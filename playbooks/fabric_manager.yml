@@ -1,0 +1,48 @@
+---
+- name: Manage Fabric Manager
+  hosts: dgx_workstation
+  become: true
+  vars:
+    fabric_action: status
+  tasks:
+    - name: Check if fabric manager is installed
+      command: systemctl list-unit-files nvidia-fabricmanager.service
+      register: fm_installed
+      failed_when: false
+      changed_when: false
+
+    - name: Report fabric manager not found
+      debug:
+        msg: "nvidia-fabricmanager is not installed on {{ inventory_hostname }}"
+      when: fm_installed.rc != 0
+
+    - name: Get fabric manager status
+      command: systemctl status nvidia-fabricmanager
+      register: fm_status
+      failed_when: false
+      changed_when: false
+      when: fm_installed.rc == 0
+
+    - name: Report fabric manager status
+      debug:
+        msg: "Fabric Manager on {{ inventory_hostname }}: {{ fm_status.stdout_lines | default([]) }}"
+      when: fm_installed.rc == 0 and fabric_action == "status"
+
+    - name: Manage fabric manager service
+      systemd:
+        name: nvidia-fabricmanager
+        state: "{{ fabric_action }}"
+        enabled: "{{ fabric_action in ['started', 'restarted'] }}"
+      when:
+        - fm_installed.rc == 0
+        - fabric_action != "status"
+
+    - name: Get NIC information
+      command: ibstat
+      register: nic_info
+      failed_when: false
+      changed_when: false
+
+    - name: Report NIC status
+      debug:
+        msg: "{{ nic_info.stdout_lines | default(['ibstat not available']) }}"

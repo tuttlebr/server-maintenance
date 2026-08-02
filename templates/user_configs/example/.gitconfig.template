@@ -1,0 +1,24 @@
+# Git configuration template
+# Users should update the name and email fields
+
+[user]
+    # Replace with your name
+    name = Your Name
+    # Replace with your email
+    email = your.email@example.com
+
+[core]
+    editor = vim
+    autocrlf = input
+
+[color]
+    ui = auto
+
+[push]
+    default = simple
+
+[pull]
+    rebase = false
+
+[init]
+    defaultBranch = main

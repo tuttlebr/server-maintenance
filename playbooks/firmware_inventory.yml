@@ -1,0 +1,39 @@
+---
+- name: Firmware Inventory
+  hosts: managed_hosts
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Collect fwupd device inventory
+      command: fwupdmgr get-devices
+      register: fwupd_devices
+      failed_when: false
+      changed_when: false
+
+    - name: Collect available fwupd updates
+      command: fwupdmgr get-updates
+      register: fwupd_updates
+      failed_when: false
+      changed_when: false
+
+    - name: Check nvfwupd availability
+      command: which nvfwupd
+      register: nvfwupd_cli
+      failed_when: false
+      changed_when: false
+
+    - name: Collect nvfwupd inventory
+      command: nvfwupd --query
+      register: nvfwupd_inventory
+      failed_when: false
+      changed_when: false
+      when: nvfwupd_cli.rc == 0
+
+    - name: Report firmware inventory
+      debug:
+        msg:
+          - "Host: {{ inventory_hostname }}"
+          - "Platform: {{ machine_type | default('unknown') }}"
+          - "fwupd devices: {{ fwupd_devices.stdout_lines | default(['not available']) }}"
+          - "fwupd updates: {{ fwupd_updates.stdout_lines | default(['not available']) }}"
+          - "nvfwupd inventory: {{ nvfwupd_inventory.stdout_lines | default(['not available']) }}"

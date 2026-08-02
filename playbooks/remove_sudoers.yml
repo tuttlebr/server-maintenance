@@ -1,0 +1,34 @@
+---
+- name: Remove User from Sudoers
+  hosts: managed_hosts
+  become: true
+  vars:
+    target_username: ""
+  tasks:
+    - name: Validate username provided
+      fail:
+        msg: "target_username must be provided"
+      when: target_username == ""
+
+    - name: Validate username is safe
+      assert:
+        that:
+          - target_username is match('^[a-z_][a-z0-9_-]{0,31}$')
+        fail_msg: "Unsafe username: {{ target_username }}"
+
+    - name: Check if sudoers file exists
+      stat:
+        path: "/etc/sudoers.d/{{ target_username }}"
+      register: sudoers_file
+
+    - name: Remove sudoers file
+      file:
+        path: "/etc/sudoers.d/{{ target_username }}"
+        state: absent
+      when: sudoers_file.stat.exists
+
+    - name: Report result
+      debug:
+        msg: >-
+          {{ 'Removed' if sudoers_file.stat.exists else 'No' }}
+          sudoers entry for {{ target_username }} on {{ inventory_hostname }}

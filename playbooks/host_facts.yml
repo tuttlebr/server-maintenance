@@ -1,0 +1,114 @@
+---
+- name: Gather Host Facts for Dashboard
+  hosts: managed_hosts
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Get GPU information
+      command: nvidia-smi --query-gpu=gpu_name,driver_version,memory.total --format=csv,noheader
+      register: gpu_info
+      ignore_errors: true
+      changed_when: false
+      when: "'nvidia_gpu' in group_names"
+
+    - name: Get CUDA version
+      shell: nvcc --version 2>/dev/null | grep "release" | sed 's/.*release //' | sed 's/,.*//'
+      register: cuda_info
+      ignore_errors: true
+      changed_when: false
+      when: "'nvidia_gpu' in group_names"
+
+    - name: Get disk usage for root
+      shell: df --output=pcent / | tail -1 | tr -d ' %'
+      register: disk_root
+      changed_when: false
+
+    - name: Get disk usage for RAID
+      shell: df --output=pcent /raid 2>/dev/null | tail -1 | tr -d ' %'
+      register: disk_raid
+      ignore_errors: true
+      changed_when: false
+      when: "'fabric_manager' in group_names"
+
+    - name: Get OS version
+      shell: . /etc/os-release && echo "$PRETTY_NAME"
+      register: os_info
+      changed_when: false
+
+    - name: Check NIC type
+      shell: "lspci | grep -i 'mellanox\\|connectx' | head -1"
+      register: nic_info
+      ignore_errors: true
+      changed_when: false
+
+    - name: Check fabric manager status
+      command: systemctl is-active nvidia-fabricmanager
+      register: fm_status
+      failed_when: false
+      changed_when: false
+      when: "'fabric_manager' in group_names"
+
+    - name: Check if reboot is required
+      stat:
+        path: /var/run/reboot-required
+      register: reboot_flag
+
+    - name: "Spark: Check Secure Boot status"
+      command: mokutil --sb-state
+      register: secure_boot_info
+      ignore_errors: true
+      changed_when: false
+      when: "'dgx_spark' in group_names"
+
+    - name: "Spark: Get firmware version info"
+      command: fwupdmgr get-devices --json
+      register: firmware_info
+      ignore_errors: true
+      changed_when: false
+      when: "'dgx_spark' in group_names"
+
+    - name: "A100: Get NVSM health summary"
+      command: nvsm show health
+      register: nvsm_health
+      ignore_errors: true
+      changed_when: false
+      when: "'dgx_workstation' in group_names"
+
+    - name: Compile host facts
+      set_fact:
+        host_report:
+          hostname: "{{ inventory_hostname }}"
+          ip_address: "{{ ansible_facts['default_ipv4']['address'] | default('unknown') }}"
+          os_version: "{{ os_info.stdout | default('unknown') }}"
+          gpu_info: "{{ gpu_info.stdout | default('unknown') }}"
+          cuda_version: "{{ cuda_info.stdout | default('unknown') }}"
+          driver_version: "{{ (gpu_info.stdout | default('')).split(', ')[1] | default('unknown') }}"
+          gpu_model: "{{ (gpu_info.stdout | default('')).split(', ')[0] | default('unknown') }}"
+          memory_mb: "{{ ansible_facts['memtotal_mb'] | default(0) }}"
+          disk_root_percent: "{{ disk_root.stdout | default('0') }}"
+          disk_raid_percent: "{{ disk_raid.stdout | default('0') }}"
+          nic_info: "{{ nic_info.stdout | default('unknown') }}"
+          fabric_manager: "{{ fm_status.stdout if 'fabric_manager' in group_names else 'N/A' }}"
+          uptime_seconds: "{{ ansible_facts['uptime_seconds'] | default(0) }}"
+          reboot_required: "{{ reboot_flag.stat.exists }}"
+          machine_type: "{{ machine_type | default('unknown') }}"
+          platform_group: "{{ machine_type | default('unknown') }}"
+          secure_boot: "{{ secure_boot_info.stdout | default('N/A') }}"
+          firmware_info: "{{ firmware_info.stdout | default('N/A') }}"
+          nvsm_health: "{{ nvsm_health.stdout | default('N/A') }}"
+
+    - name: Output host report
+      debug:
+        var: host_report
+
+    - name: Write host report as JSON for API consumption
+      copy:
+        content: "{{ host_report | to_json }}"
+        dest: "/tmp/fleet_host_report.json"
+        mode: "0644"
+
+    - name: Fetch host report to controller
+      fetch:
+        src: "/tmp/fleet_host_report.json"
+        dest: "/app/data/scans/{{ inventory_hostname }}.json"
+        flat: true

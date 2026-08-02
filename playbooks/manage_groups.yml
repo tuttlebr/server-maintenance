@@ -1,0 +1,15 @@
+---
+- name: Manage System Groups
+  hosts: all
+  become: true
+  vars:
+    groups_to_create:
+      - dynamo
+      - docker
+      # Add other groups here as needed
+  tasks:
+    - name: Ensure groups exist
+      group:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ groups_to_create }}"

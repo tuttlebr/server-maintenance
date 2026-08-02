@@ -1,0 +1,71 @@
+---
+- name: Manage Sudoers
+  hosts: all
+  become: true
+  vars:
+    # Debug variable to see what's happening
+    debug_mode: false
+  tasks:
+    - name: Validate requested sudoers
+      assert:
+        that:
+          - item is match('^[a-z_][a-z0-9_-]{0,31}$')
+        fail_msg: "Unsafe username: {{ item }}"
+      loop: "{{ root_users | default([]) }}"
+
+    - name: Get all existing users
+      getent:
+        database: passwd
+      register: all_users
+
+    - name: Debug all users
+      debug:
+        msg: "System users: {{ ansible_facts['getent_passwd'].keys() | list }}"
+      when: debug_mode
+
+    - name: Filter valid root users
+      set_fact:
+        valid_root_users: "{{ root_users | select('in', ansible_facts['getent_passwd'].keys()) | list }}"
+        invalid_root_users: "{{ root_users | reject('in', ansible_facts['getent_passwd'].keys()) | list }}"
+      when: root_users is defined
+
+    - name: Debug filtered users
+      debug:
+        msg:
+          - "Valid users: {{ valid_root_users }}"
+          - "Invalid users: {{ invalid_root_users }}"
+      when: debug_mode
+
+    - name: Create sudoers.d directory if it doesn't exist
+      file:
+        path: /etc/sudoers.d
+        state: directory
+        mode: "0755"
+        owner: root
+        group: root
+
+    - name: Add root users to sudoers file
+      lineinfile:
+        path: "/etc/sudoers.d/{{ item }}"
+        line: "{{ item }} ALL=(ALL) NOPASSWD:ALL"
+        state: present
+        create: yes
+        mode: "0440"
+        validate: "/usr/sbin/visudo -cf %s"
+      loop: "{{ valid_root_users }}"
+      when: valid_root_users is defined and valid_root_users | length > 0
+
+    - name: Set proper permissions on sudoers files
+      file:
+        path: "/etc/sudoers.d/{{ item }}"
+        owner: root
+        group: root
+        mode: "0440"
+      loop: "{{ valid_root_users }}"
+      when: valid_root_users is defined and valid_root_users | length > 0
+
+    - name: Display warning for non-existent users
+      debug:
+        msg: "WARNING: User {{ item }} does not exist and was not added to sudoers"
+      loop: "{{ invalid_root_users }}"
+      when: invalid_root_users is defined and invalid_root_users | length > 0

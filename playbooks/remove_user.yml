@@ -1,0 +1,50 @@
+---
+- name: Remove User from System
+  hosts: managed_hosts
+  become: true
+  vars:
+    target_username: ""
+    remove_home: false
+  tasks:
+    - name: Validate username provided
+      fail:
+        msg: "target_username must be provided"
+      when: target_username == ""
+
+    - name: Validate username is safe
+      assert:
+        that:
+          - target_username is match('^[a-z_][a-z0-9_-]{0,31}$')
+        fail_msg: "Unsafe username: {{ target_username }}"
+
+    - name: Check if user exists
+      command:
+        argv:
+          - id
+          - "{{ target_username }}"
+      register: user_check
+      failed_when: false
+      changed_when: false
+
+    - name: Skip if user does not exist
+      debug:
+        msg: "User {{ target_username }} does not exist on {{ inventory_hostname }}, skipping"
+      when: user_check.rc != 0
+
+    - name: Remove user
+      user:
+        name: "{{ target_username }}"
+        state: absent
+        remove: "{{ remove_home | bool }}"
+      when: user_check.rc == 0
+
+    - name: Remove sudoers file if exists
+      file:
+        path: "/etc/sudoers.d/{{ target_username }}"
+        state: absent
+
+    - name: Remove RAID directory if requested
+      file:
+        path: "/raid/{{ target_username }}"
+        state: absent
+      when: remove_home | bool

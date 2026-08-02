@@ -1,0 +1,90 @@
+---
+- name: Fleet Health Diagnostics
+  hosts: managed_hosts
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Collect uptime and load
+      command: uptime
+      register: uptime_info
+      changed_when: false
+
+    - name: Collect failed systemd units
+      command: systemctl --failed --no-pager
+      register: failed_units
+      failed_when: false
+      changed_when: false
+
+    - name: Collect recent critical journal entries
+      command: journalctl -p 3 -n 50 --no-pager
+      register: critical_journal
+      failed_when: false
+      changed_when: false
+
+    - name: Collect nvidia-smi summary
+      command: nvidia-smi
+      register: nvidia_smi_summary
+      failed_when: false
+      changed_when: false
+      when: "'nvidia_gpu' in group_names"
+
+    - name: Collect GPU ECC status
+      command: nvidia-smi --query-gpu=index,name,ecc.errors.uncorrected.volatile.total,ecc.errors.uncorrected.aggregate.total,temperature.gpu,power.draw --format=csv
+      register: gpu_ecc_status
+      failed_when: false
+      changed_when: false
+      when: "'nvidia_gpu' in group_names"
+
+    - name: Collect Fabric Manager status
+      command: systemctl status nvidia-fabricmanager --no-pager
+      register: fabric_manager_status
+      failed_when: false
+      changed_when: false
+      when: "'fabric_manager' in group_names"
+
+    - name: Collect DCGM status
+      command: systemctl status dcgm --no-pager
+      register: dcgm_status
+      failed_when: false
+      changed_when: false
+      when: "'fabric_manager' in group_names"
+
+    - name: Collect NVSM health
+      command: nvsm show health
+      register: nvsm_health
+      failed_when: false
+      changed_when: false
+      when: "'dgx_workstation' in group_names"
+
+    - name: Collect IB device status
+      command: ibstat
+      register: ib_status
+      failed_when: false
+      changed_when: false
+
+    - name: Collect block device summary
+      command: lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT
+      register: lsblk_status
+      failed_when: false
+      changed_when: false
+
+    - name: Collect mdadm status
+      shell: cat /proc/mdstat 2>/dev/null || true
+      register: mdadm_status
+      changed_when: false
+
+    - name: Report diagnostics
+      debug:
+        msg:
+          - "Host: {{ inventory_hostname }}"
+          - "Uptime: {{ uptime_info.stdout | default('unknown') }}"
+          - "Failed units: {{ failed_units.stdout_lines | default([]) }}"
+          - "Critical journal: {{ critical_journal.stdout_lines | default([]) }}"
+          - "nvidia-smi: {{ nvidia_smi_summary.stdout_lines | default(['N/A']) }}"
+          - "GPU ECC/thermal: {{ gpu_ecc_status.stdout_lines | default(['N/A']) }}"
+          - "Fabric Manager: {{ fabric_manager_status.stdout_lines | default(['N/A']) }}"
+          - "DCGM: {{ dcgm_status.stdout_lines | default(['N/A']) }}"
+          - "NVSM: {{ nvsm_health.stdout_lines | default(['N/A']) }}"
+          - "IB: {{ ib_status.stdout_lines | default(['N/A']) }}"
+          - "Block devices: {{ lsblk_status.stdout_lines | default([]) }}"
+          - "mdadm: {{ mdadm_status.stdout_lines | default(['N/A']) }}"

@@ -1,0 +1,55 @@
+---
+- name: MIG Management
+  hosts: dgx_workstation
+  become: true
+  serial: 1
+  gather_facts: false
+  vars:
+    mig_action: status
+  tasks:
+    - name: Validate MIG action
+      assert:
+        that:
+          - mig_action in ['status', 'enable', 'disable']
+        fail_msg: "mig_action must be status, enable, or disable"
+
+    - name: Check MIG support and current mode
+      command: nvidia-smi --query-gpu=index,name,mig.mode.current,mig.mode.pending --format=csv
+      register: mig_status
+      failed_when: false
+      changed_when: false
+
+    - name: Check active GPU processes before MIG change
+      command: nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader
+      register: gpu_processes
+      failed_when: false
+      changed_when: false
+
+    - name: Refuse MIG changes while GPU processes are active
+      fail:
+        msg: "Active GPU processes detected on {{ inventory_hostname }}: {{ gpu_processes.stdout }}"
+      when:
+        - mig_action in ['enable', 'disable']
+        - gpu_processes.stdout | default('') | length > 0
+
+    - name: Enable MIG mode
+      command: nvidia-smi -mig 1
+      register: mig_enable
+      changed_when: "'Enabled' in mig_enable.stdout or mig_enable.rc == 0"
+      when: mig_action == 'enable'
+
+    - name: Disable MIG mode
+      command: nvidia-smi -mig 0
+      register: mig_disable
+      changed_when: "'Disabled' in mig_disable.stdout or mig_disable.rc == 0"
+      when: mig_action == 'disable'
+
+    - name: Report MIG status
+      debug:
+        msg:
+          - "Host: {{ inventory_hostname }}"
+          - "Action: {{ mig_action }}"
+          - "Status: {{ mig_status.stdout_lines | default(['unknown']) }}"
+          - "Active GPU processes: {{ gpu_processes.stdout_lines | default([]) }}"
+          - "Enable result: {{ mig_enable.stdout_lines | default(['skipped']) }}"
+          - "Disable result: {{ mig_disable.stdout_lines | default(['skipped']) }}"

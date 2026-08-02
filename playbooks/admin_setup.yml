@@ -1,0 +1,28 @@
+---
+- name: Configure Admin Privileges
+  hosts: all
+  become: true
+  vars:
+    admin_user: "{{ admin_username | default('btuttle') }}"
+  tasks:
+    - name: Validate admin username
+      assert:
+        that:
+          - admin_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+        fail_msg: "Unsafe admin username: {{ admin_user }}"
+
+    - name: Set up passwordless sudo for admin user
+      lineinfile:
+        path: /etc/sudoers.d/admin-nopasswd
+        line: "{{ admin_user }} ALL=(ALL) NOPASSWD:ALL"
+        state: present
+        create: yes
+        mode: '0440'
+        validate: '/usr/sbin/visudo -cf %s'
+
+    - name: Ensure proper ownership of sudoers file
+      file:
+        path: /etc/sudoers.d/admin-nopasswd
+        owner: root
+        group: root
+        mode: '0440'

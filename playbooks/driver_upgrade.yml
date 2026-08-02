@@ -1,0 +1,356 @@
+---
+- name: Driver and System Upgrade (Rolling)
+  hosts: nvidia_gpu
+  become: true
+  serial: 1
+  gather_facts: true
+  vars:
+    upgrade_mode: standard
+    target_driver_version: ""
+    upgrade_firmware: false
+    skip_reboot: false
+    force_upgrade: false
+
+  tasks:
+    # ── Pre-flight checks ────────────────────────────────────────────
+    - name: Validate upgrade request
+      assert:
+        that:
+          - (upgrade_mode | default('standard')) in ['standard', 'major']
+          - (upgrade_mode | default('standard')) != 'major' or (target_driver_version | default('') | regex_search('^[0-9]+$'))
+        fail_msg: "upgrade_mode must be standard or major. Major upgrades require a numeric target_driver_version such as 570 or 580."
+
+    - name: Record pre-upgrade driver version
+      command: nvidia-smi --query-gpu=driver_version --format=csv,noheader
+      register: pre_driver_version
+      ignore_errors: true
+      changed_when: false
+
+    - name: Record pre-upgrade CUDA version
+      shell: nvcc --version 2>/dev/null | grep "release" | sed 's/.*release //' | sed 's/,.*//'
+      register: pre_cuda_version
+      ignore_errors: true
+      changed_when: false
+
+    - name: Check for active GPU processes
+      command: nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader
+      register: gpu_processes
+      ignore_errors: true
+      changed_when: false
+
+    - name: Fail if GPU processes are running
+      fail:
+        msg: >-
+          Active GPU processes detected on {{ inventory_hostname }}.
+          PIDs: {{ gpu_processes.stdout }}
+          Use -e force_upgrade=true to override.
+      when:
+        - gpu_processes.stdout | default('') | length > 0
+        - not force_upgrade | bool
+
+    - name: Check for running GPU containers
+      command: docker ps --filter "runtime=nvidia" --format "{{ '{{' }}.Names{{ '}}' }}"
+      register: gpu_containers
+      ignore_errors: true
+      changed_when: false
+
+    - name: Fail if GPU containers are running
+      fail:
+        msg: >-
+          GPU containers running on {{ inventory_hostname }}:
+          {{ gpu_containers.stdout }}
+          Use -e force_upgrade=true to override.
+      when:
+        - gpu_containers.stdout | default('') | length > 0
+        - not force_upgrade | bool
+
+    - name: "A100: Run NVSM health baseline"
+      command: nvsm show health
+      register: pre_nvsm_health
+      ignore_errors: true
+      changed_when: false
+      when: "'dgx_workstation' in group_names"
+
+    - name: "A100: Warn if pre-upgrade health issues detected"
+      debug:
+        msg: "WARNING: Pre-upgrade NVSM health check reported issues on {{ inventory_hostname }}"
+      when:
+        - "'dgx_workstation' in group_names"
+        - pre_nvsm_health.rc | default(0) != 0
+
+    - name: "Spark: Record Secure Boot state"
+      command: mokutil --sb-state
+      register: pre_secure_boot
+      ignore_errors: true
+      changed_when: false
+      when: "'dgx_spark' in group_names"
+
+    - name: Report pre-upgrade status
+      debug:
+        msg:
+          - "Host: {{ inventory_hostname }}"
+          - "Current driver: {{ pre_driver_version.stdout | default('unknown') }}"
+          - "Current CUDA: {{ pre_cuda_version.stdout | default('unknown') }}"
+
+    # ── Stop dependent services (A100 only) ──────────────────────────
+    - name: "A100: Check NVSM service status"
+      command: systemctl is-active nvsm
+      register: nvsm_was_active
+      failed_when: false
+      changed_when: false
+      when: "'dgx_workstation' in group_names"
+
+    - name: "A100: Check DCGM service status"
+      command: systemctl is-active dcgm
+      register: dcgm_was_active
+      failed_when: false
+      changed_when: false
+      when: "'dgx_workstation' in group_names"
+
+    - name: "A100: Check Fabric Manager service status"
+      command: systemctl is-active nvidia-fabricmanager
+      register: fm_was_active
+      failed_when: false
+      changed_when: false
+      when: "'dgx_workstation' in group_names"
+
+    - name: "A100: Stop NVSM before upgrade"
+      systemd:
+        name: nvsm
+        state: stopped
+      when:
+        - "'dgx_workstation' in group_names"
+        - nvsm_was_active.stdout | default('') == 'active'
+
+    - name: "A100: Stop DCGM before upgrade"
+      systemd:
+        name: dcgm
+        state: stopped
+      when:
+        - "'dgx_workstation' in group_names"
+        - dcgm_was_active.stdout | default('') == 'active'
+
+    - name: "A100: Stop Fabric Manager before upgrade"
+      systemd:
+        name: nvidia-fabricmanager
+        state: stopped
+      when:
+        - "'dgx_workstation' in group_names"
+        - fm_was_active.stdout | default('') == 'active'
+
+    # ── Perform the upgrade ──────────────────────────────────────────
+    - name: Update apt cache
+      apt:
+        update_cache: true
+
+    - name: "A100: Run full system upgrade"
+      apt:
+        upgrade: full
+        autoremove: true
+      when:
+        - "'dgx_workstation' in group_names"
+        - (upgrade_mode | default('standard')) == 'standard'
+
+    - name: "Spark: Run dist upgrade"
+      apt:
+        upgrade: dist
+        autoremove: true
+      when:
+        - "'dgx_spark' in group_names"
+        - (upgrade_mode | default('standard')) == 'standard'
+
+    - name: Install target NVIDIA driver branch
+      apt:
+        name: "nvidia-driver-{{ target_driver_version }}"
+        state: present
+        autoremove: true
+      when: (upgrade_mode | default('standard')) == 'major'
+
+    - name: "Spark: Refresh firmware metadata"
+      command: fwupdmgr refresh --force
+      ignore_errors: true
+      changed_when: false
+      when:
+        - "'dgx_spark' in group_names"
+        - upgrade_firmware | bool
+
+    - name: "Spark: Upgrade firmware"
+      command: fwupdmgr upgrade --no-reboot --assume-yes
+      register: firmware_result
+      ignore_errors: true
+      when:
+        - "'dgx_spark' in group_names"
+        - upgrade_firmware | bool
+
+    - name: "Spark: Report firmware upgrade result"
+      debug:
+        msg: "Firmware upgrade result: {{ firmware_result.stdout_lines | default(['skipped']) }}"
+      when:
+        - "'dgx_spark' in group_names"
+        - upgrade_firmware | bool
+
+    # ── Restart dependent services (A100 only) ───────────────────────
+    - name: "A100: Start Fabric Manager"
+      systemd:
+        name: nvidia-fabricmanager
+        state: started
+        enabled: true
+      when:
+        - "'dgx_workstation' in group_names"
+        - fm_was_active.stdout | default('') == 'active'
+
+    - name: "A100: Start DCGM"
+      systemd:
+        name: dcgm
+        state: started
+        enabled: true
+      when:
+        - "'dgx_workstation' in group_names"
+        - dcgm_was_active.stdout | default('') == 'active'
+
+    - name: "A100: Start NVSM"
+      systemd:
+        name: nvsm
+        state: started
+        enabled: true
+      when:
+        - "'dgx_workstation' in group_names"
+        - nvsm_was_active.stdout | default('') == 'active'
+
+    # ── Handle reboot ────────────────────────────────────────────────
+    - name: Check if reboot is required
+      stat:
+        path: /var/run/reboot-required
+      register: reboot_flag
+
+    - name: Reboot if required
+      reboot:
+        msg: "Reboot after driver/system upgrade initiated by DGX Fleet Manager"
+        reboot_timeout: 1200
+        pre_reboot_delay: 5
+        post_reboot_delay: 30
+      when:
+        - reboot_flag.stat.exists
+        - not skip_reboot | bool
+
+    - name: Wait for host to come back online
+      wait_for_connection:
+        delay: 10
+        timeout: 300
+      when:
+        - reboot_flag.stat.exists
+        - not skip_reboot | bool
+
+    # ── Post-upgrade verification ────────────────────────────────────
+    - name: Verify nvidia-smi works
+      command: nvidia-smi
+      register: post_smi_check
+      changed_when: false
+
+    - name: Record post-upgrade driver version
+      command: nvidia-smi --query-gpu=driver_version --format=csv,noheader
+      register: post_driver_version
+      ignore_errors: true
+      changed_when: false
+
+    - name: Record post-upgrade CUDA version
+      shell: nvcc --version 2>/dev/null | grep "release" | sed 's/.*release //' | sed 's/,.*//'
+      register: post_cuda_version
+      ignore_errors: true
+      changed_when: false
+
+    - name: "A100: Run post-upgrade NVSM health check"
+      command: nvsm show health
+      register: post_nvsm_health
+      ignore_errors: true
+      changed_when: false
+      when: "'dgx_workstation' in group_names"
+
+    - name: "A100: Verify Fabric Manager is running"
+      command: systemctl is-active nvidia-fabricmanager
+      register: post_fm_status
+      failed_when: false
+      changed_when: false
+      when: "'dgx_workstation' in group_names"
+
+    - name: "A100: Verify DCGM is running"
+      command: systemctl is-active dcgm
+      register: post_dcgm_status
+      failed_when: false
+      changed_when: false
+      when: "'dgx_workstation' in group_names"
+
+    - name: "A100: Verify NVSM is running"
+      command: systemctl is-active nvsm
+      register: post_nvsm_status
+      failed_when: false
+      changed_when: false
+      when: "'dgx_workstation' in group_names"
+
+    - name: "A100: Warn if services failed to restart"
+      debug:
+        msg: >-
+          WARNING: Service check on {{ inventory_hostname }} —
+          Fabric Manager: {{ post_fm_status.stdout | default('unknown') }},
+          DCGM: {{ post_dcgm_status.stdout | default('unknown') }},
+          NVSM: {{ post_nvsm_status.stdout | default('unknown') }}
+      when:
+        - "'dgx_workstation' in group_names"
+        - (post_fm_status.stdout | default('')) != 'active' or
+          (post_dcgm_status.stdout | default('')) != 'active' or
+          (post_nvsm_status.stdout | default('')) != 'active'
+
+    - name: "Spark: Verify Secure Boot status unchanged"
+      command: mokutil --sb-state
+      register: post_secure_boot
+      ignore_errors: true
+      changed_when: false
+      when: "'dgx_spark' in group_names"
+
+    - name: "Spark: Warn if Secure Boot state changed"
+      debug:
+        msg: >-
+          WARNING: Secure Boot state changed on {{ inventory_hostname }}!
+          Before: {{ pre_secure_boot.stdout | default('unknown') }}
+          After: {{ post_secure_boot.stdout | default('unknown') }}
+      when:
+        - "'dgx_spark' in group_names"
+        - (pre_secure_boot.stdout | default('')) != (post_secure_boot.stdout | default(''))
+
+    # ── Compile and export upgrade report ────────────────────────────
+    - name: Compile upgrade report
+      set_fact:
+        upgrade_report:
+          hostname: "{{ inventory_hostname }}"
+          machine_type: "{{ machine_type | default('unknown') }}"
+          upgrade_mode: "{{ upgrade_mode | default('standard') }}"
+          target_driver_version: "{{ target_driver_version | default('') }}"
+          pre_driver_version: "{{ pre_driver_version.stdout | default('unknown') }}"
+          post_driver_version: "{{ post_driver_version.stdout | default('unknown') }}"
+          driver_changed: "{{ (pre_driver_version.stdout | default('')) != (post_driver_version.stdout | default('')) }}"
+          pre_cuda_version: "{{ pre_cuda_version.stdout | default('unknown') }}"
+          post_cuda_version: "{{ post_cuda_version.stdout | default('unknown') }}"
+          firmware_updated: "{{ firmware_result is defined and firmware_result.rc | default(1) == 0 }}"
+          reboot_performed: "{{ reboot_flag.stat.exists and not skip_reboot | bool }}"
+          nvsm_health: "{{ post_nvsm_health.stdout_lines | default(['N/A']) }}"
+          services_status:
+            fabric_manager: "{{ post_fm_status.stdout | default('N/A') }}"
+            dcgm: "{{ post_dcgm_status.stdout | default('N/A') }}"
+            nvsm: "{{ post_nvsm_status.stdout | default('N/A') }}"
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+
+    - name: Output upgrade report
+      debug:
+        var: upgrade_report
+
+    - name: Write upgrade report as JSON
+      copy:
+        content: "{{ upgrade_report | to_json }}"
+        dest: "/tmp/fleet_driver_upgrade_report.json"
+        mode: "0644"
+
+    - name: Fetch upgrade report to controller
+      fetch:
+        src: "/tmp/fleet_driver_upgrade_report.json"
+        dest: "/app/data/scans/driver_upgrade_{{ inventory_hostname }}.json"
+        flat: true

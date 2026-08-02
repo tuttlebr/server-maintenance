@@ -1,0 +1,190 @@
+---
+- name: Install Docker Engine and NVIDIA Container Toolkit
+  hosts: managed_hosts
+  become: true
+  vars:
+    docker_group_users: "{{ [admin_username] if admin_username | default('') | length > 0 else [] }}"
+  tasks:
+    # ---------------------------------------------------------------
+    # Prerequisites
+    # ---------------------------------------------------------------
+    - name: Install prerequisite packages
+      apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg2
+        state: present
+        update_cache: true
+
+    - name: Create keyrings directory
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    # ---------------------------------------------------------------
+    # Docker Engine
+    # ---------------------------------------------------------------
+    - name: Download Docker GPG key
+      get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+        force: false
+
+    - name: Get system architecture
+      command: dpkg --print-architecture
+      register: dpkg_arch
+      changed_when: false
+
+    - name: Get Ubuntu codename
+      shell: . /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}"
+      register: ubuntu_codename
+      changed_when: false
+
+    - name: Add Docker apt repository
+      copy:
+        dest: /etc/apt/sources.list.d/docker.sources
+        mode: "0644"
+        content: |
+          Types: deb
+          URIs: https://download.docker.com/linux/ubuntu
+          Suites: {{ ubuntu_codename.stdout }}
+          Components: stable
+          Architectures: {{ dpkg_arch.stdout }}
+          Signed-By: /etc/apt/keyrings/docker.asc
+      register: docker_repo
+
+    - name: Update apt cache after adding Docker repo
+      apt:
+        update_cache: true
+      when: docker_repo.changed
+
+    - name: Install Docker Engine packages
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+
+    - name: Enable and start Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Enable and start containerd service
+      systemd:
+        name: containerd
+        state: started
+        enabled: true
+
+    # ---------------------------------------------------------------
+    # Docker group membership grants root-equivalent daemon access. Only
+    # explicitly selected administrators should receive it.
+    # ---------------------------------------------------------------
+    - name: Ensure docker group exists
+      group:
+        name: docker
+        state: present
+
+    - name: Validate Docker group users
+      assert:
+        that:
+          - item is match('^[a-z_][a-z0-9_-]{0,31}$')
+        fail_msg: "Unsafe Docker group username: {{ item }}"
+      loop: "{{ docker_group_users }}"
+
+    - name: Add selected administrators to docker group
+      user:
+        name: "{{ item }}"
+        groups: docker
+        append: true
+      loop: "{{ docker_group_users }}"
+
+    # ---------------------------------------------------------------
+    # NVIDIA Container Toolkit
+    # ---------------------------------------------------------------
+    - name: Download NVIDIA Container Toolkit GPG key
+      shell: |
+        curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | \
+          gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+      args:
+        creates: /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+      when: "'nvidia_gpu' in group_names"
+
+    - name: Add NVIDIA Container Toolkit apt repository
+      shell: |
+        curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+          sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+          > /etc/apt/sources.list.d/nvidia-container-toolkit.list
+      args:
+        creates: /etc/apt/sources.list.d/nvidia-container-toolkit.list
+      register: nvidia_repo
+      when: "'nvidia_gpu' in group_names"
+
+    - name: Update apt cache after adding NVIDIA repo
+      apt:
+        update_cache: true
+      when:
+        - "'nvidia_gpu' in group_names"
+        - nvidia_repo.changed
+
+    - name: Install NVIDIA Container Toolkit
+      apt:
+        name: nvidia-container-toolkit
+        state: present
+      when: "'nvidia_gpu' in group_names"
+
+    # ---------------------------------------------------------------
+    # Configure NVIDIA runtime for Docker
+    # ---------------------------------------------------------------
+    - name: Check if NVIDIA runtime is already configured
+      shell: grep -q nvidia /etc/docker/daemon.json 2>/dev/null
+      register: nvidia_runtime_check
+      failed_when: false
+      changed_when: false
+      when: "'nvidia_gpu' in group_names"
+
+    - name: Configure NVIDIA container runtime for Docker
+      command: nvidia-ctk runtime configure --runtime=docker
+      when:
+        - "'nvidia_gpu' in group_names"
+        - nvidia_runtime_check.rc != 0
+      notify: Restart Docker
+
+    # ---------------------------------------------------------------
+    # Verify installation
+    # ---------------------------------------------------------------
+    - name: Get Docker version
+      command: docker --version
+      register: docker_version
+      changed_when: false
+
+    - name: Get Docker Compose version
+      command: docker compose version
+      register: compose_version
+      changed_when: false
+
+    - name: Check NVIDIA Container Toolkit version
+      command: nvidia-ctk --version
+      register: ctk_version
+      changed_when: false
+      when: "'nvidia_gpu' in group_names"
+
+    - name: Report installed versions
+      debug:
+        msg:
+          - "{{ docker_version.stdout }}"
+          - "{{ compose_version.stdout }}"
+          - "{{ ctk_version.stdout | default('NVIDIA toolkit not requested for this host') }}"
+
+  handlers:
+    - name: Restart Docker
+      systemd:
+        name: docker
+        state: restarted

@@ -1,0 +1,295 @@
+---
+- name: GPU Usage Analysis
+  hosts: nvidia_gpu
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Analyze GPU usage and resolve process owners
+      shell: |
+        python3 << 'PYEOF'
+        import subprocess, json, os, re
+        from datetime import datetime
+
+        hostname = "{{ inventory_hostname }}"
+        platform = "{{ machine_type | default('unknown') }}"
+        is_spark = platform == "dgx_spark"
+
+        def run(cmd):
+            try:
+                r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                return r.stdout.strip() if r.returncode == 0 else ""
+            except Exception:
+                return ""
+
+        def parse_int(value):
+            if value is None:
+                return None
+            m = re.search(r'-?\d+', str(value))
+            if not m:
+                return None
+            try:
+                return int(m.group(0))
+            except ValueError:
+                return None
+
+        def read_meminfo():
+            fields = {}
+            try:
+                with open("/proc/meminfo") as f:
+                    for line in f:
+                        if ":" not in line:
+                            continue
+                        key, value = line.split(":", 1)
+                        parsed = parse_int(value)
+                        if parsed is not None:
+                            fields[key] = parsed
+            except Exception:
+                pass
+
+            huge_total = fields.get("HugePages_Total", 0)
+            huge_free = fields.get("HugePages_Free", 0)
+            huge_size_kb = fields.get("Hugepagesize", 0)
+            huge_free_kb = huge_free * huge_size_kb if huge_total and huge_size_kb else 0
+            allocatable_kb = huge_free_kb if huge_free_kb else (
+                fields.get("MemAvailable", 0) + fields.get("SwapFree", 0)
+            )
+            return {
+                "mem_total_mb": fields.get("MemTotal", 0) // 1024,
+                "mem_available_mb": fields.get("MemAvailable", 0) // 1024,
+                "swap_total_mb": fields.get("SwapTotal", 0) // 1024,
+                "swap_free_mb": fields.get("SwapFree", 0) // 1024,
+                "hugepages_total": huge_total,
+                "hugepages_free": huge_free,
+                "hugepage_size_kb": huge_size_kb,
+                "estimated_allocatable_mb": allocatable_kb // 1024,
+            }
+
+        def get_container_id(pid):
+            cgroup_file = "/proc/{}/cgroup".format(pid)
+            if not os.path.exists(cgroup_file):
+                return ""
+            try:
+                content = open(cgroup_file).read()
+                m = re.search(r'[a-f0-9]{64}', content)
+                if m:
+                    return m.group(0)
+                m = re.search(r'docker/([a-f0-9]+)', content)
+                if m:
+                    return m.group(1)
+                m = re.search(r'cri-containerd-([a-f0-9]+)', content)
+                if m:
+                    return m.group(1)
+            except Exception:
+                pass
+            return ""
+
+        def resolve_docker(container_id):
+            raw = run(["docker", "inspect", container_id])
+            if not raw or raw == "[]":
+                return None
+            try:
+                c = json.loads(raw)[0]
+            except (json.JSONDecodeError, IndexError):
+                return None
+
+            info = {
+                "user": "unknown", "source": "docker",
+                "container_name": c.get("Name", "").lstrip("/"),
+                "pod_name": "", "namespace": "",
+            }
+
+            labels = c.get("Config", {}).get("Labels", {})
+            pod = labels.get("io.kubernetes.pod.name", "")
+            ns = labels.get("io.kubernetes.pod.namespace", "")
+            if pod:
+                info["source"] = "kubernetes"
+                info["pod_name"] = pod
+                info["namespace"] = ns
+
+            for key in ["user", "owner", "JUPYTER_USER", "com.nvidia.run.as", "maintainer"]:
+                if labels.get(key):
+                    info["user"] = labels[key]
+                    return info
+
+            for e in c.get("Config", {}).get("Env", []):
+                for prefix in ["USER=", "NB_USER=", "JUPYTER_USER="]:
+                    if e.startswith(prefix):
+                        info["user"] = e.split("=", 1)[1]
+                        return info
+            return info
+
+        def resolve_crictl(container_id):
+            raw = run(["crictl", "inspect", container_id])
+            if not raw:
+                return None
+            try:
+                labels = json.loads(raw).get("status", {}).get("labels", {})
+                ns = labels.get("io.kubernetes.pod.namespace", "default")
+                return {
+                    "user": ns, "source": "kubernetes", "container_name": "",
+                    "pod_name": labels.get("io.kubernetes.pod.name", "unknown"),
+                    "namespace": ns,
+                }
+            except Exception:
+                return None
+
+        # Collect GPU stats. On DGX Spark, nvidia-smi can report framebuffer
+        # memory as unsupported because the GPU uses unified system memory.
+        gpu_raw = run([
+            "nvidia-smi",
+            "--query-gpu=index,uuid,name,memory.total,memory.used,utilization.gpu",
+            "--format=csv,noheader,nounits",
+        ])
+        gpus = []
+        for line in gpu_raw.split("\n"):
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) >= 6:
+                index = parse_int(parts[0])
+                if index is None:
+                    continue
+                mem_total = parse_int(parts[-3])
+                mem_used = parse_int(parts[-2])
+                util = parse_int(parts[-1])
+                gpus.append({
+                    "index": index,
+                    "uuid": parts[1],
+                    "name": ", ".join(parts[2:-3]) if len(parts) > 6 else parts[2],
+                    "memory_total_mb": mem_total or 0,
+                    "memory_used_mb": mem_used or 0,
+                    "memory_supported": mem_total is not None and mem_used is not None,
+                    "utilization_pct": util or 0,
+                })
+
+        if not gpus:
+            fallback_raw = run([
+                "nvidia-smi",
+                "--query-gpu=index,uuid,name,utilization.gpu",
+                "--format=csv,noheader,nounits",
+            ])
+            for line in fallback_raw.split("\n"):
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) >= 4:
+                    index = parse_int(parts[0])
+                    if index is None:
+                        continue
+                    gpus.append({
+                        "index": index,
+                        "uuid": parts[1],
+                        "name": ", ".join(parts[2:-1]) if len(parts) > 4 else parts[2],
+                        "memory_total_mb": 0,
+                        "memory_used_mb": 0,
+                        "memory_supported": False,
+                        "utilization_pct": parse_int(parts[-1]) or 0,
+                    })
+
+        # Collect GPU processes and resolve each to a user
+        proc_raw = run([
+            "nvidia-smi",
+            "--query-compute-apps=pid,used_memory,gpu_uuid",
+            "--format=csv,noheader,nounits",
+        ])
+        processes = []
+        for line in proc_raw.split("\n"):
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) < 3:
+                continue
+            pid = parse_int(parts[0])
+            mem_mb = parse_int(parts[1])
+            if pid is None:
+                continue
+            mem_mb = mem_mb or 0
+            gpu_uuid = parts[2]
+
+            proc_name = run(["ps", "-o", "comm=", "-p", str(pid)]) or "unknown"
+
+            info = {
+                "user": "unknown", "source": "bare-metal",
+                "container_name": "", "pod_name": "", "namespace": "",
+            }
+
+            cid = get_container_id(pid)
+            if cid:
+                docker_info = resolve_docker(cid)
+                if docker_info:
+                    info = docker_info
+                else:
+                    crictl_info = resolve_crictl(cid)
+                    if crictl_info:
+                        info = crictl_info
+
+            if info["source"] == "bare-metal" or info["user"] == "unknown":
+                linux_user = run(["ps", "-o", "user=", "-p", str(pid)])
+                if linux_user and linux_user != "root":
+                    info["user"] = linux_user
+                elif info["user"] == "unknown" and linux_user:
+                    info["user"] = linux_user
+
+            processes.append({
+                "pid": pid, "process_name": proc_name,
+                "gpu_memory_mb": mem_mb, "gpu_uuid": gpu_uuid, **info,
+            })
+
+        # Map processes to GPUs and classify status
+        for gpu in gpus:
+            gpu_procs = [p for p in processes if p.get("gpu_uuid") == gpu["uuid"]]
+            gpu["processes"] = gpu_procs
+            if not gpu.get("memory_supported"):
+                gpu["memory_used_mb"] = sum(p.get("gpu_memory_mb", 0) for p in gpu_procs)
+            if not gpu_procs:
+                gpu["status"] = "free"
+            elif gpu["utilization_pct"] == 0 and gpu["memory_used_mb"] > 0:
+                gpu["status"] = "idle_reserved"
+            else:
+                gpu["status"] = "active"
+
+        # Per-user summary
+        users = {}
+        for p in processes:
+            u = p.get("user", "unknown")
+            users.setdefault(u, {"gpu_count": 0, "total_memory_mb": 0})
+            users[u]["total_memory_mb"] += p.get("gpu_memory_mb", 0)
+        for gpu in gpus:
+            seen = set()
+            for p in gpu.get("processes", []):
+                u = p.get("user", "unknown")
+                if u not in seen:
+                    users.setdefault(u, {"gpu_count": 0, "total_memory_mb": 0})
+                    users[u]["gpu_count"] += 1
+                    seen.add(u)
+
+        report = {
+            "hostname": hostname,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "platform": platform,
+            "memory_architecture": "UMA" if is_spark else "discrete",
+            "system_memory": read_meminfo() if is_spark else None,
+            "notes": [
+                "DGX Spark uses unified system memory; nvidia-smi framebuffer Memory-Usage may be unsupported."
+            ] if is_spark else [],
+            "total_gpus": len(gpus),
+            "free_gpus": sum(1 for g in gpus if g["status"] == "free"),
+            "idle_gpus": sum(1 for g in gpus if g["status"] == "idle_reserved"),
+            "active_gpus": sum(1 for g in gpus if g["status"] == "active"),
+            "gpus": gpus,
+            "user_summary": sorted(
+                [{"user": k, **v} for k, v in users.items()],
+                key=lambda x: x["gpu_count"], reverse=True,
+            ),
+        }
+        print(json.dumps(report, indent=2))
+        PYEOF
+      register: gpu_report_json
+      ignore_errors: true
+      changed_when: false
+
+    - name: Write GPU usage report as JSON
+      copy:
+        content: "{{ gpu_report_json.stdout }}"
+        dest: "/tmp/fleet_gpu_usage_report.json"
+        mode: "0644"
+
+    - name: Fetch GPU usage report to controller
+      fetch:
+        src: "/tmp/fleet_gpu_usage_report.json"
+        dest: "/app/data/scans/gpu_usage_{{ inventory_hostname }}.json"
+        flat: true

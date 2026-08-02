@@ -1,0 +1,95 @@
+---
+- name: Reboot Hosts
+  hosts: managed_hosts
+  become: true
+  serial: 1
+  vars:
+    force_reboot: false
+    verify_fstab_mounts: true
+  tasks:
+    - name: Check if reboot is required
+      stat:
+        path: /var/run/reboot-required
+      register: reboot_flag
+
+    - name: Determine if we should reboot
+      set_fact:
+        should_reboot: "{{ force_reboot | bool or reboot_flag.stat.exists }}"
+
+    - name: Skip hosts that do not require reboot
+      debug:
+        msg: "{{ inventory_hostname }} does not require a reboot, skipping"
+      when: not should_reboot | bool
+
+    - name: Verify fstab syntax before reboot
+      command: findmnt --verify
+      changed_when: false
+      when:
+        - should_reboot | bool
+        - verify_fstab_mounts | bool
+
+    - name: Capture automatically mounted fstab targets before reboot
+      shell: >-
+        awk '$1 !~ /^[[:space:]]*#/ && $1 != "" && $3 != "swap" && NF >= 4
+        && $4 !~ /(^|,)noauto(,|$)/
+        && $4 !~ /(^|,)x-systemd[.]automount(,|$)/ {print $2}' /etc/fstab
+      register: expected_fstab_mounts
+      changed_when: false
+      when:
+        - should_reboot | bool
+        - verify_fstab_mounts | bool
+
+    - name: Reboot the host
+      reboot:
+        msg: "Reboot initiated by Fleet Manager"
+        reboot_timeout: 1200
+        pre_reboot_delay: 5
+        post_reboot_delay: 30
+      when: should_reboot | bool
+
+    - name: Verify host is back online
+      wait_for_connection:
+        delay: 10
+      timeout: 300
+      when: should_reboot | bool
+
+    - name: Wait for expected fstab targets after reboot
+      command: findmnt -rno TARGET
+      register: post_reboot_mounts
+      changed_when: false
+      failed_when: false
+      until: >-
+        (expected_fstab_mounts.stdout_lines | default([])
+        | difference(post_reboot_mounts.stdout_lines | default([]))) | length == 0
+      retries: 18
+      delay: 10
+      when:
+        - should_reboot | bool
+        - verify_fstab_mounts | bool
+
+    - name: Fail when expected fstab targets did not return
+      fail:
+        msg: >-
+          Expected fstab targets did not mount after reboot:
+          {{
+            expected_fstab_mounts.stdout_lines | default([])
+            | difference(post_reboot_mounts.stdout_lines | default([]))
+            | join(', ')
+          }}
+      when:
+        - should_reboot | bool
+        - verify_fstab_mounts | bool
+        - >-
+          (expected_fstab_mounts.stdout_lines | default([])
+          | difference(post_reboot_mounts.stdout_lines | default([]))) | length > 0
+
+    - name: Confirm reboot completed
+      command: uptime
+      register: uptime_result
+      changed_when: false
+      when: should_reboot | bool
+
+    - name: Report status
+      debug:
+        msg: "{{ inventory_hostname }} rebooted successfully — {{ uptime_result.stdout | default('skipped') }}"
+      when: should_reboot | bool

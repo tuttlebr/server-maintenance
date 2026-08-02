@@ -1,0 +1,307 @@
+---
+- name: Manage Users
+  hosts: all
+  become: true
+  vars:
+    debug_mode: false
+    force_password_change: true
+    user_info: []
+    user_records: []
+    target_usernames: []
+    user_groups: ""
+    user_shell: ""
+  tasks:
+    - name: Ensure we're running on Ubuntu
+      fail:
+        msg: "This playbook is designed to run on Ubuntu systems only."
+      when: ansible_facts['distribution'] != "Ubuntu"
+
+    - name: Validate update usernames
+      assert:
+        that:
+          - item is match('^[a-z_][a-z0-9_-]{0,31}$')
+        fail_msg: "Unsafe username for update: {{ item }}"
+      loop: "{{ target_usernames | default([]) }}"
+
+    - name: Validate structured user records
+      assert:
+        that:
+          - item.username is match('^[a-z_][a-z0-9_-]{0,31}$')
+          - item.email is match('^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$')
+          - item.full_name is defined
+          - item.full_name | length > 0
+          - "'<' not in item.full_name"
+          - "'>' not in item.full_name"
+          - "'{' not in item.full_name"
+          - "'}' not in item.full_name"
+          - "'$' not in item.full_name"
+          - "'`' not in item.full_name"
+          - "'|' not in item.full_name"
+          - "';' not in item.full_name"
+        fail_msg: "Unsafe user record: {{ item }}"
+      loop: "{{ user_records | default([]) }}"
+      no_log: true
+
+    - name: Normalize structured user records
+      set_fact:
+        users_to_create: "{{ user_records | default([]) }}"
+
+    - name: Extract legacy user_info records
+      set_fact:
+        users_to_create: >-
+          {{ users_to_create + [{
+              'full_name': item | regex_replace(';$', '') | regex_search('^([^<]+)') | trim,
+              'username': item | regex_replace(';$', '') | regex_search('(?<=<)[^@]+(?=@)'),
+              'email': item | regex_replace(';$', '') | regex_search('(?<=<)[^>]+(?=>)')
+            }]
+          }}
+      loop: "{{ user_info | default([]) }}"
+      when:
+        - (user_records | default([]) | length) == 0
+        - item is defined
+        - item != ""
+      no_log: true
+
+    - name: Filter out users with invalid data
+      set_fact:
+        users_to_create: >-
+          {{ users_to_create
+             | selectattr('username', 'defined')
+             | selectattr('username', 'match', '^[a-z_][a-z0-9_-]{0,31}$')
+             | list }}
+
+    - name: Validate normalized user records
+      assert:
+        that:
+          - item.username is match('^[a-z_][a-z0-9_-]{0,31}$')
+          - item.email is match('^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$')
+          - item.full_name is defined
+          - item.full_name | length > 0
+          - "'<' not in item.full_name"
+          - "'>' not in item.full_name"
+          - "'{' not in item.full_name"
+          - "'}' not in item.full_name"
+          - "'$' not in item.full_name"
+          - "'`' not in item.full_name"
+          - "'|' not in item.full_name"
+          - "';' not in item.full_name"
+        fail_msg: "Unsafe user record"
+      loop: "{{ users_to_create | default([]) }}"
+      no_log: true
+
+    - name: Validate initial password input
+      assert:
+        that:
+          - default_password | length >= 12
+          - "'{' not in default_password"
+          - "'}' not in default_password"
+        fail_msg: "default_password must be at least 12 characters and must not contain template expressions"
+      when: default_password is defined and default_password | length > 0
+      no_log: true
+
+    - name: Normalize default user group list
+      set_fact:
+        user_group_list: "{{ user_defaults.groups.split(',') if user_defaults.groups is string else user_defaults.groups }}"
+
+    - name: Normalize update group list
+      set_fact:
+        update_group_list: "{{ user_groups.split(',') | map('trim') | reject('equalto', '') | list }}"
+      when: user_groups | default('') | length > 0
+
+    - name: Validate update groups
+      assert:
+        that:
+          - item is match('^[a-z_][a-z0-9_-]{0,31}$')
+        fail_msg: "Unsafe group name: {{ item }}"
+      loop: "{{ update_group_list | default([]) }}"
+
+    - name: Validate update shell
+      assert:
+        that:
+          - user_shell in ['/bin/bash', '/bin/sh', '/bin/zsh', '/usr/bin/bash', '/usr/bin/zsh', '/usr/sbin/nologin', '/bin/false']
+        fail_msg: "Unsupported shell: {{ user_shell }}"
+      when: user_shell | default('') | length > 0
+
+    - name: Get existing users
+      getent:
+        database: passwd
+
+    - name: Fail if update target users do not exist
+      fail:
+        msg: "User {{ item }} does not exist on {{ inventory_hostname }}"
+      loop: "{{ target_usernames | default([]) }}"
+      when: item not in ansible_facts['getent_passwd'].keys()
+
+    - name: Ensure update groups exist
+      group:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ update_group_list | default([]) }}"
+
+    - name: Apply group updates to existing users
+      user:
+        name: "{{ item }}"
+        groups: "{{ update_group_list | join(',') }}"
+        append: yes
+      loop: "{{ target_usernames | default([]) }}"
+      when: update_group_list is defined and update_group_list | length > 0
+
+    - name: Apply shell updates to existing users
+      user:
+        name: "{{ item }}"
+        shell: "{{ user_shell }}"
+      loop: "{{ target_usernames | default([]) }}"
+      when: user_shell | default('') | length > 0
+
+    - name: Stop after update-only request
+      meta: end_host
+      when:
+        - target_usernames | default([]) | length > 0
+        - users_to_create | length == 0
+
+    - name: Create list of existing usernames
+      set_fact:
+        existing_usernames: "{{ ansible_facts['getent_passwd'].keys() | list }}"
+
+    - name: Categorize users as new or existing
+      set_fact:
+        new_users: "{{ users_to_create | rejectattr('username', 'in', existing_usernames) | list }}"
+        existing_users: "{{ users_to_create | selectattr('username', 'in', existing_usernames) | list }}"
+
+    - name: Confirm before proceeding
+      pause:
+        prompt: "Configuring {{ users_to_create | length }} users on {{ inventory_hostname }} ({{ new_users | length }} new, {{ existing_users | length }} existing). Press Enter to continue or Ctrl+C to abort"
+      when:
+        - users_to_create | length > 0
+        - interactive_mode | default(true) | bool
+
+    - name: Display summary of user operations
+      debug:
+        msg:
+          - "Summary: {{ new_users | length }} new users to create, {{ existing_users | length }} users already exist."
+          - "Total users to configure: {{ users_to_create | length }}"
+      when: users_to_create | length > 0
+
+    - name: Ensure /raid directory exists
+      file:
+        path: "/raid"
+        state: directory
+        mode: "0755"
+      when: users_to_create | length > 0
+
+    - name: Ensure required groups exist
+      group:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ user_group_list }}"
+      when:
+        - users_to_create | length > 0
+        - user_defaults.groups is defined
+
+    - name: Create new users
+      user:
+        name: "{{ item.username }}"
+        comment: "{{ item.full_name }}"
+        shell: "{{ user_defaults.shell }}"
+        create_home: "{{ user_defaults.create_home | bool }}"
+        state: present
+      loop: "{{ new_users | default([]) }}"
+
+    - name: Set user passwords
+      user:
+        name: "{{ item.username }}"
+        password: "{{ default_password | password_hash('sha512') }}"
+        update_password: always
+      loop: "{{ new_users | default([]) }}"
+      no_log: true
+      when: default_password is defined and default_password | length > 0
+
+    - name: Add users to groups
+      user:
+        name: "{{ item.username }}"
+        groups: "{{ user_group_list | join(',') }}"
+        append: yes
+      loop: "{{ new_users | default([]) }}"
+      when: user_defaults.groups is defined
+
+    - name: Set user email in ~/.profile
+      blockinfile:
+        path: "/home/{{ item.username }}/.profile"
+        block: |
+          # Set email address added by Ansible
+          export EMAIL="{{ item.email }}"
+        marker: "# {mark} ANSIBLE MANAGED EMAIL BLOCK"
+        create: yes
+        owner: "{{ item.username }}"
+        group: "{{ item.username }}"
+        mode: "0644"
+      loop: "{{ new_users | default([]) }}"
+      when: user_defaults.create_home | bool
+
+    - name: Create SSH directory for users
+      file:
+        path: "/home/{{ item.username }}/.ssh"
+        state: directory
+        owner: "{{ item.username }}"
+        group: "{{ item.username }}"
+        mode: "0700"
+      loop: "{{ new_users | default([]) }}"
+      when: user_defaults.create_home | bool
+
+    - name: Create empty authorized_keys file
+      file:
+        path: "/home/{{ item.username }}/.ssh/authorized_keys"
+        state: touch
+        owner: "{{ item.username }}"
+        group: "{{ item.username }}"
+        mode: "0600"
+      loop: "{{ new_users | default([]) }}"
+      when: user_defaults.create_home | bool
+
+    - name: Set standard configuration files for new users
+      copy:
+        src: "../templates/user_configs/example/"
+        dest: "/home/{{ item.username }}/"
+        owner: "{{ item.username }}"
+        group: "{{ item.username }}"
+        mode: "0644"
+        directory_mode: "0755"
+      loop: "{{ new_users | default([]) }}"
+      when: user_defaults.create_home | bool
+      failed_when: false
+
+    - name: Create user directories in /raid
+      file:
+        path: "/raid/{{ item.username }}"
+        state: directory
+        owner: "{{ item.username }}"
+        group: "{{ item.username }}"
+        mode: "0750"
+      loop: "{{ new_users | default([]) }}"
+
+    - name: Add RAID directory reference to user profile
+      blockinfile:
+        path: "/home/{{ item.username }}/.profile"
+        block: |
+          # RAID directory
+          export RAID_DIR="/raid/{{ item.username }}"
+          alias cdraid="cd $RAID_DIR"
+        marker: "# {mark} ANSIBLE MANAGED RAID DIRECTORY BLOCK"
+        create: yes
+        owner: "{{ item.username }}"
+        group: "{{ item.username }}"
+        mode: "0644"
+      loop: "{{ new_users | default([]) }}"
+      when: user_defaults.create_home | bool
+
+    - name: Force password change on first login
+      command:
+        argv:
+          - chage
+          - "-d"
+          - "0"
+          - "{{ item.username }}"
+      loop: "{{ new_users | default([]) }}"
+      failed_when: false
+      changed_when: true
+      when: force_password_change | bool

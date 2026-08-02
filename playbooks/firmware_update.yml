@@ -1,0 +1,48 @@
+---
+- name: Firmware Update
+  hosts: managed_hosts
+  become: true
+  serial: 1
+  gather_facts: true
+  vars:
+    firmware_mode: inventory
+  tasks:
+    - name: Validate firmware mode
+      assert:
+        that:
+          - firmware_mode in ['inventory', 'update']
+        fail_msg: "firmware_mode must be inventory or update"
+
+    - name: Collect firmware inventory before update
+      command: fwupdmgr get-updates
+      register: pre_firmware_updates
+      failed_when: false
+      changed_when: false
+
+    - name: Refresh firmware metadata
+      command: fwupdmgr refresh --force
+      register: fwupd_refresh
+      failed_when: false
+      changed_when: false
+      when: firmware_mode == 'update'
+
+    - name: Apply fwupd firmware updates without reboot
+      command: fwupdmgr upgrade --no-reboot --assume-yes
+      register: fwupd_update
+      failed_when: false
+      when: firmware_mode == 'update'
+
+    - name: Check if reboot is required
+      stat:
+        path: /var/run/reboot-required
+      register: reboot_required_file
+
+    - name: Report firmware update result
+      debug:
+        msg:
+          - "Host: {{ inventory_hostname }}"
+          - "Mode: {{ firmware_mode }}"
+          - "Pre-update inventory: {{ pre_firmware_updates.stdout_lines | default(['not available']) }}"
+          - "Refresh: {{ fwupd_refresh.stdout_lines | default(['skipped']) }}"
+          - "Update: {{ fwupd_update.stdout_lines | default(['skipped']) }}"
+          - "Reboot required: {{ reboot_required_file.stat.exists }}"

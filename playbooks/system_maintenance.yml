@@ -1,0 +1,97 @@
+---
+- name: Update Managed Hosts
+  hosts: managed_hosts
+  become: true
+  serial: 1
+  tasks:
+    - name: Upgrade Debian-family packages
+      apt:
+        upgrade: dist
+        update_cache: true
+        autoremove: true
+        autoclean: true
+        cache_valid_time: 3600
+      when: ansible_facts['os_family'] == "Debian"
+
+    - name: Upgrade Red Hat-family packages
+      dnf:
+        name: "*"
+        state: latest
+        update_cache: true
+      when: ansible_facts['os_family'] == "RedHat"
+
+    - name: Register nvidia-smi output
+      command: nvidia-smi --query-gpu=gpu_name,gpu_bus_id,driver_version --format=csv
+      register: gpu_info
+      ignore_errors: true
+      changed_when: false
+      when: "'nvidia_gpu' in group_names"
+
+    - name: Print nvidia-smi info
+      ansible.builtin.debug:
+        var: gpu_info.stdout_lines
+      when: "'nvidia_gpu' in group_names"
+
+    - name: Remove old kernels
+      shell: |
+        dpkg -l 'linux-*' | sed '/^ii/!d;/'"$(uname -r | sed "s/\(.*\)-\([^0-9]\+\)/\1/")"'/d;s/^[^ ]* [^ ]* \([^ ]*\).*/\1/;/[0-9]/!d' | xargs apt-get -y purge
+      register: kernel_cleanup
+      changed_when: kernel_cleanup.stdout != ""
+      when: ansible_facts['os_family'] == "Debian"
+
+    - name: Check disk space
+      shell: |
+        df -h /
+      register: disk_space
+      changed_when: false
+
+    - name: Print disk space remaining
+      ansible.builtin.debug:
+        var: disk_space.stdout_lines
+
+    - name: Check whether the optional RAID mount exists
+      stat:
+        path: /raid
+      register: raid_mount
+
+    - name: Check optional RAID disk space
+      command: df -h /raid
+      register: raid_disk_space
+      changed_when: false
+      when: raid_mount.stat.isdir | default(false)
+
+    - name: Print optional RAID disk space remaining
+      ansible.builtin.debug:
+        var: raid_disk_space.stdout_lines
+      when: raid_mount.stat.isdir | default(false)
+
+
+    # Reboot Check
+    - name: Check if reboot is required
+      block:
+        - name: Check for reboot-required flag
+          stat:
+            path: /var/run/reboot-required
+          register: reboot_required_file
+
+        - name: Check for processes using old deleted libraries
+          shell: lsof | grep 'DEL.*lib' || true
+          register: deleted_libs
+          changed_when: false
+
+        - name: Print reboot requirement message
+          debug:
+            msg: |
+              WARNING: Server {{ inventory_hostname }} requires a manual reboot!
+              Reasons:
+              {% if reboot_required_file.stat.exists %}
+              - System updates require a reboot
+              {% endif %}
+              {% if deleted_libs.stdout_lines | length > 0 %}
+              - Processes using deleted libraries detected
+              {% endif %}
+          when: reboot_required_file.stat.exists or deleted_libs.stdout_lines | length > 0
+
+        - name: Include reboot status in maintenance report
+          set_fact:
+            reboot_needed: "{{ reboot_required_file.stat.exists or deleted_libs.stdout_lines | length > 0 }}"

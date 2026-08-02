@@ -1,0 +1,131 @@
+# NeMo Agent Toolkit configuration for DGX Help Chat
+
+retrievers:
+  dgx_retriever:
+    _type: milvus_retriever
+    uri: ${MILVUS_URI:-http://milvus:19530}
+    collection_name: dgx_docs
+    embedding_model: dgx_embedder
+    top_k: 3
+    metric_type: L2
+
+function_groups:
+  dynamo_mcp_server:
+    _type: mcp_client
+    include:
+      - searchDocs
+    tool_call_timeout: 45
+    reconnect_enabled: true
+    reconnect_max_attempts: 3
+    session_idle_timeout: 600
+    tool_overrides:
+      searchDocs:
+        description: >-
+          Search NVIDIA Dynamo inference runtime docs. Args: query.
+          Returns: doc passages. Use for Dynamo-specific API/config
+          questions.
+    server:
+      transport: streamable-http
+      url: https://docs.nvidia.com/dynamo/_mcp/server
+  brev_mcp_server:
+    _type: mcp_client
+    include:
+      - searchDocs
+    tool_call_timeout: 45
+    reconnect_enabled: true
+    reconnect_max_attempts: 3
+    session_idle_timeout: 600
+    tool_overrides:
+      searchDocs:
+        description: >-
+          Search NVIDIA Brev docs. Args: query.
+          Returns: doc passages. Use for Brev-specific API/config
+          questions.
+    server:
+      transport: streamable-http
+      url: https://docs.nvidia.com/brev/_mcp/server
+  aiperf_mcp_server:
+    _type: mcp_client
+    include:
+      - searchDocs
+    tool_call_timeout: 45
+    reconnect_enabled: true
+    reconnect_max_attempts: 3
+    session_idle_timeout: 600
+    tool_overrides:
+      searchDocs:
+        description: >-
+          Search NVIDIA AIPerf docs. Args: query.
+          Returns: doc passages. Use for AIPerf-specific API/config
+          questions.
+    server:
+      transport: streamable-http
+      url: https://docs.nvidia.com/aiperf/_mcp/server
+  nvcf_mcp_server:
+    _type: mcp_client
+    include:
+      - searchDocs
+    tool_call_timeout: 45
+    reconnect_enabled: true
+    reconnect_max_attempts: 3
+    session_idle_timeout: 600
+    tool_overrides:
+      searchDocs:
+        description: >-
+          Search NVIDIA Cloud Functions docs. Args: query.
+          Returns: doc passages. Use for NVIDIA Cloud Functions-specific
+          API/config questions.
+    server:
+      transport: streamable-http
+      url: https://docs.nvidia.com/nvcf/_mcp/server
+  dsx_mcp_server:
+    _type: mcp_client
+    include:
+      - searchDocs
+    tool_call_timeout: 45
+    reconnect_enabled: true
+    reconnect_max_attempts: 3
+    session_idle_timeout: 600
+    tool_overrides:
+      searchDocs:
+        description: >-
+          Search NVIDIA DSX docs. Args: query.
+          Returns: doc passages. Use for DSX-specific API/config
+          questions.
+    server:
+      transport: streamable-http
+      url: https://docs.nvidia.com/dsx/_mcp/server
+
+functions:
+  dgx_docs:
+    _type: nat_retriever
+    retriever: dgx_retriever
+    topic: "Search NVIDIA DGX system documentation and DGX Fleet Manager UI usage guidance, including DGX Spark, DGX A100, and DGX H100 user guides"
+
+llms:
+  dgx_llm:
+    _type: openai
+    api_type: chat_completion
+    base_url: ${AI_HELPER_BASE_URL}
+    api_key: ${AI_HELPER_API_KEY}
+    model_name: ${AI_HELPER_MODEL}
+
+embedders:
+  dgx_embedder:
+    _type: nim
+    base_url: ${EMBED_BASE_URL}
+    api_key: ${EMBED_API_KEY}
+    model_name: ${EMBED_MODEL:-nvidia/qwen/qwen3-embedding-0.6b}
+
+workflow:
+  _type: tool_calling_agent
+  tool_names:
+    - dgx_docs
+    - dynamo_mcp_server
+    - brev_mcp_server
+    - aiperf_mcp_server
+    - nvcf_mcp_server
+    - dsx_mcp_server
+  llm_name: dgx_llm
+  system_prompt: |
+    You are a tech support assistant for NVIDIA DGX Fleet Manager covering DGX Spark, DGX A100, DGX H100 systems, and the DGX Fleet Manager web UI. Give the shortest accurate answer possible - one or two sentences unless the question requires steps. No greetings, no filler. All responses should sound natural if read aloud.

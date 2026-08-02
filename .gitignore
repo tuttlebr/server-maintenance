@@ -1,0 +1,33 @@
+# Ansible secrets (group_vars with sensitive data)
+group_vars/all.yml
+group_vars/workstations.yml
+group_vars/.all.yml
+group_vars/.workstations.yml
+
+# Local and auto-generated inventory
+inventory/hosts.ini
+hosts.csv
+.DS_Store
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Docker / App data
+.env
+.fleet-ssh/
+*.db
+*.sqlite
+data/
+
+# Generated files
+password_reset_*.txt
+vault_password
+docs/crawled/
+tools/**/target/

@@ -1,0 +1,71 @@
+---
+- name: Docker Cleanup
+  hosts: managed_hosts
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Check if Docker CLI is installed
+      command: which docker
+      register: docker_cli
+      failed_when: false
+      changed_when: false
+
+    - name: Ensure Docker daemon is running
+      ansible.builtin.systemd:
+        state: started
+        name: docker
+        enabled: true
+        daemon_reload: true
+      when: docker_cli.rc == 0
+
+    - name: Prune unused Docker images
+      command: docker image prune -a -f
+      register: docker_image_prune
+      changed_when: docker_image_prune.stdout | length > 0
+      when: docker_cli.rc == 0
+
+    - name: Prune Docker build cache
+      command: docker builder prune -f
+      register: docker_builder_prune
+      changed_when: docker_builder_prune.stdout | length > 0
+      when: docker_cli.rc == 0
+
+    - name: Prune unused Docker networks
+      command: docker network prune -f
+      register: docker_network_prune
+      changed_when: docker_network_prune.stdout | length > 0
+      when: docker_cli.rc == 0
+
+    - name: Check if nerdctl is installed
+      command: which nerdctl
+      register: nerdctl_cli
+      failed_when: false
+      changed_when: false
+      when: "'dgx_workstation' in group_names"
+
+    - name: Ensure containerd daemon is running
+      ansible.builtin.systemd:
+        state: started
+        name: containerd
+        enabled: true
+        daemon_reload: true
+      when:
+        - "'dgx_workstation' in group_names"
+        - nerdctl_cli.rc | default(1) == 0
+
+    - name: Prune unused containerd images in k8s namespace
+      command: nerdctl --namespace k8s.io image prune -f
+      register: containerd_image_prune
+      changed_when: containerd_image_prune.stdout | length > 0
+      when:
+        - "'dgx_workstation' in group_names"
+        - nerdctl_cli.rc | default(1) == 0
+
+    - name: Report cleanup summary
+      debug:
+        msg:
+          - "Docker installed: {{ docker_cli.rc == 0 }}"
+          - "Docker images: {{ docker_image_prune.stdout_lines | default(['skipped']) }}"
+          - "Docker build cache: {{ docker_builder_prune.stdout_lines | default(['skipped']) }}"
+          - "Docker networks: {{ docker_network_prune.stdout_lines | default(['skipped']) }}"
+          - "containerd images: {{ containerd_image_prune.stdout_lines | default(['skipped']) }}"

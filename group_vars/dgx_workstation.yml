@@ -1,0 +1,12 @@
+---
+machine_type: dgx_workstation
+os_name: "Ubuntu"
+gpu_architecture: "Blackwell Ultra"
+memory_gb: 748
+nic_type: "ConnectX-8"
+nic_speed: "800Gb"
+hbm3e_gb: 252
+mig_support: true
+mig_max_instances: 7
+bmc_management: true
+firmware_update: false

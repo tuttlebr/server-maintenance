@@ -1,0 +1,281 @@
+---
+- name: Storage Analysis
+  hosts: managed_hosts
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Get /home usage per user with ownership
+      shell: |
+        /usr/bin/python3 << 'PYEOF'
+        import grp
+        import json
+        import os
+        import pwd
+        import subprocess
+
+        def du_mb(path):
+            try:
+                r = subprocess.run(["du", "-sm", path], capture_output=True, text=True, timeout=120)
+                if r.returncode == 0 and r.stdout.strip():
+                    return int(r.stdout.split()[0])
+            except Exception:
+                pass
+            return 0
+
+        def owner(path):
+            try:
+                st = os.stat(path)
+                try:
+                    user = pwd.getpwuid(st.st_uid).pw_name
+                except KeyError:
+                    user = str(st.st_uid)
+                try:
+                    group = grp.getgrgid(st.st_gid).gr_name
+                except KeyError:
+                    group = str(st.st_gid)
+                return user, st.st_uid, group
+            except Exception:
+                return None, None, None
+
+        entries = []
+        base = "/home"
+        if os.path.isdir(base):
+            for name in os.listdir(base):
+                path = os.path.join(base, name)
+                if not os.path.isdir(path) or os.path.islink(path):
+                    continue
+                user, uid, group = owner(path)
+                entries.append({
+                    "size_mb": du_mb(path),
+                    "name": name,
+                    "path": path,
+                    "owner_user": user,
+                    "owner_uid": uid,
+                    "owner_group": group,
+                    "kind": "directory",
+                })
+        entries.sort(key=lambda e: e["size_mb"], reverse=True)
+        print(json.dumps(entries))
+        PYEOF
+      register: home_usage
+      ignore_errors: true
+      changed_when: false
+
+    - name: Get total /home usage
+      shell: du -sm /home 2>/dev/null | awk '{print $1}'
+      register: home_total
+      ignore_errors: true
+      changed_when: false
+
+    - name: Discover and analyze storage mounts
+      shell: |
+        /usr/bin/python3 << 'PYEOF'
+        import grp
+        import json
+        import os
+        import pwd
+        import shlex
+        import subprocess
+        import sys
+
+        def run(cmd):
+            try:
+                r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120)
+                return r.stdout.strip()
+            except Exception:
+                return ""
+
+        def owner(path):
+            try:
+                st = os.stat(path)
+                try:
+                    user = pwd.getpwuid(st.st_uid).pw_name
+                except KeyError:
+                    user = str(st.st_uid)
+                try:
+                    group = grp.getgrgid(st.st_gid).gr_name
+                except KeyError:
+                    group = str(st.st_gid)
+                return user, st.st_uid, group
+            except Exception:
+                return None, None, None
+
+        SKIP_MOUNTS = frozenset(("/boot", "/boot/efi", "/tmp", "/home"))
+        SKIP_PREFIXES = ("/snap/", "/sys/", "/proc/", "/dev/", "/run/", "/var/lib/kubelet/", "/var/lib/docker/", "/var/lib/containerd/")
+        VIRTUAL_FS = frozenset((
+            "tmpfs", "devtmpfs", "sysfs", "proc", "securityfs", "cgroup", "cgroup2",
+            "pstore", "bpf", "tracefs", "debugfs", "hugetlbfs", "mqueue", "fusectl",
+            "fuse.lxcfs", "configfs", "efivarfs", "autofs", "overlay", "squashfs",
+            "nsfs", "fuse.snapfuse", "devpts", "ramfs",
+        ))
+        NFS_TYPES = frozenset(("nfs", "nfs4", "cifs", "smb", "smb2", "smb3", "glusterfs", "lustre", "pvfs2", "gpfs", "fuse.sshfs"))
+
+        raw = run("findmnt -J -b 2>/dev/null")
+        if not raw:
+            print("[]")
+            sys.exit(0)
+
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            print("[]")
+            sys.exit(0)
+
+        flat = []
+        def walk(entries):
+            for e in entries:
+                flat.append(e)
+                if "children" in e:
+                    walk(e["children"])
+        walk(data.get("filesystems", []))
+
+        results = []
+        for m in flat:
+            target = m.get("target", "")
+            source = m.get("source", "")
+            fstype = m.get("fstype", "")
+
+            if target in SKIP_MOUNTS:
+                continue
+            if any(target.startswith(p) for p in SKIP_PREFIXES):
+                continue
+            if fstype in VIRTUAL_FS:
+                continue
+
+            # Allowlist: only include block-device-backed or network mounts
+            is_block_device = source.startswith("/dev/")
+            is_network_mount = fstype in NFS_TYPES
+            if not is_block_device and not is_network_mount:
+                continue
+
+            # Classify mount type
+            mount_type = "local"
+            if fstype in NFS_TYPES:
+                mount_type = "nfs"
+            elif source.startswith("/dev/md") or "/md" in source:
+                mount_type = "raid"
+            else:
+                # Check if the backing device is a RAID array via lsblk
+                dev = source.split("[")[0]  # strip subvol brackets
+                lsblk = run("lsblk -no TYPE {} 2>/dev/null | head -1".format(dev))
+                if lsblk.strip().startswith("raid"):
+                    mount_type = "raid"
+                elif "raid" in target.lower():
+                    mount_type = "raid"
+
+            # Get df info
+            quoted_target = shlex.quote(target)
+            df_out = run("df -BM --output=size,used,avail,pcent {} 2>/dev/null | tail -1".format(quoted_target))
+            total_mb = used_mb = avail_mb = use_pct = 0
+            if df_out:
+                parts = df_out.split()
+                if len(parts) >= 4:
+                    try:
+                        total_mb = int(parts[0].rstrip("M"))
+                        used_mb = int(parts[1].rstrip("M"))
+                        avail_mb = int(parts[2].rstrip("M"))
+                        use_pct = int(parts[3].rstrip("%"))
+                    except ValueError:
+                        pass
+
+            # Skip tiny mounts (< 100 MB total)
+            if total_mb < 100:
+                continue
+
+            # Get top-level folder breakdown
+            du_out = run("du -sm {}/*/ 2>/dev/null | sort -rn | head -20".format(quoted_target))
+            entries = []
+            for line in du_out.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split(None, 1)
+                if len(parts) == 2:
+                    try:
+                        size = int(parts[0])
+                    except ValueError:
+                        continue
+                    path = parts[1].rstrip("/")
+                    name = os.path.basename(path)
+                    if name:
+                        user, uid, group = owner(path)
+                        entries.append({
+                            "size_mb": size,
+                            "name": name,
+                            "path": path,
+                            "owner_user": user,
+                            "owner_uid": uid,
+                            "owner_group": group,
+                            "kind": "directory",
+                        })
+
+            results.append({
+                "mountpoint": target,
+                "type": mount_type,
+                "fstype": fstype,
+                "source": source,
+                "total_mb": total_mb,
+                "used_mb": used_mb,
+                "avail_mb": avail_mb,
+                "use_pct": use_pct,
+                "entries": entries,
+            })
+
+        print(json.dumps(results))
+        PYEOF
+      register: discovered_mounts_raw
+      ignore_errors: true
+      changed_when: false
+
+    - name: Parse discovered mounts
+      set_fact:
+        discovered_mounts: "{{ (discovered_mounts_raw.stdout_lines | default(['[]']) | last) | from_json }}"
+      ignore_errors: true
+
+    - name: Fallback if discovery failed
+      set_fact:
+        discovered_mounts: []
+      when: discovered_mounts is not defined or discovered_mounts is not iterable
+
+    - name: Build home entries
+      set_fact:
+        home_entries: "{{ home_usage.stdout | default('[]') | from_json }}"
+      ignore_errors: true
+
+    - name: Fallback if home ownership parsing failed
+      set_fact:
+        home_entries: []
+      when: home_entries is not defined or home_entries is not iterable
+
+    - name: Build backward-compatible raid fields
+      set_fact:
+        raid_total_mb: "{{ (discovered_mounts | selectattr('type', 'eq', 'raid') | map(attribute='total_mb') | first | default(0)) | int }}"
+        raid_entries: "{{ (discovered_mounts | selectattr('type', 'eq', 'raid') | map(attribute='entries') | first | default([])) }}"
+
+    - name: Compile storage report
+      set_fact:
+        storage_report:
+          hostname: "{{ inventory_hostname }}"
+          timestamp: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+          home_total_mb: "{{ home_total.stdout | default('0') | int }}"
+          raid_total_mb: "{{ raid_total_mb }}"
+          home_entries: "{{ home_entries }}"
+          raid_entries: "{{ raid_entries }}"
+          mounts: "{{ discovered_mounts }}"
+          filesystem: "{{ [] }}"
+
+    - name: Output storage report
+      debug:
+        var: storage_report
+
+    - name: Write storage report as JSON
+      copy:
+        content: "{{ storage_report | to_json }}"
+        dest: "/tmp/fleet_storage_report.json"
+        mode: "0644"
+
+    - name: Fetch storage report to controller
+      fetch:
+        src: "/tmp/fleet_storage_report.json"
+        dest: "/app/data/scans/storage_{{ inventory_hostname }}.json"
+        flat: true

@@ -1,0 +1,24 @@
+[package]
+name = "dgx-doc-ingester"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+
+[dependencies]
+anyhow = "=1.0.103"
+clap = { version = "=4.4.18", features = ["derive"] }
+dotenvy = "0.15"
+futures = "0.3"
+html2md = "=0.2.15"
+# These direct pins keep transitive dependencies compatible with the repo's rustc 1.75 toolchain.
+hashbrown = "=0.14.5"
+idna = "=1.0.3"
+idna_adapter = "=1.2.0"
+indexmap = "=2.2.6"
+regex = "1.10"
+reqwest = { version = "=0.13.0", default-features = false, features = ["json", "rustls", "webpki-roots"] }
+scraper = "=0.25.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "=1.44.2", features = ["macros", "rt-multi-thread", "time"] }
+url = "=2.5.4"

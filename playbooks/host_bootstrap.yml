@@ -1,0 +1,6 @@
+---
+- import_playbook: manage_groups.yml
+- import_playbook: admin_setup.yml
+- import_playbook: install_docker.yml
+- import_playbook: host_facts.yml
+

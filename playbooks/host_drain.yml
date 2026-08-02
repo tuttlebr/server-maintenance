@@ -1,0 +1,62 @@
+---
+- name: Drain or Resume Host
+  hosts: managed_hosts
+  become: true
+  gather_facts: false
+  vars:
+    drain_action: status
+  tasks:
+    - name: Validate drain action
+      assert:
+        that:
+          - drain_action in ['status', 'drain', 'resume']
+        fail_msg: "drain_action must be status, drain, or resume"
+
+    - name: Check active GPU processes
+      command: nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader
+      register: gpu_processes
+      failed_when: false
+      changed_when: false
+      when: "'nvidia_gpu' in group_names"
+
+    - name: Check Kubernetes access
+      command: kubectl get node "{{ inventory_hostname }}"
+      register: kubectl_node
+      failed_when: false
+      changed_when: false
+
+    - name: Cordon Kubernetes node
+      command: kubectl cordon "{{ inventory_hostname }}"
+      register: cordon_result
+      changed_when: "'cordoned' in cordon_result.stdout"
+      when:
+        - drain_action == 'drain'
+        - kubectl_node.rc == 0
+
+    - name: Drain Kubernetes node
+      command: kubectl drain "{{ inventory_hostname }}" --ignore-daemonsets --delete-emptydir-data --timeout=10m
+      register: drain_result
+      failed_when: false
+      changed_when: "'drained' in drain_result.stdout or 'cordoned' in drain_result.stdout"
+      when:
+        - drain_action == 'drain'
+        - kubectl_node.rc == 0
+
+    - name: Uncordon Kubernetes node
+      command: kubectl uncordon "{{ inventory_hostname }}"
+      register: uncordon_result
+      changed_when: "'uncordoned' in uncordon_result.stdout"
+      when:
+        - drain_action == 'resume'
+        - kubectl_node.rc == 0
+
+    - name: Report drain status
+      debug:
+        msg:
+          - "Host: {{ inventory_hostname }}"
+          - "Action: {{ drain_action }}"
+          - "Kubernetes node visible: {{ kubectl_node.rc == 0 }}"
+          - "Active GPU processes: {{ gpu_processes.stdout_lines | default([]) }}"
+          - "Cordon: {{ cordon_result.stdout_lines | default(['skipped']) }}"
+          - "Drain: {{ drain_result.stdout_lines | default(['skipped']) }}"
+          - "Resume: {{ uncordon_result.stdout_lines | default(['skipped']) }}"

@@ -1,0 +1,11 @@
+.git
+.env
+data/
+venv/
+.venv/
+__pycache__/
+*.pyc
+frontend/node_modules/
+frontend/dist/
+tools/**/target/
+docs/crawled/

@@ -1,0 +1,115 @@
+---
+- name: Maintenance Preflight Check
+  hosts: managed_hosts
+  become: true
+  gather_facts: true
+  vars:
+    disk_warn_pct: 85
+  tasks:
+    - name: Check apt and dpkg lock holders
+      shell: |
+        pgrep -fa 'apt|apt-get|dpkg|unattended-upgrade' || true
+      register: apt_lock_processes
+      changed_when: false
+
+    - name: Check root filesystem usage
+      shell: df --output=pcent / | tail -1 | tr -d ' %'
+      register: root_usage_pct
+      changed_when: false
+
+    - name: Check RAID filesystem usage
+      shell: df --output=pcent /raid 2>/dev/null | tail -1 | tr -d ' %'
+      register: raid_usage_pct
+      failed_when: false
+      changed_when: false
+      when: "'dgx_workstation' in group_names"
+
+    - name: Check if reboot is required
+      stat:
+        path: /var/run/reboot-required
+      register: reboot_required_file
+
+    - name: Check nvidia-smi availability
+      command: nvidia-smi
+      register: nvidia_smi_check
+      failed_when: false
+      changed_when: false
+      when: "'nvidia_gpu' in group_names"
+
+    - name: Check active GPU processes
+      command: nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader
+      register: gpu_processes
+      failed_when: false
+      changed_when: false
+      when: "'nvidia_gpu' in group_names"
+
+    - name: Check Docker GPU workloads
+      shell: |
+        docker ps --filter "runtime=nvidia" --format "{{ '{{' }}.Names{{ '}}' }}" 2>/dev/null || true
+      register: gpu_containers
+      changed_when: false
+      when: "'nvidia_gpu' in group_names"
+
+    - name: Check Kubernetes node drain state
+      shell: |
+        kubectl get node "{{ inventory_hostname }}" -o jsonpath='{.spec.unschedulable}' 2>/dev/null || echo "unknown"
+      register: kube_unschedulable
+      changed_when: false
+      failed_when: false
+
+    - name: Check Fabric Manager status
+      command: systemctl is-active nvidia-fabricmanager
+      register: fabric_manager_status
+      failed_when: false
+      changed_when: false
+      when: "'fabric_manager' in group_names"
+
+    - name: Check DCGM status
+      command: systemctl is-active dcgm
+      register: dcgm_status
+      failed_when: false
+      changed_when: false
+      when: "'fabric_manager' in group_names"
+
+    - name: Check NVSM health
+      command: nvsm show health
+      register: nvsm_health
+      failed_when: false
+      changed_when: false
+      when: "'dgx_workstation' in group_names"
+
+    - name: Report preflight summary
+      debug:
+        msg:
+          - "Host: {{ inventory_hostname }}"
+          - "Reachable: true"
+          - "OS: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
+          - "Kernel: {{ ansible_facts['kernel'] }}"
+          - "Root disk used: {{ root_usage_pct.stdout | default('unknown') }}%"
+          - "RAID disk used: {{ raid_usage_pct.stdout | default('N/A') }}%"
+          - "Reboot required: {{ reboot_required_file.stat.exists }}"
+          - "Apt/dpkg activity: {{ apt_lock_processes.stdout_lines | default([]) }}"
+          - "nvidia-smi rc: {{ nvidia_smi_check.rc | default('N/A') }}"
+          - "GPU processes: {{ gpu_processes.stdout_lines | default([]) }}"
+          - "GPU containers: {{ gpu_containers.stdout_lines | default([]) }}"
+          - "Kubernetes unschedulable: {{ kube_unschedulable.stdout | default('unknown') }}"
+          - "Fabric Manager: {{ fabric_manager_status.stdout | default('N/A') }}"
+          - "DCGM: {{ dcgm_status.stdout | default('N/A') }}"
+          - "NVSM rc: {{ nvsm_health.rc | default('N/A') }}"
+
+    - name: Warn on high root disk usage
+      debug:
+        msg: "WARNING: root filesystem is at {{ root_usage_pct.stdout }}% on {{ inventory_hostname }}"
+      when: root_usage_pct.stdout | int >= disk_warn_pct
+
+    - name: Warn on active apt or dpkg processes
+      debug:
+        msg: "WARNING: apt/dpkg activity detected on {{ inventory_hostname }}: {{ apt_lock_processes.stdout_lines }}"
+      when: apt_lock_processes.stdout | length > 0
+
+    - name: Warn on active GPU workloads
+      debug:
+        msg: "WARNING: active GPU workloads detected on {{ inventory_hostname }}: {{ gpu_processes.stdout_lines | default([]) }}"
+      when:
+        - "'nvidia_gpu' in group_names"
+        - gpu_processes.stdout | default('') | length > 0

@@ -1,0 +1,4 @@
+---
+machine_type: gpu_node
+os_name: "Ubuntu"
+firmware_update: false

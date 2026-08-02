@@ -1,0 +1,9 @@
+---
+machine_type: dgx_spark
+os_name: "DGX OS"
+gpu_architecture: "Grace Blackwell"
+memory_gb: 128
+nic_type: "CX7"
+nic_speed: "QSFP"
+firmware_update: true
+secure_boot_default: true  # DGX Spark ships with Secure Boot enabled; runtime detection via mokutil

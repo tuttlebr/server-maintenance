@@ -1,0 +1,4 @@
+---
+machine_type: cpu_node
+os_name: "Ubuntu"
+firmware_update: false
