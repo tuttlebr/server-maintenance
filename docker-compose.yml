@@ -21,6 +21,8 @@ services:
       SSH_AUTH_SOCK: /run/fleet-agent/agent.sock
       SSH_KNOWN_HOSTS_FILE: /app/data/ssh/known_hosts
       SSH_KNOWN_HOSTS_SEED_FILE: /run/fleet-known-hosts-seed
+      # The .env default is host-facing; containers reach Milvus by service name.
+      MILVUS_URI: http://milvus:19530
     restart: unless-stopped
     read_only: false
     tmpfs:
@@ -132,6 +134,7 @@ services:
       - EMBED_API_KEY=${EMBED_API_KEY:-${AI_HELPER_API_KEY:-}}
       - EMBED_BASE_URL=${EMBED_BASE_URL:-${AI_HELPER_BASE_URL:-}}
       - EMBED_MODEL=${EMBED_MODEL:-nvidia/qwen/qwen3-embedding-0.6b}
+      - EMBED_DIM=${EMBED_DIM:-}
       - MILVUS_URI=http://milvus:19530
     depends_on:
       milvus:

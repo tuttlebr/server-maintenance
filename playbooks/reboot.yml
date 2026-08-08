@@ -2,7 +2,7 @@
 - name: Reboot Hosts
   hosts: managed_hosts
   become: true
-  serial: 1
+  serial: 4
   vars:
     force_reboot: false
     verify_fstab_mounts: true

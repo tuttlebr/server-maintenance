@@ -38,6 +38,13 @@ WORKDIR /app
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install Ansible collection dependencies in the system collection path so the
+# non-root runtime user can load them.
+COPY requirements.yml .
+RUN ansible-galaxy collection install \
+    --requirements-file requirements.yml \
+    --collections-path /usr/share/ansible/collections
+
 # Copy backend code
 COPY --chown=fleet:fleet backend/ ./backend/
 

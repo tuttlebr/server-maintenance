@@ -8,8 +8,8 @@ A web-based Linux fleet management platform with optional NVIDIA GPU and DGX-spe
 - **User management**: bulk add (form or CSV), bulk update, password changes, sudoers management
 - **Driver upgrades**: one-click driver updates per host or fleet-wide, with firmware handled separately
 - **Networking**: fabric manager control, NIC status monitoring
-- **System maintenance**: rolling package updates, Docker cleanup, preflight checks, diagnostics, firmware actions, host drain/resume, MIG controls, disk monitoring
-- **Job tracking**: full history with output logs for every operation
+- **System maintenance**: routine diagnostics and cleanup plus advanced full-system maintenance, firmware actions, host drain/resume, MIG controls, and disk monitoring
+- **Job tracking**: full history with output logs for every operation, indexed for DGX Help after success, failure, or cancellation
 - **NVIDIA-branded UI** following official design guidelines
 - **CLI compatible**: all Ansible playbooks still work directly from the command line
 
@@ -163,6 +163,7 @@ Startup fails if authentication, host-encryption, or MinIO secrets are missing o
 | `ANSIBLE_FORKS` | `10` | Maximum hosts Ansible may operate on concurrently inside one fleet-scoped job; playbook `serial` still takes precedence |
 | `MINIO_ACCESS_KEY` | required | Non-default MinIO root user shared with Milvus |
 | `MINIO_SECRET_KEY` | required | Non-default MinIO root password shared with Milvus |
+| `EMBED_MODEL` | `nvidia/qwen/qwen3-embedding-0.6b` | Embedding model shared by documentation and completed-job retrieval |
 
 ## Adding Hosts to the Fleet
 
@@ -295,7 +296,7 @@ The web UI shows current driver and CUDA versions across the fleet. Select hosts
 - **Major Version**: installs a specific `nvidia-driver-<branch>` package, such as `nvidia-driver-570`
 
 Each UI job launches one fleet-scoped Ansible process. Driver upgrades still
-run one host at a time because the playbook declares `serial: 1`; read-only
+run one host at a time because the playbook declares `serial: 4`; read-only
 playbooks can use Ansible forks across the selected fleet. Check the Jobs tab
 for output.
 Firmware updates are handled separately from driver upgrades on the Maintenance page.
@@ -308,13 +309,13 @@ The Networking page shows fabric manager status per host with controls to start,
 
 - **Preflight checks**: SSH reachability through Ansible, apt/dpkg activity, disk pressure, reboot flag, GPU processes, and service state
 - **Health diagnostics**: nvidia-smi, Fabric Manager, DCGM, NVSM, IB, failed units, critical journal, and storage summaries
-- **Package updates**: rolling apt update/upgrade, old kernel removal, disk checks
+- **Full system maintenance**: advanced package and firmware updates, mount remediation, kernel and container cleanup, storage checks, and zombie-process remediation with conditional automatic reboots
 - **Docker cleanup**: prune unused images, build cache, networks, and containerd images without removing volumes
 - **Bootstrap**: common groups, admin sudo setup, Docker/NVIDIA Container Toolkit install, and host scan
 - **Firmware**: inventory and update actions independent of driver upgrades
 - **Drain/Resume**: inspect active GPU work and run Kubernetes cordon/drain/uncordon when kubectl is configured
 - **MIG**: query or toggle MIG mode on DGX Workstation hosts after active GPU checks
-- **Disk monitoring**: root and RAID usage across the fleet
+- **Disk monitoring**: root and automatically discovered mounted-storage usage across the fleet
 
 ## CLI Usage
 
@@ -323,6 +324,9 @@ All playbooks work directly with `ansible-playbook` for power users:
 ```bash
 # Activate the virtual environment
 source .venv/bin/activate
+
+# Install required Ansible collections (first-time setup)
+ansible-galaxy collection install -r requirements.yml
 
 # System maintenance
 ansible-playbook playbooks/system_maintenance.yml
@@ -385,6 +389,8 @@ cargo run --manifest-path tools/dgx-doc-ingester/Cargo.toml -- \
 
 The tool reads `EMBED_MODEL`, optional `EMBED_DIM`, `EMBED_API_KEY`/`AI_HELPER_API_KEY`, `EMBED_BASE_URL`/`AI_HELPER_BASE_URL`, and `MILVUS_URI` from `.env`. By default it rebuilds `dgx_docs`; pass `--append` to keep an existing collection or `--no-local-markdown` to exclude local UI guidance.
 
+Completed Ansible runs are indexed separately in the `fleet_job_logs` collection. Every terminal outcome (success, failure, or cancellation) adds redacted metadata, recap, error context, and bounded log chunks. Each ingestion also refreshes a latest-completed-job-per-host snapshot so DGX Help can answer questions such as “What’s the overall status of my fleet based on the most recent jobs?” The SQL job history and full on-disk log remain the source of truth; Milvus is a derived search index. Startup reconciliation backfills terminal jobs that were missed while Milvus or the embedding endpoint was unavailable.
+
 ## Project Structure
 
 ```
@@ -406,7 +412,7 @@ server-maintenance/
 │   ├── manage_groups.yml       # Create system groups
 │   ├── admin_setup.yml         # Single admin sudo setup
 │   ├── host_bootstrap.yml      # Groups, admin, Docker/toolkit, scan
-│   ├── system_maintenance.yml  # Rolling package updates and disk checks
+│   ├── system_maintenance.yml  # Advanced full-system maintenance workflow
 │   ├── docker_cleanup.yml      # Docker/containerd image and cache cleanup
 │   ├── preflight_check.yml     # Read-only maintenance readiness checks
 │   ├── health_diagnostics.yml  # Deep host health diagnostics
@@ -454,3 +460,21 @@ npm run dev
 ```
 
 The Vite dev server proxies `/api` requests to the backend at `localhost:8000`.
+
+
+## Embedding Test
+
+```bash
+export EMBED_API_KEY="not-used"
+export EMBED_MODEL="nvidia/llama-nemotron-embed-vl-1b-v2"
+export EMBED_BASE_URL="http://192.168.1.12:8000/v1"
+
+curl "${EMBED_BASE_URL}/embeddings" \
+  -H "Authorization: Bearer ${EMBED_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"model\": \"${EMBED_MODEL}\",
+    \"input\": [\"NVIDIA Dynamo optimizes distributed LLM inference.\"],
+    \"encoding_format\": \"float\"
+  }"
+```

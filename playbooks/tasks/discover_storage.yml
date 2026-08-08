@@ -1,0 +1,43 @@
+---
+- name: Discover unique mounted storage filesystems
+  ansible.builtin.script:
+    cmd: >-
+      files/storage_discovery.py
+      {{ '--scan-entries' if (storage_scan_entries | default(false) | bool) else '' }}
+    executable: "{{ ansible_python_interpreter | default('/usr/bin/python3') }}"
+  register: storage_discovery_raw
+  failed_when: false
+  changed_when: false
+
+- name: Report storage discovery failure
+  ansible.builtin.debug:
+    msg: >-
+      Storage discovery failed on {{ inventory_hostname }}:
+      {{ storage_discovery_raw.stderr | default('unknown error') | trim }}
+  when: storage_discovery_raw.rc | default(1) != 0
+
+- name: Parse mounted storage inventory
+  ansible.builtin.set_fact:
+    storage_mounts: >-
+      {{
+        (storage_discovery_raw.stdout_lines | default(['[]']) | last | from_json)
+        if (storage_discovery_raw.rc | default(1) == 0)
+        else []
+      }}
+
+- name: Separate root and non-root storage
+  ansible.builtin.set_fact:
+    root_storage_mount: >-
+      {{
+        storage_mounts
+        | selectattr('mountpoint', 'equalto', '/')
+        | list
+        | first
+        | default({})
+      }}
+    non_root_storage_mounts: >-
+      {{
+        storage_mounts
+        | rejectattr('mountpoint', 'equalto', '/')
+        | list
+      }}

@@ -15,3 +15,9 @@ https://docs.nvidia.com/dgx/dgx-station-a100-service-manual/index.html
 https://docs.nvidia.com/dgx/archives/dgx2-user-guide/index.html
 https://docs.nvidia.com/dgx/archives/dgx1-user-guide/index.html
 https://docs.nvidia.com/dgx/archives/dgx-station-user-guide/index.html
+https://download.asrock.com/Manual/ROMED6U-2L2T.pdf
+https://www.asrockrack.com/general/productdetail.asp?Model=ROMED6U-2L2T#Specifications
+https://www.asrockrack.com/general/productdetail.asp?Model=ROMED6U-2L2T#CPU
+https://www.asrockrack.com/general/productdetail.asp?Model=ROMED6U-2L2T#Memory
+https://www.asrockrack.com/general/productdetail.asp?Model=ROMED6U-2L2T#TPM
+https://www.asrockrack.com/general/news.asp?id=198

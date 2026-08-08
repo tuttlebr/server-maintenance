@@ -14,6 +14,7 @@ from backend.routers import chat, drivers, hosts, jobs, maintenance, networking,
 from backend.schemas import LoginRequest, TokenResponse
 from backend.services.ansible_runner import PlaybookRequestError
 from backend.services.inventory_writer import regenerate_inventory
+from backend.services.job_log_indexer import start_reconcile as start_job_log_reconcile
 from backend.services.login_throttle import (
     clear_account_failures,
     login_is_blocked,
@@ -57,6 +58,9 @@ async def lifespan(app: FastAPI):
         regenerate_inventory(db)
     finally:
         db.close()
+    # Reconcile in the background so startup stays available if Milvus or the
+    # embedding endpoint is temporarily unavailable.
+    start_job_log_reconcile()
     yield
 
 

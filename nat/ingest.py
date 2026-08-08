@@ -19,13 +19,20 @@ from pymilvus import (
     connections,
     utility,
 )
+from pymilvus.exceptions import MilvusException
 
 DOCS_DIR = "/app/docs"
 COLLECTION_NAME = "dgx_docs"
+JOB_LOG_COLLECTION_NAME = "fleet_job_logs"
 MILVUS_URI = os.environ.get("MILVUS_URI", "http://milvus:19530")
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/qwen/qwen3-embedding-0.6b")
-API_KEY = os.environ.get("EMBED_API_KEY", "")
-API_BASE_URL = os.environ.get("EMBED_BASE_URL", "https://inference-api.nvidia.com/v1")
+EMBED_DIM = int(os.environ["EMBED_DIM"]) if os.environ.get("EMBED_DIM") else None
+API_KEY = os.environ.get("EMBED_API_KEY") or os.environ.get("AI_HELPER_API_KEY", "")
+API_BASE_URL = (
+    os.environ.get("EMBED_BASE_URL")
+    or os.environ.get("AI_HELPER_BASE_URL")
+    or "https://inference-api.nvidia.com/v1"
+)
 
 
 def wait_for_milvus(uri, retries=30, delay=5):
@@ -37,8 +44,8 @@ def wait_for_milvus(uri, retries=30, delay=5):
             connections.connect("default", host=host, port=port)
             print(f"Connected to Milvus at {uri}")
             return True
-        except Exception as e:
-            print(f"Waiting for Milvus ({i+1}/{retries}): {e}")
+        except MilvusException as e:
+            print(f"Waiting for Milvus ({i + 1}/{retries}): {e}")
             time.sleep(delay)
     raise RuntimeError(f"Could not connect to Milvus at {uri}")
 
@@ -82,7 +89,9 @@ def load_and_split_docs(docs_dir):
 
         with open(filepath, "r", encoding="utf-8") as f:
             text = f.read()
-        source = _doc_title(text) or filename.replace("-", " ").replace(".md", "").title()
+        source = (
+            _doc_title(text) or filename.replace("-", " ").replace(".md", "").title()
+        )
         reference = f"docs/{filename}"
 
         parts = re.split(r"(?=^## )", text, flags=re.MULTILINE)
@@ -91,14 +100,20 @@ def load_and_split_docs(docs_dir):
             if not part or len(part) < 50:
                 continue
             lines = part.split("\n", 1)
-            heading = lines[0].lstrip("#").strip() if lines[0].startswith("#") else "Introduction"
+            heading = (
+                lines[0].lstrip("#").strip()
+                if lines[0].startswith("#")
+                else "Introduction"
+            )
 
             for chunk_heading, chunk_text in _split_large_text(part, heading):
-                sections.append({
-                    "source": source,
-                    "heading": chunk_heading,
-                    "text": f"Source: {source}\nLocal document: {reference}\n\n{chunk_text}",
-                })
+                sections.append(
+                    {
+                        "source": source,
+                        "heading": chunk_heading,
+                        "text": f"Source: {source}\nLocal document: {reference}\n\n{chunk_text}",
+                    }
+                )
 
     print(f"Loaded {len(sections)} chunks from {docs_dir}")
     return sections
@@ -154,7 +169,9 @@ def embed_texts(texts):
     total = len(texts)
     for i in range(0, total, EMBED_BATCH_SIZE):
         batch = texts[i : i + EMBED_BATCH_SIZE]
-        print(f"Embedding batch {i // EMBED_BATCH_SIZE + 1}/{(total + EMBED_BATCH_SIZE - 1) // EMBED_BATCH_SIZE}")
+        print(
+            f"Embedding batch {i // EMBED_BATCH_SIZE + 1}/{(total + EMBED_BATCH_SIZE - 1) // EMBED_BATCH_SIZE}"
+        )
         embeddings = _call_embeddings_api(batch)
         all_embeddings.extend(embeddings)
     return all_embeddings
@@ -173,22 +190,100 @@ def create_collection(embed_dim):
     collection = Collection(COLLECTION_NAME, schema)
     collection.create_index(
         field_name="vector",
-        index_params={"index_type": "IVF_FLAT", "metric_type": "L2", "params": {"nlist": 64}},
+        index_params={
+            "index_type": "IVF_FLAT",
+            "metric_type": "L2",
+            "params": {"nlist": 64},
+        },
     )
     print(f"Created collection '{COLLECTION_NAME}' (dim={embed_dim})")
     return collection
 
 
+def _collection_embed_dim(collection_name):
+    """Read the vector dimension from an existing collection, if available."""
+    if not utility.has_collection(collection_name):
+        return None
+    collection = Collection(collection_name)
+    vector_field = next(
+        (field for field in collection.schema.fields if field.name == "vector"), None
+    )
+    if not vector_field:
+        return None
+    return int(vector_field.params["dim"])
+
+
+def ensure_job_log_collection(embed_dim):
+    """Create the empty collection required by the NAT job-log retriever."""
+    if utility.has_collection(JOB_LOG_COLLECTION_NAME):
+        existing_dim = _collection_embed_dim(JOB_LOG_COLLECTION_NAME)
+        if existing_dim == embed_dim:
+            print(f"Collection '{JOB_LOG_COLLECTION_NAME}' is ready (dim={embed_dim})")
+            collection = Collection(JOB_LOG_COLLECTION_NAME)
+            collection.load()
+            return collection
+        print(
+            f"Recreating '{JOB_LOG_COLLECTION_NAME}' because embedding dimension "
+            f"changed from {existing_dim} to {embed_dim}"
+        )
+        utility.drop_collection(JOB_LOG_COLLECTION_NAME)
+
+    fields = [
+        FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=128, is_primary=True),
+        FieldSchema(name="source", dtype=DataType.VARCHAR, max_length=256),
+        FieldSchema(name="heading", dtype=DataType.VARCHAR, max_length=512),
+        FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=16384),
+        FieldSchema(name="job_id", dtype=DataType.VARCHAR, max_length=64),
+        FieldSchema(name="status", dtype=DataType.VARCHAR, max_length=32),
+        FieldSchema(name="finished_at", dtype=DataType.VARCHAR, max_length=64),
+        FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=embed_dim),
+    ]
+    schema = CollectionSchema(
+        fields, description="Redacted DGX Fleet Manager completed job logs"
+    )
+    collection = Collection(JOB_LOG_COLLECTION_NAME, schema)
+    collection.create_index(
+        field_name="vector",
+        index_params={
+            "index_type": "IVF_FLAT",
+            "metric_type": "L2",
+            "params": {"nlist": 64},
+        },
+    )
+    collection.load()
+    print(f"Created collection '{JOB_LOG_COLLECTION_NAME}' (dim={embed_dim})")
+    return collection
+
+
 def main():
+    wait_for_milvus(MILVUS_URI)
+
+    embed_dim = (
+        EMBED_DIM
+        or _collection_embed_dim(COLLECTION_NAME)
+        or _collection_embed_dim(JOB_LOG_COLLECTION_NAME)
+    )
+    if not embed_dim:
+        if not API_KEY:
+            print("WARNING: embedding API is not configured, skipping ingestion")
+            return
+        embed_dim = detect_embed_dim()
+
+    # The retriever validates its collection when NAT starts, even before the
+    # first fleet job has completed.
+    ensure_job_log_collection(embed_dim)
+
     if not os.path.exists(DOCS_DIR):
-        print(f"WARNING: Docs directory {DOCS_DIR} not found, skipping ingestion")
+        print(
+            f"WARNING: Docs directory {DOCS_DIR} not found, skipping documentation ingestion"
+        )
         return
 
     if not API_KEY:
-        print("WARNING: EMBED_API_KEY not set, skipping ingestion")
+        print(
+            "WARNING: embedding API is not configured, skipping documentation ingestion"
+        )
         return
-
-    wait_for_milvus(MILVUS_URI)
 
     # Check if collection already has data
     if utility.has_collection(COLLECTION_NAME):
@@ -196,7 +291,9 @@ def main():
         collection.load()
         count = collection.num_entities
         if count > 0:
-            print(f"Collection '{COLLECTION_NAME}' already has {count} entities, skipping ingestion")
+            print(
+                f"Collection '{COLLECTION_NAME}' already has {count} entities, skipping ingestion"
+            )
             return
         else:
             utility.drop_collection(COLLECTION_NAME)
@@ -205,9 +302,6 @@ def main():
     if not sections:
         print("No sections found, nothing to ingest")
         return
-
-    # Auto-detect embedding dimension from the model
-    embed_dim = detect_embed_dim()
 
     print("Embedding sections...")
     texts = [s["text"] for s in sections]
@@ -226,7 +320,9 @@ def main():
     collection.flush()
     collection.load()
 
-    print(f"Ingested {len(sections)} sections into Milvus collection '{COLLECTION_NAME}'")
+    print(
+        f"Ingested {len(sections)} sections into Milvus collection '{COLLECTION_NAME}'"
+    )
 
 
 if __name__ == "__main__":

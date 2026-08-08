@@ -16,7 +16,7 @@ Drivers opens Driver Management. Use it to review driver versions and start driv
 
 Networking opens Fabric Manager controls and networking status. Fabric Manager actions only apply to DGX Workstation hosts with NVSwitch support. DGX Spark does not support Fabric Manager.
 
-Maintenance opens System Maintenance. Use it for disk usage, reboot required, storage analysis, GPU usage, package updates, Docker cleanup, preflight checks, diagnostics, host bootstrap, firmware actions, drain/resume, MIG controls, and the DGX Help Documentation Index.
+Maintenance opens System Maintenance. Use it for disk usage, reboot required, storage analysis, GPU usage, Docker cleanup, preflight checks, diagnostics, advanced full-system maintenance, host bootstrap, firmware actions, drain/resume, MIG controls, and the DGX Help Documentation Index.
 
 Maintenance Targets sets the host scope for host-scoped maintenance actions. All Hosts uses each playbook's supported host group. Selected Hosts can target one machine or any subset. Firmware support is detected by the playbook at runtime, GPU usage is limited to known NVIDIA GPU nodes, and MIG actions are limited to DGX Workstation hosts.
 
@@ -74,9 +74,9 @@ After starting a Fabric Manager action, check the active job and Job History for
 
 ## Maintenance Workflows
 
-The Maintenance page contains sections for Targets, Disk, Reboot, Storage, GPU, Actions, and Docs.
+The Maintenance page contains sections for Targets, Disk, Reboot, Storage, GPU, Quick Maintenance, Advanced Maintenance, and Docs.
 
-Disk shows current root and RAID usage by host. Use it for quick capacity checks.
+Disk shows current root usage and the busiest non-root mounted filesystem by host. Use it for quick capacity checks.
 
 Reboot Required lists hosts that report a pending reboot. Reboot All is a high-blast-radius action and reboots one host at a time. Targeted Reboot follows the maintenance target selection and can force-reboot one host, all hosts, or a subset. The reboot playbook verifies fstab syntax and confirms that automatically mounted fstab targets return after reboot. Users should confirm hostnames and expect temporary loss of access.
 
@@ -84,11 +84,11 @@ Storage Analysis runs a deeper storage report for the selected maintenance targe
 
 GPU Usage runs GPU utilization collection for the selected maintenance targets. Start Analyze GPU Usage, then review the resulting per-host report or Job History.
 
-Package Update starts rolling package updates on the selected maintenance targets. Package updates can change system state and may require a reboot afterward. Docker cleanup is separate and also follows the maintenance target selection.
+Full System Maintenance is an advanced operation that runs the broader `system_maintenance.yml` workflow on the selected targets. It can update packages and firmware, configure or remediate mounts, clean kernels and container artifacts, perform system checks, and remediate zombie processes. It automatically reboots a host after firmware changes or when zombie processes are detected. Docker cleanup remains available separately as a narrower action.
 
 Docker Cleanup prunes unused Docker images, build cache, networks, and containerd images across hosts. It does not remove running containers or volumes according to the UI confirmation text, but users should still review the confirmation before starting.
 
-Preflight runs read-only maintenance readiness checks. Use it before package updates, driver upgrades, firmware updates, reboots, or MIG changes. It reports apt or dpkg activity, disk pressure, reboot-required state, active GPU processes, GPU containers, Kubernetes schedulability when available, and DGX Workstation service health.
+Preflight runs read-only maintenance readiness checks. Use it before full system maintenance, driver upgrades, firmware updates, reboots, or MIG changes. It reports apt or dpkg activity, disk pressure, reboot-required state, active GPU processes, GPU containers, Kubernetes schedulability when available, and DGX Workstation service health.
 
 Health Diagnostics collects deeper host output for troubleshooting, including nvidia-smi, GPU ECC and thermal data, Fabric Manager, DCGM, NVSM, IB status, failed systemd units, critical journal entries, and storage summaries. It is diagnostic and should be reviewed in Job History.
 
@@ -104,7 +104,9 @@ The Docs section contains DGX Help Documentation Index. Click Reindex Documentat
 
 ## Job History And Troubleshooting
 
-Use Jobs to see every background job, including scans, user management, driver upgrades, reboots, storage analysis, GPU usage, Docker cleanup, package updates, preflight checks, diagnostics, bootstrap, firmware actions, drain/resume, MIG actions, and documentation reindexing.
+Use Jobs to see every background job, including scans, user management, driver upgrades, reboots, storage analysis, GPU usage, Docker cleanup, full system maintenance, preflight checks, diagnostics, bootstrap, firmware actions, drain/resume, MIG actions, and documentation reindexing.
+
+DGX Help can also search completed job output. After any job succeeds, fails, or is cancelled, Fleet Manager indexes its redacted log, recap, target hosts, status, and timestamps in a separate Milvus collection. Ask questions such as “What failed in the last driver upgrade?”, “Which hosts had cancelled jobs?”, or “What’s the overall status of my fleet based on the most recent jobs?” Overall fleet answers use the newest completed job that targeted each registered host and distinguish job results from live host health.
 
 Open a job to view status and output. For failed jobs, use AI analysis when available to summarize likely causes from the job output. If a user asks why an operation failed, ask for the job ID or direct them to the failed job in Job History.
 

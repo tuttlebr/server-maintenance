@@ -44,7 +44,7 @@
 
         <template v-for="(msg, i) in messages" :key="i">
           <div :class="['chat-msg', `chat-msg-${msg.role}`]">
-            <div class="chat-msg-content">{{ msg.content }}</div>
+            <div class="chat-msg-content chat-msg-markdown" v-html="renderMarkdown(msg.content)"></div>
             <button
               v-if="msg.steps && msg.steps.length"
               type="button"
@@ -83,7 +83,11 @@
             <span class="chat-streaming-dots"><span></span><span></span><span></span></span>
           </div>
 
-          <div v-if="streamingContent.trim()" class="chat-msg-content">{{ cleanedStreamingContent }}<span class="chat-cursor" aria-hidden="true">|</span></div>
+          <div
+            v-if="streamingContent.trim()"
+            class="chat-msg-content chat-msg-markdown"
+            v-html="renderMarkdown(cleanedStreamingContent, true)"
+          ></div>
         </div>
       </div>
 
@@ -112,8 +116,25 @@
 </template>
 
 <script setup>
+import DOMPurify from "dompurify";
+import { marked } from "marked";
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { getChatStatus, streamChat } from "../api";
+
+const MARKDOWN_TAGS = [
+  "a", "blockquote", "br", "code", "del", "em", "h1", "h2", "h3",
+  "h4", "h5", "h6", "hr", "input", "li", "ol", "p", "pre", "strong",
+  "table", "tbody", "td", "th", "thead", "tr", "ul",
+];
+const MARKDOWN_ATTRIBUTES = [
+  "align", "checked", "class", "disabled", "href", "rel", "start", "target",
+  "title", "type",
+];
+const MARKDOWN_OPTIONS = {
+  async: false,
+  breaks: true,
+  gfm: true,
+};
 
 const chatAvailable = ref(false);
 const isOpen = ref(false);
@@ -141,6 +162,46 @@ const cleanedStreamingContent = computed(() => {
   const cleaned = raw.replace(/^\s+/, "").replace(/\n{3,}/g, "\n\n");
   return stripLeadingRepeatedAnswers(cleaned, currentTurnPriorAssistantAnswers.value);
 });
+
+function renderMarkdown(content, includeCursor = false) {
+  const source = String(content || "");
+  let parsed;
+  try {
+    parsed = marked.parse(source, MARKDOWN_OPTIONS);
+  } catch {
+    parsed = source;
+  }
+
+  const sanitized = DOMPurify.sanitize(parsed, {
+    ALLOWED_ATTR: MARKDOWN_ATTRIBUTES,
+    ALLOWED_TAGS: MARKDOWN_TAGS,
+    ALLOW_DATA_ATTR: false,
+  });
+  const template = document.createElement("template");
+  template.innerHTML = sanitized;
+
+  template.content.querySelectorAll("a[href]").forEach((link) => {
+    if (!link.getAttribute("href")?.startsWith("#")) {
+      link.setAttribute("target", "_blank");
+      link.setAttribute("rel", "noopener noreferrer");
+    }
+  });
+
+  if (includeCursor) {
+    const cursor = document.createElement("span");
+    cursor.className = "chat-cursor";
+    cursor.setAttribute("aria-hidden", "true");
+    cursor.textContent = "|";
+    const lastBlock = template.content.lastElementChild;
+    if (lastBlock?.tagName === "P") {
+      lastBlock.append(cursor);
+    } else {
+      template.content.append(cursor);
+    }
+  }
+
+  return template.innerHTML;
+}
 
 onMounted(async () => {
   try {
@@ -531,12 +592,111 @@ function leadingWhitespaceInsensitiveMatchEnd(text, prefix) {
   border-radius: var(--radius-md);
   font-size: 13px;
   line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
   /* Prevent ballooning if upstream tokens are pathological. */
   min-height: 28px;
   max-height: 460px;
   overflow-y: auto;
+}
+
+.chat-msg-markdown :deep(> :first-child) { margin-top: 0; }
+.chat-msg-markdown :deep(> :last-child) { margin-bottom: 0; }
+
+.chat-msg-markdown :deep(p) {
+  margin: 0 0 0.65em;
+}
+
+.chat-msg-markdown :deep(h1),
+.chat-msg-markdown :deep(h2),
+.chat-msg-markdown :deep(h3),
+.chat-msg-markdown :deep(h4),
+.chat-msg-markdown :deep(h5),
+.chat-msg-markdown :deep(h6) {
+  line-height: 1.25;
+  margin: 0.8em 0 0.35em;
+}
+
+.chat-msg-markdown :deep(h1) { font-size: 1.3em; }
+.chat-msg-markdown :deep(h2) { font-size: 1.2em; }
+.chat-msg-markdown :deep(h3) { font-size: 1.1em; }
+.chat-msg-markdown :deep(h4),
+.chat-msg-markdown :deep(h5),
+.chat-msg-markdown :deep(h6) { font-size: 1em; }
+
+.chat-msg-markdown :deep(ul),
+.chat-msg-markdown :deep(ol) {
+  margin: 0.35em 0 0.7em;
+  padding-left: 1.5em;
+}
+
+.chat-msg-markdown :deep(li + li) { margin-top: 0.2em; }
+.chat-msg-markdown :deep(li > p) { margin: 0; }
+
+.chat-msg-markdown :deep(blockquote) {
+  border-left: 3px solid var(--color-accent);
+  color: var(--text-secondary);
+  margin: 0.6em 0;
+  padding-left: 0.75em;
+}
+
+.chat-msg-markdown :deep(code) {
+  background: var(--surface-light);
+  border-radius: 3px;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.92em;
+  padding: 0.1em 0.3em;
+}
+
+.chat-msg-markdown :deep(pre) {
+  background: var(--surface-dark);
+  border-radius: var(--radius-sm);
+  color: var(--text-on-dark);
+  margin: 0.6em 0;
+  overflow-x: auto;
+  padding: 9px 10px;
+  white-space: pre;
+}
+
+.chat-msg-markdown :deep(pre code) {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  white-space: inherit;
+}
+
+.chat-msg-markdown :deep(a) {
+  color: var(--color-info);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.chat-msg-markdown :deep(table) {
+  border-collapse: collapse;
+  font-size: 0.92em;
+  margin: 0.6em 0;
+  min-width: 100%;
+}
+
+.chat-msg-markdown :deep(th),
+.chat-msg-markdown :deep(td) {
+  border: 1px solid var(--border-subtle);
+  padding: 4px 6px;
+  text-align: left;
+}
+
+.chat-msg-markdown :deep(th) {
+  background: var(--surface-light);
+  font-weight: 600;
+}
+
+.chat-msg-markdown :deep(hr) {
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  margin: 0.75em 0;
+}
+
+.chat-msg-markdown :deep(input[type="checkbox"]) {
+  margin: 0 0.35em 0 0;
 }
 
 .chat-msg-user .chat-msg-content {
@@ -551,7 +711,7 @@ function leadingWhitespaceInsensitiveMatchEnd(text, prefix) {
   color: var(--text-on-light);
 }
 
-.chat-cursor {
+.chat-msg-markdown :deep(.chat-cursor) {
   animation: blink 0.85s step-end infinite;
   color: var(--color-accent);
   font-weight: 700;

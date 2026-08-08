@@ -22,6 +22,15 @@ GPU_REPORT_STALE_SECONDS = 30 * 60
 STORAGE_REPORT_STALE_SECONDS = 24 * 60 * 60
 HOST_SCAN_STALE_SECONDS = 24 * 60 * 60
 DISK_WARN_PCT = 85
+_MOUNT_SKIP_TREES = (
+    "/var/lib/kubelet",
+    "/var/lib/docker",
+    "/var/lib/containerd",
+    "/snap",
+    "/sys",
+    "/proc",
+    "/run",
+)
 
 
 def _utc_now() -> datetime:
@@ -70,17 +79,87 @@ def _freshness(timestamps: list[datetime], stale_after_seconds: int, now: dateti
 
 def _read_cached_reports(prefix: str) -> list[tuple[Path, dict, datetime]]:
     scan_dir = settings.data_dir / "scans"
-    reports = []
+    reports_by_host: dict[str, tuple[Path, dict, datetime]] = {}
     if not scan_dir.exists():
-        return reports
+        return []
     for scan_file in sorted(scan_dir.glob(f"{prefix}_*.json")):
         try:
             report = json.loads(scan_file.read_text())
-            reports.append((scan_file, report, _report_timestamp(scan_file, report)))
+            timestamp = _report_timestamp(scan_file, report)
+            report_key = str(report.get("hostname") or scan_file.stem)
+            previous = reports_by_host.get(report_key)
+            if previous is None or timestamp >= previous[2]:
+                reports_by_host[report_key] = (scan_file, report, timestamp)
         except Exception:
             logger.warning("Could not read cached %s report %s", prefix, scan_file, exc_info=True)
             continue
-    return reports
+    return [reports_by_host[key] for key in sorted(reports_by_host)]
+
+
+def _mount_is_skipped(mountpoint: str) -> bool:
+    return any(
+        mountpoint == tree or mountpoint.startswith(tree + "/")
+        for tree in _MOUNT_SKIP_TREES
+    )
+
+
+def _storage_mount_key(mount: dict) -> str:
+    filesystem_id = mount.get("filesystem_id")
+    if filesystem_id:
+        return str(filesystem_id)
+
+    source = str(mount.get("source") or "")
+    fstype = str(mount.get("fstype") or "")
+    mount_type = str(mount.get("type") or "")
+    if source:
+        if mount_type in {"nfs", "smb", "network"}:
+            source = source.rstrip("/")
+        elif source.startswith("/dev/"):
+            source = source.split("[", 1)[0]
+        return f"source:{fstype}:{source}"
+    return f"mountpoint:{mount.get('mountpoint') or '/'}"
+
+
+def _dedupe_storage_mounts(mounts: list[dict]) -> list[dict]:
+    unique: dict[str, dict] = {}
+    for raw_mount in mounts:
+        if not isinstance(raw_mount, dict):
+            continue
+        mountpoint = str(raw_mount.get("mountpoint") or "/")
+        if _mount_is_skipped(mountpoint):
+            continue
+
+        key = _storage_mount_key(raw_mount)
+        aliases = {
+            str(path)
+            for path in (raw_mount.get("mountpoints") or [])
+            if path
+        }
+        aliases.add(mountpoint)
+        if key not in unique:
+            mount = dict(raw_mount)
+            mount["mountpoints"] = sorted(
+                aliases,
+                key=lambda path: (path.count("/"), len(path), path),
+            )
+            unique[key] = mount
+            continue
+
+        existing = unique[key]
+        aliases.update(existing.get("mountpoints") or [])
+        existing["mountpoints"] = sorted(
+            aliases,
+            key=lambda path: (path.count("/"), len(path), path),
+        )
+
+    return sorted(
+        unique.values(),
+        key=lambda mount: (
+            0 if mount.get("mountpoint") == "/" else 1,
+            str(mount.get("mountpoint") or "").count("/"),
+            str(mount.get("mountpoint") or ""),
+        ),
+    )
 
 
 def _safe_int(value, default: int = 0) -> int:
@@ -111,8 +190,8 @@ async def _run_maintenance_job(
     return {"job_id": job_id, "detail": detail}
 
 
-@router.post("/package-update")
-async def run_package_update(
+@router.post("/system-maintenance")
+async def run_system_maintenance(
     payload: MaintenanceRequest | None = None,
     db: Session = Depends(get_db),
     user: str = Depends(get_current_user),
@@ -125,7 +204,7 @@ async def run_package_update(
         user=user,
         hosts=hosts,
         all_hosts=all_hosts,
-        detail="Package update started",
+        detail="Full system maintenance started",
     )
 
 
@@ -400,7 +479,8 @@ def get_maintenance_overview(
     storage_reports = _read_cached_reports("storage")
     storage_timestamps = [ts for _, _, ts in storage_reports]
     pressure_by_key: dict[tuple[str, str], dict] = {}
-    owner_entries = []
+    owner_entries_by_key: dict[tuple[str, str], dict] = {}
+    hosts_with_mount_reports: set[str] = set()
 
     def add_pressure(hostname: str, mountpoint: str, mount_type: str | None, use_pct: int, used_mb=None, total_mb=None):
         if use_pct < DISK_WARN_PCT:
@@ -423,7 +503,7 @@ def get_maintenance_overview(
         if not path:
             base = mountpoint.rstrip("/") or "/"
             path = f"{base}/{name}" if name else base
-        owner_entries.append({
+        owner_entry = {
             "hostname": hostname,
             "owner_user": entry.get("owner_user"),
             "owner_uid": entry.get("owner_uid"),
@@ -434,32 +514,30 @@ def get_maintenance_overview(
             "mount_type": mount_type,
             "use_pct": use_pct,
             "kind": entry.get("kind") or "directory",
-        })
+        }
+        key = (hostname, str(path))
+        previous = owner_entries_by_key.get(key)
+        if previous is None or size_mb > previous["size_mb"]:
+            owner_entries_by_key[key] = owner_entry
 
     for _, report, _ in storage_reports:
         hostname = report.get("hostname") or "unknown"
-        mounts = report.get("mounts") or []
+        mounts = _dedupe_storage_mounts(report.get("mounts") or [])
+        if mounts:
+            hosts_with_mount_reports.add(hostname)
         for mount in mounts:
             mountpoint = mount.get("mountpoint") or "/"
-            if any(mountpoint.startswith(p) for p in _MOUNT_SKIP_PREFIXES):
-                continue
             mount_type = mount.get("type")
             use_pct = _safe_int(mount.get("use_pct"))
             add_pressure(hostname, mountpoint, mount_type, use_pct, mount.get("used_mb"), mount.get("total_mb"))
             for entry in mount.get("entries", []) or []:
                 add_owner_entry(hostname, mountpoint, mount_type, use_pct, entry)
 
-        for entry in report.get("home_entries", []) or []:
-            add_owner_entry(hostname, "/home", "home", None, entry)
-        if not mounts:
-            for entry in report.get("raid_entries", []) or []:
-                add_owner_entry(hostname, "/raid", "raid", None, entry)
-
     for host in hosts:
-        add_pressure(host.hostname, "/", "root", host.disk_root_percent or 0)
-        if host.disk_raid_percent:
-            add_pressure(host.hostname, "/raid", "raid", host.disk_raid_percent)
+        if host.hostname not in hosts_with_mount_reports:
+            add_pressure(host.hostname, "/", "local", host.disk_root_percent or 0)
 
+    owner_entries = list(owner_entries_by_key.values())
     owner_entries.sort(key=lambda item: item["size_mb"], reverse=True)
     pressure_hosts = sorted(
         pressure_by_key.values(),
@@ -555,32 +633,17 @@ async def run_storage_analysis(
     return {"job_id": job_id, "detail": "Storage analysis started"}
 
 
-_MOUNT_SKIP_PREFIXES = ("/var/lib/kubelet/", "/var/lib/docker/", "/var/lib/containerd/",
-                        "/snap/", "/sys/", "/proc/", "/run/")
-
-
 @router.get("/storage-analysis")
 def get_storage_analysis(
     db: Session = Depends(get_db),
     user: str = Depends(get_current_user),
 ):
     """Return cached storage analysis results from the most recent scan."""
-    scan_dir = settings.data_dir / "scans"
     results = []
-    if scan_dir.exists():
-        for scan_file in scan_dir.glob("storage_*.json"):
-            try:
-                report = json.loads(scan_file.read_text())
-                # Filter out kubelet/container volume mounts from cached data
-                if "mounts" in report:
-                    report["mounts"] = [
-                        m for m in report["mounts"]
-                        if not any(m.get("mountpoint", "").startswith(p) for p in _MOUNT_SKIP_PREFIXES)
-                    ]
-                results.append(report)
-            except Exception:
-                logger.warning("Could not read storage analysis report %s", scan_file, exc_info=True)
-                continue
+    for _, cached_report, _ in _read_cached_reports("storage"):
+        report = dict(cached_report)
+        report["mounts"] = _dedupe_storage_mounts(report.get("mounts") or [])
+        results.append(report)
     return results
 
 

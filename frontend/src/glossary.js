@@ -20,8 +20,8 @@ export const GLOSSARY = {
   rebootRequired:
     "A package update or driver install asked Linux to reboot before the change takes effect. Typically triggered by a kernel update from apt, or a major driver upgrade.",
 
-  raid:
-    "RAID combines several physical disks into one logical volume — on DGX systems this is the /raid mount used for datasets and scratch space.",
+  storage:
+    "The highest usage among non-root mounted filesystems discovered on the host, including local disks, RAID, NFS, SMB, and other network storage.",
 
   nicSpeed:
     "Negotiated link speed of the host's primary network card. ConnectX-7 NICs run at 400Gb; ConnectX-8 NICs at 800Gb. Lower speeds may indicate a cable or switch issue.",

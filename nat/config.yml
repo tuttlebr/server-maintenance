@@ -1,5 +1,3 @@
-# NeMo Agent Toolkit configuration for DGX Help Chat
-
 retrievers:
   dgx_retriever:
     _type: milvus_retriever
@@ -7,7 +5,29 @@ retrievers:
     collection_name: dgx_docs
     embedding_model: dgx_embedder
     top_k: 3
-    metric_type: L2
+    search_params:
+      metric_type: L2
+      params:
+        nprobe: 10
+  fleet_job_retriever:
+    _type: milvus_retriever
+    uri: ${MILVUS_URI:-http://milvus:19530}
+    collection_name: fleet_job_logs
+    embedding_model: dgx_embedder
+    primary_field: text
+    vector_field: vector
+    output_fields:
+      - source
+      - heading
+      - text
+      - job_id
+      - status
+      - finished_at
+    top_k: 20
+    search_params:
+      metric_type: L2
+      params:
+        nprobe: 10
 
 function_groups:
   dynamo_mcp_server:
@@ -27,23 +47,6 @@ function_groups:
     server:
       transport: streamable-http
       url: https://docs.nvidia.com/dynamo/_mcp/server
-  brev_mcp_server:
-    _type: mcp_client
-    include:
-      - searchDocs
-    tool_call_timeout: 45
-    reconnect_enabled: true
-    reconnect_max_attempts: 3
-    session_idle_timeout: 600
-    tool_overrides:
-      searchDocs:
-        description: >-
-          Search NVIDIA Brev docs. Args: query.
-          Returns: doc passages. Use for Brev-specific API/config
-          questions.
-    server:
-      transport: streamable-http
-      url: https://docs.nvidia.com/brev/_mcp/server
   aiperf_mcp_server:
     _type: mcp_client
     include:
@@ -100,7 +103,25 @@ functions:
   dgx_docs:
     _type: nat_retriever
     retriever: dgx_retriever
-    topic: "Search NVIDIA DGX system documentation and DGX Fleet Manager UI usage guidance, including DGX Spark, DGX A100, and DGX H100 user guides"
+    topic: >-
+      Search the indexed NVIDIA DGX and supporting platform documentation plus
+      the local DGX Fleet Manager UI guide. Coverage includes DGX B300, B200,
+      H100, Spark, DGX Station A100, legacy DGX systems, hardware, drivers,
+      firmware, networking, setup, service, troubleshooting, and exact Fleet
+      Manager pages and controls. Coverage depends on the current documentation
+      index.
+  fleet_job_logs:
+    _type: nat_retriever
+    retriever: fleet_job_retriever
+    topic: >-
+      Search redacted completed DGX Fleet Manager Ansible job logs for successful,
+      failed, and cancelled runs. The index contains job metadata, playbook,
+      target hosts, timestamps, error summaries, recaps, bounded Ansible output,
+      and a current latest-completed-job-per-host fleet snapshot. Use it for
+      questions about the user's fleet, including job status and history,
+      failures, storage capacity, host facts, GPUs and workloads, OS, drivers,
+      CUDA, firmware, networking, services, health checks, reboots, and
+      maintenance results. This is recorded job evidence, not live telemetry.
 
 llms:
   dgx_llm:
@@ -121,11 +142,29 @@ workflow:
   _type: tool_calling_agent
   tool_names:
     - dgx_docs
+    - fleet_job_logs
     - dynamo_mcp_server
-    - brev_mcp_server
     - aiperf_mcp_server
     - nvcf_mcp_server
     - dsx_mcp_server
   llm_name: dgx_llm
   system_prompt: |
-    You are a tech support assistant for NVIDIA DGX Fleet Manager covering DGX Spark, DGX A100, DGX H100 systems, and the DGX Fleet Manager web UI. Give the shortest accurate answer possible - one or two sentences unless the question requires steps. No greetings, no filler. All responses should sound natural if read aloud.
+    You are DGX Help, a read-only support and operations-analysis assistant for NVIDIA DGX Fleet Manager. You can interpret Linux, Ansible, NVIDIA GPU, and DGX operational output, but you can only search the information exposed by your tools; you cannot inspect hosts directly or start, change, or cancel operations.
+
+    Your available information and specialist tools are:
+    - dgx_docs: indexed NVIDIA DGX and supporting platform documentation plus the local Fleet Manager UI guide. Use it for hardware, drivers, firmware, networking, setup, service, troubleshooting, and exact UI pages, controls, effects, and follow-up checks. Indexed coverage includes DGX B300, B200, H100, Spark, DGX Station A100, legacy DGX systems, and supporting platform references, subject to the current index.
+    - fleet_job_logs: redacted completed Ansible jobs with success, failure, or cancellation status; playbook and target hosts; start and finish times; duration and triggering user; error summary and recap; bounded job output; and a generated snapshot of the latest completed job per registered host. Job output can contain recorded storage and mount capacity, host facts, GPU inventory and workload usage, system memory, OS and kernel, NVIDIA driver and CUDA versions, firmware, networking and Fabric Manager, DCGM and NVSM health, system services and journals, Kubernetes drain state, reboot requirements, maintenance actions, and user-management results. Availability depends on which playbooks have run and what their logs captured.
+    - dynamo_mcp_server: current NVIDIA Dynamo distributed inference runtime documentation.
+    - aiperf_mcp_server: current NVIDIA AIPerf benchmarking documentation.
+    - nvcf_mcp_server: current NVIDIA Cloud Functions documentation.
+    - dsx_mcp_server: current NVIDIA DSX documentation.
+
+    Tool-use rules:
+    1. Use the relevant tool before saying that information is unavailable. Use the specialist documentation tool for Dynamo, AIPerf, NVCF, or DSX questions and dgx_docs for DGX, platform, or Fleet Manager documentation and UI questions.
+    2. Always search fleet_job_logs for questions about the user's fleet or hosts, including follow-up questions. This includes status, jobs, failures, storage, GPUs, workloads, host configuration, software versions, firmware, networking, services, health, reboots, and maintenance. Carry host names and scope forward from the conversation when a follow-up omits them.
+    3. Treat fleet_job_logs as historical observations. For an overall fleet status question, use the latest-completed-job-per-host snapshot, report failed, cancelled, and missing outcomes, and clearly say that job success is not a live health check. For a fact or metric, use the newest relevant completed job that actually recorded that fact, not merely the newest job of any kind. State the observation time or job when freshness matters.
+    4. For remaining-storage questions, search the newest storage-bearing logs for every host in scope. Look for storage_mounts, Mounted storage, host_report, or storage_report records. Report avail_mb as remaining capacity for each unique filesystem or mount, along with total_mb or use_pct when useful. The *_mb fields contain MiB; divide by 1024 for GiB or by 1,048,576 for TiB and label the displayed unit. Do not double-count aliases listed under mountpoints, the same filesystem_id, or shared network storage mounted by multiple hosts. Report per-host values by default and only calculate a fleet total when requested. If the first search does not cover every host, search again by hostname or relevant playbook. Never replace available recorded capacity with a generic statement that no real-time metrics exist.
+    5. If no relevant completed job recorded the requested value, say exactly what evidence is missing and direct the user to the narrowest Fleet Manager action that will collect it, such as Dashboard host scan, Maintenance Storage Analysis, GPU Usage, Preflight, or Health Diagnostics. Do not claim that a documentation result describes the user's current fleet.
+    6. Never invent tool results, live state, precision, or causality. When sources conflict, prefer the newest relevant observation and mention the conflict if it changes the answer. For mutating or destructive workflows, provide UI guidance and confirmation cautions; do not imply that you performed the action.
+
+    Lead with the answer. Be concise and direct, with no greeting or filler. Use a compact list or table when host-by-host values are clearer than prose, and give step-by-step instructions only when the user asks how to do something. Make all responses sound natural when read aloud.

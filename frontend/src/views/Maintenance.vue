@@ -7,7 +7,7 @@
       </button>
     </div>
     <PageIntro>
-      Routine fleet upkeep for the common cases first: GPU usage, disk cleanup owners, reboots, package updates, Docker cleanup, and health checks. Advanced provisioning, firmware, drain/resume, MIG, and docs indexing stay lower on the page.
+      Routine fleet upkeep for the common cases first: GPU usage, disk cleanup owners, reboots, Docker cleanup, and health checks. Full system maintenance, provisioning, firmware, drain/resume, MIG, and docs indexing stay in the advanced section.
     </PageIntro>
 
     <nav class="section-nav" aria-label="Maintenance sections">
@@ -93,7 +93,7 @@
     <section id="disk" ref="diskRef" class="card section-card">
       <div class="card-body">
         <h4 style="margin-bottom: var(--space-xs)"><i class="fas fa-hdd section-icon" aria-hidden="true"></i> Disk Usage</h4>
-        <p class="section-intro">Root and RAID volume usage per host. Bars turn orange at 75% and red at 90%.</p>
+        <p class="section-intro">Root and the busiest non-root mounted filesystem per host. Bars turn orange at 75% and red at 90%.</p>
         <div v-if="diskUsage.length">
           <div v-for="d in diskUsage" :key="d.hostname" class="disk-host-row">
             <div class="disk-host-name">
@@ -108,7 +108,7 @@
                 <span class="disk-bar-pct">{{ d.disk_root_percent || 0 }}%</span>
               </div>
               <div class="disk-bar-group">
-                <span class="disk-bar-label">RAID <InfoTooltip :text="GLOSSARY.raid" /></span>
+                <span class="disk-bar-label">Other max <InfoTooltip :text="GLOSSARY.storage" /></span>
                 <div class="progress-bar" style="flex: 1">
                   <div class="progress-fill" :class="diskClass(d.disk_raid_percent)" :style="{ width: (d.disk_raid_percent || 0) + '%' }"></div>
                 </div>
@@ -272,7 +272,7 @@
           </button>
         </div>
         <p class="target-line">Target: {{ actionTargetLabel('storage') }}</p>
-        <p class="section-intro">Deep scan of /, /raid, /home, and NFS mounts. Click a row to see the largest folders. Runs on demand — takes ~2 minutes per host.</p>
+        <p class="section-intro">Deep scan of mounted local, RAID, NFS, SMB, and other capacity-backed filesystems. Each filesystem appears once, even when it has multiple mount paths. Click a row to see the largest entries.</p>
 
         <JobInlineStatus
           v-if="storageJobId"
@@ -322,50 +322,11 @@
                 </div>
               </div>
 
-              <div v-if="!(report.mounts || []).length && (report.raid_entries || []).length" class="sa-row-wrap">
-                <div class="sa-row" role="button" tabindex="0" @click="toggleMount(report.hostname, '/raid')" @keydown.enter.prevent="toggleMount(report.hostname, '/raid')">
-                  <span class="sa-label">/raid <span class="badge badge-orange" style="font-size: 10px; margin-left: 4px">raid</span></span>
-                  <div class="progress-bar sa-bar">
-                    <div class="progress-fill" :class="diskClass(pct(report.raid_entries.reduce((a,e) => a+e.size_mb, 0), report.raid_total_mb))" :style="{ width: pct(report.raid_entries.reduce((a,e) => a+e.size_mb, 0), report.raid_total_mb) + '%' }"></div>
-                  </div>
-                  <span class="sa-pct">{{ pct(report.raid_entries.reduce((a,e) => a+e.size_mb, 0), report.raid_total_mb) }}%</span>
-                  <span class="sa-sizes">{{ formatSize(report.raid_entries.reduce((a,e) => a+e.size_mb, 0)) }} / {{ formatSize(report.raid_total_mb) }}</span>
-                  <i class="fas fa-chevron-down sa-expand-icon" :class="{ rotated: isMountExpanded(report.hostname, '/raid') }" aria-hidden="true"></i>
-                </div>
-                <div v-if="isMountExpanded(report.hostname, '/raid')" class="sa-details">
-                  <div v-for="entry in report.raid_entries.slice(0, 10)" :key="entry.name" class="storage-row">
-                    <span class="storage-name">{{ entry.name }}</span>
-                    <div class="progress-bar" style="flex: 1; margin: 0 8px">
-                      <div class="progress-fill" :class="barColor(entry.size_mb, report.raid_total_mb)" :style="{ width: pct(entry.size_mb, report.raid_total_mb) + '%' }"></div>
-                    </div>
-                    <span class="storage-size">{{ formatSize(entry.size_mb) }}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div v-if="report.home_total_mb > 0" class="sa-row-wrap">
-                <div class="sa-row" role="button" tabindex="0" @click="toggleMount(report.hostname, '/home')" @keydown.enter.prevent="toggleMount(report.hostname, '/home')">
-                  <span class="sa-label">/home</span>
-                  <div class="progress-bar sa-bar"><div class="progress-fill good" style="width: 0%"></div></div>
-                  <span class="sa-pct" style="visibility: hidden">—</span>
-                  <span class="sa-sizes">{{ formatSize(report.home_total_mb) }} total</span>
-                  <i v-if="report.home_entries && report.home_entries.length" class="fas fa-chevron-down sa-expand-icon" :class="{ rotated: isMountExpanded(report.hostname, '/home') }" aria-hidden="true"></i>
-                </div>
-                <div v-if="isMountExpanded(report.hostname, '/home') && report.home_entries && report.home_entries.length" class="sa-details">
-                  <div v-for="entry in report.home_entries.slice(0, 10)" :key="entry.name" class="storage-row">
-                    <span class="storage-name">{{ entry.name }}</span>
-                    <div class="progress-bar" style="flex: 1; margin: 0 8px">
-                      <div class="progress-fill" :class="barColor(entry.size_mb, report.home_total_mb)" :style="{ width: pct(entry.size_mb, report.home_total_mb) + '%' }"></div>
-                    </div>
-                    <span class="storage-size">{{ formatSize(entry.size_mb) }}</span>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
         </div>
         <p v-else style="color: var(--text-secondary); font-size: 14px">
-          Click "Analyze Storage" to scan /home, RAID, and NFS usage across the fleet.
+          Click "Analyze Storage" to discover and scan mounted storage across the fleet.
         </p>
       </div>
     </section>
@@ -511,43 +472,7 @@
           </div>
         </div>
       </div>
-      <div class="col-4 col-md-6 col-sm-12">
-        <div class="card maintenance-card">
-          <div class="card-body">
-            <div class="maintenance-card-header">
-              <h4><i class="fas fa-arrow-up section-icon" aria-hidden="true"></i> Package Updates</h4>
-              <span class="maintenance-impact impact-change">Rolling</span>
-            </div>
-            <p class="maintenance-card-copy">
-              Run rolling apt update and upgrade on hosts, remove old kernels, and check disk space.
-            </p>
-            <div class="target-chip">
-              <i class="fas fa-crosshairs" aria-hidden="true"></i>
-              <span>{{ actionTargetLabel('package') }}</span>
-            </div>
-            <div class="maintenance-actions">
-              <button
-                class="btn btn-primary btn-sm"
-                :disabled="!canRunHostAction('package')"
-                :title="actionDisabledTitle('package')"
-                @click="askPackageUpdate"
-              >
-                <i class="fas fa-arrow-up" aria-hidden="true"></i> Update Targets
-              </button>
-            </div>
-            <div class="job-stack">
-              <JobInlineStatus
-                v-for="(id, idx) in packageJobIds"
-                :key="id"
-                :job-id="id"
-                label="Package update"
-                @dismiss="packageJobIds.splice(idx, 1)"
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="col-4 col-md-6 col-sm-12">
+      <div class="col-6 col-md-6 col-sm-12">
         <div class="card maintenance-card">
           <div class="card-body">
             <div class="maintenance-card-header">
@@ -583,7 +508,7 @@
           </div>
         </div>
       </div>
-      <div class="col-4 col-md-6 col-sm-12">
+      <div class="col-6 col-md-6 col-sm-12">
         <div class="card maintenance-card">
           <div class="card-body">
             <div class="maintenance-card-header">
@@ -636,11 +561,51 @@
           </div>
         </div>
       </div>
+    </section>
+
+    <section id="advanced" ref="advancedRef" class="grid section-card-grid">
       <div class="col-12">
         <div class="maintenance-group-heading advanced">
           <div>
             <h4>Advanced Maintenance</h4>
-            <p>Provisioning, firmware, Kubernetes drain, and GPU mode changes.</p>
+            <p>Broad system changes, provisioning, firmware, Kubernetes drain, and GPU mode changes.</p>
+          </div>
+        </div>
+      </div>
+      <div class="col-12">
+        <div class="card maintenance-card">
+          <div class="card-body">
+            <div class="maintenance-card-header">
+              <h4><i class="fas fa-screwdriver-wrench section-icon" aria-hidden="true"></i> Full System Maintenance</h4>
+              <span class="maintenance-impact impact-danger">Disruptive</span>
+            </div>
+            <p class="maintenance-card-copy">
+              Run package and firmware updates, mount remediation, kernel and container cleanup, storage checks, and zombie-process remediation. Hosts can reboot automatically.
+            </p>
+            <div class="target-chip">
+              <i class="fas fa-crosshairs" aria-hidden="true"></i>
+              <span>{{ actionTargetLabel('system') }}</span>
+            </div>
+            <div class="maintenance-actions">
+              <button
+                class="btn btn-danger btn-sm"
+                type="button"
+                :disabled="!canRunHostAction('system')"
+                :title="actionDisabledTitle('system')"
+                @click="confirmAdvanced('system')"
+              >
+                <i class="fas fa-screwdriver-wrench" aria-hidden="true"></i> Run Maintenance
+              </button>
+            </div>
+            <div class="job-stack">
+              <JobInlineStatus
+                v-for="(id, idx) in systemMaintenanceJobIds"
+                :key="id"
+                :job-id="id"
+                label="Full system maintenance"
+                @dismiss="systemMaintenanceJobIds.splice(idx, 1)"
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -820,17 +785,6 @@
     </section>
 
     <ConfirmDialog
-      :visible="packageConfirm.visible"
-      :title="`Update ${packageConfirm.label}`"
-      :message="`This runs apt update + upgrade on ${packageConfirm.label}. It may install kernel updates that require a reboot. Estimated duration: about ${Math.max(3, packageConfirm.count * 2)} minutes.`"
-      confirm-text="Start update"
-      :danger-mode="true"
-      :require-text="packageConfirm.requireText"
-      @confirm="runPackageUpdateConfirmed"
-      @cancel="packageConfirm.visible = false"
-    />
-
-    <ConfirmDialog
       :visible="dockerConfirm.visible"
       :title="`Clean Docker on ${dockerConfirm.label}`"
       :message="`This prunes unused Docker images, build cache, networks, and containerd images on ${dockerConfirm.label}. Running containers and volumes are not removed. Estimated duration: about ${Math.max(2, dockerConfirm.count)} minutes.`"
@@ -940,7 +894,7 @@
 import { computed, ref, onMounted, onUnmounted, reactive, nextTick } from "vue";
 import { useIntervalFn, useDocumentVisibility } from "@vueuse/core";
 import {
-  getDiskUsage, getHosts, getRebootRequired, rebootHosts, runPackageUpdate, runDockerCleanup,
+  getDiskUsage, getHosts, getRebootRequired, rebootHosts, runSystemMaintenance, runDockerCleanup,
   runStorageAnalysis, getStorageAnalysis, runGpuUsage, getGpuUsage,
   runPreflightCheck, runHealthDiagnostics, runHostBootstrap, runFirmwareInventory, runFirmwareUpdate,
   runDrainAction, runMigAction,
@@ -960,8 +914,9 @@ const sections = [
   { id: "reboot", label: "Reboot", icon: "fa-power-off" },
   { id: "storage", label: "Storage", icon: "fa-chart-pie" },
   { id: "gpu", label: "GPU", icon: "fa-microchip" },
-  { id: "actions", label: "Quick Actions", icon: "fa-bolt" },
-  { id: "docs", label: "Advanced", icon: "fa-book" },
+  { id: "actions", label: "Quick", icon: "fa-bolt" },
+  { id: "advanced", label: "Advanced", icon: "fa-screwdriver-wrench" },
+  { id: "docs", label: "Docs", icon: "fa-book" },
 ];
 
 function askHelpChat(prompt) {
@@ -977,7 +932,6 @@ const rebootHosts_ = ref([]);
 const rebootAllOpen = ref(false);
 const confirmSingleReboot = reactive({ visible: false, hostname: "" });
 const targetedRebootConfirm = reactive({ visible: false, hosts: [], label: "", count: 0, requireText: "" });
-const packageConfirm = reactive({ visible: false, hosts: null, label: "", count: 0, requireText: "" });
 const dockerConfirm = reactive({ visible: false, hosts: null, label: "", count: 0, requireText: "" });
 const advancedConfirm = reactive({
   visible: false,
@@ -997,7 +951,7 @@ const gpuData = ref([]);
 const gpuRunning = ref(false);
 const gpuJobId = ref("");
 const rebootJobIds = ref([]);
-const packageJobIds = ref([]);
+const systemMaintenanceJobIds = ref([]);
 const dockerJobIds = ref([]);
 const preflightJobIds = ref([]);
 const healthJobIds = ref([]);
@@ -1020,6 +974,7 @@ const rebootRef = ref(null);
 const storageRef = ref(null);
 const gpuRef = ref(null);
 const actionsRef = ref(null);
+const advancedRef = ref(null);
 const docsRef = ref(null);
 
 const confirmReindex = ref(false);
@@ -1405,34 +1360,6 @@ async function doTargetedReboot() {
   }
 }
 
-function askPackageUpdate() {
-  if (!canRunHostAction("package")) {
-    window.$toast?.error(actionDisabledTitle("package") || "Package update target is invalid");
-    return;
-  }
-  const snapshot = targetSnapshot("package");
-  Object.assign(packageConfirm, {
-    hosts: snapshot.hosts,
-    label: snapshot.label,
-    count: snapshot.count,
-    requireText: snapshot.count > 1 ? `UPDATE ${snapshot.count}` : "",
-  });
-  packageConfirm.visible = true;
-}
-
-async function runPackageUpdateConfirmed() {
-  const payload = payloadFromSnapshot(packageConfirm);
-  const label = packageConfirm.label;
-  packageConfirm.visible = false;
-  try {
-    const result = await runPackageUpdate(payload);
-    if (result?.job_id) trackJob(packageJobIds, result.job_id);
-    window.$toast?.success(`Package update started on ${label}`);
-  } catch (e) {
-    window.$toast?.error("Couldn't start package update", e);
-  }
-}
-
 function askDockerCleanup() {
   if (!canRunHostAction("docker")) {
     window.$toast?.error(actionDisabledTitle("docker") || "Docker cleanup target is invalid");
@@ -1513,6 +1440,7 @@ async function runMigStatus() {
 
 function confirmAdvanced(action) {
   const actionTargets = {
+    system: "system",
     bootstrap: "bootstrap",
     firmware: "firmware",
     drain: "drain",
@@ -1528,6 +1456,13 @@ function confirmAdvanced(action) {
   const snapshot = targetSnapshot(targetAction);
   const target = snapshot.label;
   const configs = {
+    system: {
+      title: `Run full system maintenance on ${target}`,
+      message: `This runs package and firmware updates, mount configuration and remediation, kernel and container cleanup, storage checks, and zombie-process remediation on ${target}. It automatically reboots a host after firmware changes or when zombie processes are detected. Estimated duration: about ${Math.max(15, snapshot.count * 15)} minutes.`,
+      confirmText: "Run maintenance",
+      requireText: snapshot.count > 1 ? "MAINTENANCE" : "",
+      dangerMode: true,
+    },
     bootstrap: {
       title: `Bootstrap ${target}`,
       message: `This installs common groups, admin sudo configuration, Docker, NVIDIA Container Toolkit, and then scans ${target}.`,
@@ -1583,7 +1518,9 @@ async function runAdvancedConfirmed() {
   const action = advancedConfirm.action;
   const payload = payloadFromSnapshot(advancedConfirm);
   advancedConfirm.visible = false;
-  if (action === "bootstrap") {
+  if (action === "system") {
+    await startAction(runSystemMaintenance, systemMaintenanceJobIds, "Full system maintenance started", payload);
+  } else if (action === "bootstrap") {
     await startAction(runHostBootstrap, bootstrapJobIds, "Host bootstrap started", payload);
   } else if (action === "firmware") {
     await startAction(runFirmwareUpdate, firmwareJobIds, "Firmware update started", payload);
@@ -1607,7 +1544,7 @@ function diskClass(pct) {
 
 function mountBadgeClass(type) {
   if (type === "raid") return "badge-orange";
-  if (type === "nfs") return "badge-blue";
+  if (["nfs", "smb", "network", "iscsi"].includes(type)) return "badge-blue";
   return "badge-outline";
 }
 
@@ -1676,7 +1613,7 @@ function setupSectionObserver() {
     },
     { rootMargin: "-30% 0px -60% 0px", threshold: 0 }
   );
-  for (const el of [targetsRef.value, diskRef.value, rebootRef.value, storageRef.value, gpuRef.value, actionsRef.value, docsRef.value]) {
+  for (const el of [targetsRef.value, diskRef.value, rebootRef.value, storageRef.value, gpuRef.value, actionsRef.value, advancedRef.value, docsRef.value]) {
     if (el) scrollObserver.observe(el);
   }
 }

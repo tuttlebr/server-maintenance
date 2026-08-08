@@ -58,7 +58,7 @@ import { formatHostList } from "../utils/hosts.js";
 const PLAYBOOK_ETAS_MS = {
   driver_upgrade: 12 * 60_000,
   reboot: 4 * 60_000,
-  package_update: 8 * 60_000,
+  system_maintenance: 30 * 60_000,
   storage_analysis: 4 * 60_000,
   docker_cleanup: 3 * 60_000,
   firmware_update: 30 * 60_000,

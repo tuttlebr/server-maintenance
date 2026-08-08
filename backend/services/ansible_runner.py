@@ -13,6 +13,7 @@ from pathlib import Path
 from backend.config import settings
 from backend.database import SessionLocal
 from backend.models import Host, Job
+from backend.services import job_log_indexer
 from backend.services.secret_store import decrypt_secret
 
 logger = logging.getLogger(__name__)
@@ -615,6 +616,14 @@ async def run_playbook(
         finally:
             _CANCELLED_JOBS.discard(job_id)
             _release_host_locks(locks)
+            try:
+                # Job-log retrieval is derived state. Index every terminal
+                # outcome after releasing host locks, and never let an
+                # embedding/Milvus outage change the recorded job result.
+                await asyncio.to_thread(job_log_indexer.ingest_completed_job, job_id)
+            except Exception:
+                logger.exception("Failed to index completed Ansible job %s", job_id)
+                job_log_indexer.start_reconcile()
 
     asyncio.create_task(_run())
     return job_id

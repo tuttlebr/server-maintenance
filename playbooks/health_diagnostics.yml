@@ -62,6 +62,9 @@
       failed_when: false
       changed_when: false
 
+    - name: Discover mounted storage
+      ansible.builtin.include_tasks: tasks/discover_storage.yml
+
     - name: Collect block device summary
       command: lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT
       register: lsblk_status
@@ -86,5 +89,6 @@
           - "DCGM: {{ dcgm_status.stdout_lines | default(['N/A']) }}"
           - "NVSM: {{ nvsm_health.stdout_lines | default(['N/A']) }}"
           - "IB: {{ ib_status.stdout_lines | default(['N/A']) }}"
+          - "Mounted storage: {{ storage_mounts }}"
           - "Block devices: {{ lsblk_status.stdout_lines | default([]) }}"
           - "mdadm: {{ mdadm_status.stdout_lines | default(['N/A']) }}"

@@ -151,8 +151,8 @@ export const manageFabricManager = (action, data) =>
   request(`/networking/fabric-manager/${action}`, { method: "POST", body: data || {} });
 
 // Maintenance
-export const runPackageUpdate = (data) =>
-  request("/maintenance/package-update", { method: "POST", body: data || {} });
+export const runSystemMaintenance = (data) =>
+  request("/maintenance/system-maintenance", { method: "POST", body: data || {} });
 export const runDockerCleanup = (data) =>
   request("/maintenance/docker-cleanup", { method: "POST", body: data || {} });
 export const runPreflightCheck = (data) =>

@@ -12,17 +12,8 @@
       register: apt_lock_processes
       changed_when: false
 
-    - name: Check root filesystem usage
-      shell: df --output=pcent / | tail -1 | tr -d ' %'
-      register: root_usage_pct
-      changed_when: false
-
-    - name: Check RAID filesystem usage
-      shell: df --output=pcent /raid 2>/dev/null | tail -1 | tr -d ' %'
-      register: raid_usage_pct
-      failed_when: false
-      changed_when: false
-      when: "'dgx_workstation' in group_names"
+    - name: Discover mounted storage
+      ansible.builtin.include_tasks: tasks/discover_storage.yml
 
     - name: Check if reboot is required
       stat:
@@ -85,8 +76,7 @@
           - "Reachable: true"
           - "OS: {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
           - "Kernel: {{ ansible_facts['kernel'] }}"
-          - "Root disk used: {{ root_usage_pct.stdout | default('unknown') }}%"
-          - "RAID disk used: {{ raid_usage_pct.stdout | default('N/A') }}%"
+          - "Mounted storage: {{ storage_mounts }}"
           - "Reboot required: {{ reboot_required_file.stat.exists }}"
           - "Apt/dpkg activity: {{ apt_lock_processes.stdout_lines | default([]) }}"
           - "nvidia-smi rc: {{ nvidia_smi_check.rc | default('N/A') }}"
@@ -97,10 +87,17 @@
           - "DCGM: {{ dcgm_status.stdout | default('N/A') }}"
           - "NVSM rc: {{ nvsm_health.rc | default('N/A') }}"
 
-    - name: Warn on high root disk usage
-      debug:
-        msg: "WARNING: root filesystem is at {{ root_usage_pct.stdout }}% on {{ inventory_hostname }}"
-      when: root_usage_pct.stdout | int >= disk_warn_pct
+    - name: Warn on high storage usage
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: {{ item.mountpoint }} ({{ item.type }}) is at
+          {{ item.use_pct }}% on {{ inventory_hostname }}
+      loop: "{{ storage_mounts }}"
+      loop_control:
+        label: "{{ item.mountpoint }}"
+      when:
+        - item.accessible | bool
+        - item.use_pct | int >= disk_warn_pct
 
     - name: Warn on active apt or dpkg processes
       debug:

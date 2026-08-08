@@ -2,7 +2,7 @@
 - name: MIG Management
   hosts: dgx_workstation
   become: true
-  serial: 1
+  serial: 4
   gather_facts: false
   vars:
     mig_action: status

@@ -18,17 +18,18 @@
       changed_when: false
       when: "'nvidia_gpu' in group_names"
 
-    - name: Get disk usage for root
-      shell: df --output=pcent / | tail -1 | tr -d ' %'
-      register: disk_root
-      changed_when: false
+    - name: Discover mounted storage
+      ansible.builtin.include_tasks: tasks/discover_storage.yml
 
-    - name: Get disk usage for RAID
-      shell: df --output=pcent /raid 2>/dev/null | tail -1 | tr -d ' %'
-      register: disk_raid
-      ignore_errors: true
-      changed_when: false
-      when: "'fabric_manager' in group_names"
+    - name: Select the busiest non-root storage filesystem
+      ansible.builtin.set_fact:
+        busiest_non_root_storage: >-
+          {{
+            non_root_storage_mounts
+            | sort(attribute='use_pct', reverse=true)
+            | first
+            | default({})
+          }}
 
     - name: Get OS version
       shell: . /etc/os-release && echo "$PRETTY_NAME"
@@ -85,8 +86,11 @@
           driver_version: "{{ (gpu_info.stdout | default('')).split(', ')[1] | default('unknown') }}"
           gpu_model: "{{ (gpu_info.stdout | default('')).split(', ')[0] | default('unknown') }}"
           memory_mb: "{{ ansible_facts['memtotal_mb'] | default(0) }}"
-          disk_root_percent: "{{ disk_root.stdout | default('0') }}"
-          disk_raid_percent: "{{ disk_raid.stdout | default('0') }}"
+          disk_root_percent: "{{ root_storage_mount.use_pct | default(0) }}"
+          disk_raid_percent: "{{ busiest_non_root_storage.use_pct | default(0) }}"
+          disk_data_mountpoint: "{{ busiest_non_root_storage.mountpoint | default('') }}"
+          disk_data_type: "{{ busiest_non_root_storage.type | default('') }}"
+          storage_mounts: "{{ storage_mounts }}"
           nic_info: "{{ nic_info.stdout | default('unknown') }}"
           fabric_manager: "{{ fm_status.stdout if 'fabric_manager' in group_names else 'N/A' }}"
           uptime_seconds: "{{ ansible_facts['uptime_seconds'] | default(0) }}"

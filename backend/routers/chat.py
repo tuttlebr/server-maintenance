@@ -24,6 +24,7 @@ SYSTEM_PROMPT = """You are a helpful assistant for NVIDIA DGX Fleet Manager. Ans
 # Human-readable labels for the agent's tool calls. Extend as new tools are added.
 TOOL_STATUS = {
     "dgx_docs": "Searching DGX docs and UI guidance",
+    "fleet_job_logs": "Reviewing recent fleet job results",
 }
 
 

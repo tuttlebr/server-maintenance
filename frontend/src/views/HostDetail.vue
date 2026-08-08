@@ -65,7 +65,7 @@
               <span>{{ host.disk_root_percent || 0 }}%</span>
             </div>
             <div class="disk-row" style="margin-top: 12px">
-              <span>RAID</span>
+              <span>Other max</span>
               <div class="progress-bar" style="flex: 1; margin: 0 12px">
                 <div class="progress-fill" :class="diskClass(host.disk_raid_percent)" :style="{ width: (host.disk_raid_percent || 0) + '%' }"></div>
               </div>
