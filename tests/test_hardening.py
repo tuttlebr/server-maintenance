@@ -208,6 +208,7 @@ class HostCredentialTests(unittest.TestCase):
         parsed = json.loads(content)
         hostvars = parsed["all"]["children"]["dgx_spark"]["hosts"]["dgx-01"]
         self.assertEqual(hostvars["machine_type"], "dgx_spark")
+        self.assertEqual(parsed["all"]["vars"]["ansible_python_interpreter"], "auto_silent")
         self.assertNotIn("ansible_password", content)
         self.assertNotIn("ansible_become_password", content)
         self.assertIn("StrictHostKeyChecking=yes", hostvars["ansible_ssh_common_args"])

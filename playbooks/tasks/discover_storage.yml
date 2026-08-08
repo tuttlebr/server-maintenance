@@ -4,7 +4,7 @@
     cmd: >-
       files/storage_discovery.py
       {{ '--scan-entries' if (storage_scan_entries | default(false) | bool) else '' }}
-    executable: "{{ ansible_python_interpreter | default('/usr/bin/python3') }}"
+    executable: "{{ ansible_facts.python.executable | default('/usr/bin/python3') }}"
   register: storage_discovery_raw
   failed_when: false
   changed_when: false

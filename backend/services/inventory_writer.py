@@ -102,7 +102,10 @@ def regenerate_inventory(db: Session) -> None:
     inventory = {
         "all": {
             "children": groups,
-            "vars": {"ansible_python_interpreter": "/usr/bin/python3"},
+            # Mixed fleets often have a newer automation-compatible Python
+            # alongside an OS-owned /usr/bin/python3. Let Ansible select the
+            # best supported interpreter for each device.
+            "vars": {"ansible_python_interpreter": "auto_silent"},
         }
     }
     inventory_path = settings.resolved_inventory_file
