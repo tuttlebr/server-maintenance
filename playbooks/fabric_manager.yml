@@ -1,6 +1,6 @@
 ---
 - name: Manage Fabric Manager
-  hosts: dgx_workstation
+  hosts: fabric_manager
   become: true
   vars:
     fabric_action: status

@@ -163,7 +163,7 @@ watch(
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
-  background: var(--color-danger, var(--nv-red));
+  background: var(--color-danger);
   color: #fff;
   font-size: 12px;
   font-weight: 700;
@@ -197,7 +197,7 @@ watch(
   border-radius: 4px;
 }
 .modal-close:hover { background: rgba(0, 0, 0, 0.06); color: var(--text-on-light); }
-.modal-close:focus-visible { outline: 2px solid var(--nv-green); outline-offset: 1px; }
+.modal-close:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 
 .modal-content { font-size: 14px; line-height: 1.55; }
 

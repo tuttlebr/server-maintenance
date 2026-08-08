@@ -47,12 +47,13 @@ RUN ansible-galaxy collection install \
 
 # Copy backend code
 COPY --chown=fleet:fleet backend/ ./backend/
+COPY --chown=fleet:fleet alembic.ini ./alembic.ini
 
 # Copy docs for fallback chat
 COPY --chown=fleet:fleet docs/ ./docs/
 
 # Copy Rust documentation ingester
-COPY --from=docs-ingester-build /build/tools/dgx-doc-ingester/target/release/dgx-doc-ingester /usr/local/bin/dgx-doc-ingester
+COPY --from=docs-ingester-build /build/tools/dgx-doc-ingester/target/release/fleet-doc-ingester /usr/local/bin/fleet-doc-ingester
 
 # Copy built frontend into static directory
 COPY --from=frontend-build /app/frontend/dist ./backend/static/
@@ -65,4 +66,4 @@ EXPOSE 8000
 
 USER fleet:fleet
 
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn backend.main:app --host 0.0.0.0 --port 8000"]

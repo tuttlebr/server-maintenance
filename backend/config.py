@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     docs_dir: Path = Path("/app/docs")
     docs_urls_file: Path = Path("/app/docs/urls.txt")
     docs_markdown_dir: Path = Path("/app/data/docs-crawled")
-    docs_ingester_bin: Path = Path("/usr/local/bin/dgx-doc-ingester")
+    docs_ingester_bin: Path = Path("/usr/local/bin/fleet-doc-ingester")
 
     @property
     def is_development(self) -> bool:

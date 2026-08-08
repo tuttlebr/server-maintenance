@@ -107,6 +107,6 @@ watch(
   border-radius: 3px;
   font-size: 12px;
   font-weight: 600;
-  color: var(--color-danger, var(--nv-red));
+  color: var(--color-danger);
 }
 </style>

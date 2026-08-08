@@ -1,16 +1,17 @@
 # Fleet Manager
 
-A web-based Linux fleet management platform with optional NVIDIA GPU and DGX-specific operations. It provides a clean web UI for user management, driver upgrades, networking, and system maintenance — backed by Ansible playbooks and packaged in Docker.
+A capability-driven fleet operations platform for Linux compute, edge devices, and robots. It discovers what each device can do, shows only eligible operations, and keeps NVIDIA support as a first-class integration rather than the product identity. The backend uses FastAPI, Ansible, and adapter services; the frontend is Vue 3.
 
 ## Features
 
-- **Fleet dashboard** with host status, GPU info, disk usage, and job history
-- **User management**: bulk add (form or CSV), bulk update, password changes, sudoers management
-- **Driver upgrades**: one-click driver updates per host or fleet-wide, with firmware handled separately
-- **Networking**: fabric manager control, NIC status monitoring
-- **System maintenance**: routine diagnostics and cleanup plus advanced full-system maintenance, firmware actions, host drain/resume, MIG controls, and disk monitoring
-- **Job tracking**: full history with output logs for every operation, indexed for DGX Help after success, failure, or cancellation
-- **NVIDIA-branded UI** following official design guidelines
+- **Mixed-fleet overview** with device reachability, attention, optional GPU and robot summaries, and recent activity
+- **Capability discovery** for portable Linux facts, NVIDIA features, and Reachy Mini Wireless daemon health
+- **Adaptive operations** that appear only when at least one device supports them
+- **Access management** for Linux accounts on devices that advertise `users.manage`
+- **Integration operations** for NVIDIA drivers, Fabric Manager, MIG, and Kubernetes when discovery finds them
+- **Safe Reachy Mini support** for health, logs, daemon restart, and stable software updates, without motion, torque, camera, audio, or app controls
+- **Activity tracking**: full history with output logs for every operation, indexed for Fleet Help after success, failure, or cancellation
+- **Neutral UI** with NVIDIA, Kubernetes, and Reachy features presented as labeled integrations
 - **CLI compatible**: all Ansible playbooks still work directly from the command line
 
 ## Prerequisites
@@ -29,7 +30,7 @@ There are two different users in this design:
 | User | Where it exists | Purpose |
 |------|-----------------|---------|
 | `fleet` | Inside the web container only | Runs Ansible and owns its local temporary files |
-| `ansible_user` from the UI or CSV | On every selected remote host | The Linux account used for SSH and remote Ansible tasks |
+| `ssh_user` from the UI or CSV | On every selected remote device | The Linux account used for SSH and remote Ansible tasks |
 
 The remote machines do not need a `fleet` account unless you deliberately set `ansible_user=fleet`.
 
@@ -165,82 +166,38 @@ Startup fails if authentication, host-encryption, or MinIO secrets are missing o
 | `MINIO_SECRET_KEY` | required | Non-default MinIO root password shared with Milvus |
 | `EMBED_MODEL` | `nvidia/qwen/qwen3-embedding-0.6b` | Embedding model shared by documentation and completed-job retrieval |
 
-## Adding Hosts to the Fleet
+## Adding Devices to the Fleet
 
 ### Via Web UI (Recommended)
 
 1. Log in to the dashboard
-2. Click **Add Host**
-3. Enter the hostname or IP, machine type, and the existing remote **SSH Username**. Use **Unknown / Auto-detect** when the product class is not known; an omitted CSV machine type also remains `unknown`.
-4. Select **Dedicated fleet SSH key**:
+2. Open **Devices** and click **Add device**
+3. Choose **Linux over SSH** or **Reachy Mini Wireless**.
+4. Enter an inventory-safe device name, network endpoint, and connection details. Hardware type is discovered instead of selected.
+5. Select **Dedicated fleet SSH key**:
    - If the key is already in that user's `authorized_keys`, leave the bootstrap password blank.
    - Otherwise enter a one-time bootstrap password so the UI can install the key.
-5. Click **Verify SSH & Add**. The UI retrieves the ED25519 host key and shows its fingerprint.
-6. Compare that fingerprint with `sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the host console.
-7. Click **Approve, verify & add**. The application records the approved key, verifies authentication, and only then saves the host.
-8. Click **Scan Fleet** to gather GPU, driver, disk, and network information.
+6. For SSH, click **Discover device**. The UI retrieves the ED25519 host key and shows its fingerprint.
+7. Compare that fingerprint with `sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the device console.
+8. Approve the verified fingerprint and add the device. Fleet Manager verifies authentication before saving it.
+9. Run **Scan device** so portable facts and capabilities replace the initial generic profile.
 
-Bulk import uses the same enrollment workflow for every row. `ansible_user` is required. Values such as `true`, `yes`, `key`, or `passwordless` in `passwordless_ssh` use the dedicated agent key. Use `bootstrap_password` only when that public key is not installed yet:
+Use **Import CSV** on the Devices page to preview, discover, fingerprint-check, and enroll multiple devices. `ssh_user` is required for SSH rows. Values such as `true`, `yes`, `key`, or `passwordless` in `passwordless_ssh` use the dedicated agent key. Use `bootstrap_password` only when that public key is not installed yet:
 
 ```csv
-hostname,ip_address,machine_type,ansible_user,ansible_password,ansible_become_password,passwordless_ssh,bootstrap_password
-daedalus-01,192.168.1.234,dgx_spark,brandon,,,true,one-time-ssh-password
-daedalus-02,192.168.1.235,dgx_spark,brandon,,,true,
+name,endpoint,transport,ssh_user,ssh_password,become_password,passwordless_ssh,bootstrap_password,daemon_port
+compute-01,192.168.1.234,ssh,brandon,,,true,one-time-ssh-password,
+edge-01,192.168.1.235,ssh,brandon,,,true,,
+reachy-lab,reachy-mini.local,reachy_daemon,,,,true,,8000
 ```
 
-For password authentication, set `passwordless_ssh=false` and put the persistent SSH password in `ansible_password`. One-time bootstrap passwords are never stored; persistent SSH and sudo passwords are encrypted before database storage. Treat CSV files containing passwords as temporary secrets and delete them securely after import.
+For password authentication, set `passwordless_ssh=false` and put the persistent SSH password in `ssh_password`. One-time bootstrap passwords are never stored; persistent SSH and sudo passwords are encrypted before database storage. Treat CSV files containing passwords as temporary secrets and delete them securely after import.
 
-### Via Inventory File
+### Generated Ansible Inventory
 
-Edit `inventory/hosts.ini` directly:
+The database is the source of truth. Fleet Manager regenerates `data/inventory/hosts.json` after enrollment and whenever a scan changes capabilities. It provides `managed_hosts`, `compute`, `gpu`, `nvidia_gpu`, `cpu`, `fabric_manager`, and `mig` groups. Reachy daemon devices are intentionally excluded because they are not SSH playbook targets.
 
-```ini
-[dgx_spark]
-ast-spark-01 ansible_connection=local
-ast-spark-02 ansible_host=10.0.0.2
-
-[dgx_workstation]
-ast-ws-01 ansible_host=10.0.0.10
-
-[cpu_node]
-server-01 ansible_host=10.0.0.20
-
-[gpu_node]
-gpu-01 ansible_host=10.0.0.30
-
-[unknown]
-
-[managed_hosts:children]
-unknown
-dgx_spark
-dgx_workstation
-cpu_node
-gpu_node
-
-# Compatibility alias for older playbooks.
-[workstations:children]
-unknown
-dgx_spark
-dgx_workstation
-cpu_node
-gpu_node
-
-[nvidia_gpu:children]
-dgx_spark
-dgx_workstation
-gpu_node
-
-[all:vars]
-ansible_user=btuttle
-ansible_python_interpreter=/usr/bin/python3
-```
-
-The UI-generated runtime inventory also provides `managed_hosts`, `compute`,
-`gpu`, `nvidia_gpu`, `cpu`, and `fabric_manager` capability groups. New
-playbooks should target `all` or `managed_hosts` and gate optional tasks on a
-capability group. `workstations` remains only as a compatibility alias.
-
-## Initial Host Setup
+## Integration Setup Notes
 
 ### DGX Spark
 
@@ -248,7 +205,7 @@ capability group. `workstations` remains only as a compatibility alias.
 2. **Enable SSH**: SSH is available after first boot completes
 3. **Network**: Connect Ethernet (10 GbE) and optionally CX7 QSFP cables for Spark Stacking
 4. **Verify GPU**: Run `nvidia-smi` to confirm the Grace Blackwell GPU is detected
-5. **Add to fleet**: Add the host via the web UI or inventory file
+5. **Add to fleet**: Enroll the device through the Devices page
 6. **Scan**: Run a scan to populate dashboard data
 
 Key specs: DGX OS 7.4.0, CUDA 13.0.2, driver 580.142, Grace Blackwell superchip, 128 GB unified memory, CX7 QSFP networking.
@@ -260,62 +217,22 @@ Key specs: DGX OS 7.4.0, CUDA 13.0.2, driver 580.142, Grace Blackwell superchip,
 3. **Network**: Connect 10 GbE for standard networking and ConnectX-8 QSFP112 ports for high-speed fabric
 4. **MIG** (optional): Configure Multi-Instance GPU for up to 7 isolated GPU instances
 5. **Verify GPU**: Run `nvidia-smi` to confirm the Blackwell Ultra GPU is detected
-6. **Add to fleet**: Add the host via the web UI or inventory file
+6. **Add to fleet**: Enroll the device through the Devices page
 
 Key specs: Ubuntu 24.04 LTS, Blackwell Ultra GPU, 252 GB HBM3e, 496 GB LPDDR5X, ConnectX-8 SuperNIC (800 Gb/s), MIG support.
 
+### Reachy Mini Wireless
+
+1. Connect the robot to the same trusted network as Fleet Manager.
+2. Confirm its daemon is available on port `8000`, or enter the configured port.
+3. Add it with **Reachy Mini Wireless** as the connection type.
+4. Discovery reads `/api/state/full` and never sends movement, torque, camera, audio, or app-control commands.
+
 ## Common Operations
 
-### User Management
+The **Operations** page derives eligibility from each device's discovered capabilities. It groups read-only inspection, system changes, NVIDIA integration tasks, Kubernetes checks, and Reachy management separately. Unsupported operations are hidden, and high-impact actions require confirmation.
 
-**Bulk add users** via the web UI:
-- Enter users manually (full name + email) or upload a CSV file
-- Select target hosts (individual, all Spark, or all Workstation)
-- Users are created with home directories, SSH keys, standard configs, and `/raid` directories
-
-CSV format:
-```
-full_name,email
-Jane Smith,jsmith@nvidia.com
-John Doe,jdoe@nvidia.com
-```
-
-**Password management**:
-- Change individual user passwords via the Manage Users tab
-- Bulk reset non-system user passwords with an operator-provided temporary password
-- New and bulk-reset users are forced to change passwords on next login
-
-**Sudoers**:
-- Add or remove users from passwordless sudo via the Sudoers tab
-
-### Driver Upgrades
-
-The web UI shows current driver and CUDA versions across the fleet. Select hosts and click **Upgrade Selected** to run:
-
-- **Standard**: rolling package-level driver/system updates
-- **Major Version**: installs a specific `nvidia-driver-<branch>` package, such as `nvidia-driver-570`
-
-Each UI job launches one fleet-scoped Ansible process. Driver upgrades still
-run one host at a time because the playbook declares `serial: 4`; read-only
-playbooks can use Ansible forks across the selected fleet. Check the Jobs tab
-for output.
-Firmware updates are handled separately from driver upgrades on the Maintenance page.
-
-### Fabric Manager
-
-The Networking page shows fabric manager status per host with controls to start, stop, or restart the service.
-
-### System Maintenance
-
-- **Preflight checks**: SSH reachability through Ansible, apt/dpkg activity, disk pressure, reboot flag, GPU processes, and service state
-- **Health diagnostics**: nvidia-smi, Fabric Manager, DCGM, NVSM, IB, failed units, critical journal, and storage summaries
-- **Full system maintenance**: advanced package and firmware updates, mount remediation, kernel and container cleanup, storage checks, and zombie-process remediation with conditional automatic reboots
-- **Docker cleanup**: prune unused images, build cache, networks, and containerd images without removing volumes
-- **Bootstrap**: common groups, admin sudo setup, Docker/NVIDIA Container Toolkit install, and host scan
-- **Firmware**: inventory and update actions independent of driver upgrades
-- **Drain/Resume**: inspect active GPU work and run Kubernetes cordon/drain/uncordon when kubectl is configured
-- **MIG**: query or toggle MIG mode on DGX Workstation hosts after active GPU checks
-- **Disk monitoring**: root and automatically discovered mounted-storage usage across the fleet
+Use **Access** for Linux account provisioning, password changes, and sudoers management. Only SSH devices with `users.manage` can be targeted. Use **Activity** for job status, output, cancellation, and history.
 
 ## CLI Usage
 
@@ -362,11 +279,11 @@ ansible-playbook playbooks/mig_management.yml -e '{"mig_action":"status"}'
 ansible-playbook playbooks/system_maintenance.yml --limit ast-spark-01
 ```
 
-## DGX Documentation Ingestion
+## Fleet Documentation Ingestion
 
-The Rust doc ingester crawls every HTML page under each URL prefix in `docs/urls.txt`, includes local Markdown guidance from `docs/*.md`, converts content to Markdown, embeds the chunks with the `.env` embedding settings, and rebuilds the `dgx_docs` collection in Milvus. The included `docs/fleet-manager-ui.md` file teaches DGX Help how to guide users through the Fleet Manager UI.
+The Rust doc ingester crawls every HTML page under each URL prefix in `docs/urls.txt`, includes local Markdown guidance from `docs/*.md`, converts content to Markdown, embeds the chunks with the `.env` embedding settings, and rebuilds the `fleet_docs` collection in Milvus. The included `docs/fleet-manager-ui.md` file teaches Fleet Help how to guide users through the UI.
 
-In Docker, the web image builds this tool into `/usr/local/bin/dgx-doc-ingester`. The **Maintenance → Reindex Documentation** button calls the backend reindex endpoint, which runs that binary inside the web container and writes generated Markdown to `/app/data/docs-crawled`.
+In Docker, the web image builds this tool into `/usr/local/bin/fleet-doc-ingester`. The documentation reindex endpoint runs that binary inside the web container and writes generated Markdown to `/app/data/docs-crawled`.
 
 ```bash
 # Start Milvus first
@@ -387,9 +304,9 @@ cargo run --manifest-path tools/dgx-doc-ingester/Cargo.toml -- \
   --dry-run
 ```
 
-The tool reads `EMBED_MODEL`, optional `EMBED_DIM`, `EMBED_API_KEY`/`AI_HELPER_API_KEY`, `EMBED_BASE_URL`/`AI_HELPER_BASE_URL`, and `MILVUS_URI` from `.env`. By default it rebuilds `dgx_docs`; pass `--append` to keep an existing collection or `--no-local-markdown` to exclude local UI guidance.
+The tool reads `EMBED_MODEL`, optional `EMBED_DIM`, `EMBED_API_KEY`/`AI_HELPER_API_KEY`, `EMBED_BASE_URL`/`AI_HELPER_BASE_URL`, and `MILVUS_URI` from `.env`. By default it rebuilds `fleet_docs`; pass `--append` to keep an existing collection or `--no-local-markdown` to exclude local UI guidance.
 
-Completed Ansible runs are indexed separately in the `fleet_job_logs` collection. Every terminal outcome (success, failure, or cancellation) adds redacted metadata, recap, error context, and bounded log chunks. Each ingestion also refreshes a latest-completed-job-per-host snapshot so DGX Help can answer questions such as “What’s the overall status of my fleet based on the most recent jobs?” The SQL job history and full on-disk log remain the source of truth; Milvus is a derived search index. Startup reconciliation backfills terminal jobs that were missed while Milvus or the embedding endpoint was unavailable.
+Completed operations are indexed separately in `fleet_job_logs`. Every terminal outcome adds redacted metadata, recap, error context, and bounded log chunks. Each ingestion also refreshes a latest-completed-job-per-device snapshot so Fleet Help can answer questions about recent fleet evidence. SQL activity and full on-disk logs remain the source of truth; Milvus is a derived search index.
 
 ## Project Structure
 
@@ -427,7 +344,7 @@ server-maintenance/
 ├── templates/                  # User config templates
 ├── scripts/                    # Shell scripts and design guide
 ├── backend/                    # FastAPI backend (API + Ansible runner)
-└── frontend/                   # Vue 3 SPA (NVIDIA-branded UI)
+└── frontend/                   # Vue 3 capability-driven UI
 ```
 
 ## Security

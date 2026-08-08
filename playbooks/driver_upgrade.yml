@@ -225,7 +225,7 @@
 
     - name: Reboot if required
       reboot:
-        msg: "Reboot after driver/system upgrade initiated by DGX Fleet Manager"
+        msg: "Reboot after driver/system upgrade initiated by Fleet Manager"
         reboot_timeout: 1200
         pre_reboot_delay: 5
         post_reboot_delay: 30

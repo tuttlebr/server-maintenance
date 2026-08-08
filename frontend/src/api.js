@@ -1,6 +1,4 @@
-import { sortByHostname } from "./utils/hosts.js";
-
-const BASE = "/api/v1";
+const BASE = "/api/v2";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -100,21 +98,28 @@ export const login = (username, password) =>
     body: { username, password },
   });
 
-// Hosts
-export const getHosts = () => request("/hosts").then(sortByHostname);
-export const getHost = (hostname) => request(`/hosts/${hostname}`);
-export const addHost = (data) => request("/hosts", { method: "POST", body: data });
-export const updateHost = (hostname, data) => request(`/hosts/${hostname}`, { method: "PUT", body: data });
-export const deleteHost = (hostname) => request(`/hosts/${hostname}`, { method: "DELETE" });
-export const bulkAddHosts = (data) => request("/hosts/bulk-add", { method: "POST", body: data });
-export const bulkAddHostsCsv = (formData) =>
-  request("/hosts/bulk-add-csv", { method: "POST", body: formData });
-export const previewHostEnrollment = (data) =>
-  request("/hosts/enrollment-preview", { method: "POST", body: data, timeoutMs: 45_000 });
-export const enrollHosts = (data) =>
-  request("/hosts/bulk-enroll", { method: "POST", body: data, timeoutMs: 120_000 });
-export const scanHost = (hostname) => request(`/hosts/${hostname}/scan`, { method: "POST" });
-export const scanAllHosts = () => request("/hosts/scan-all", { method: "POST" });
+// Devices
+export const getDevices = () => request("/devices").then((items) =>
+  [...items].sort((a, b) => a.name.localeCompare(b.name))
+);
+export const getDevice = (deviceId) => request(`/devices/${deviceId}`);
+export const discoverDevice = (data) =>
+  request("/devices/discover", { method: "POST", body: data, timeoutMs: 45_000 });
+export const addDevice = (data) =>
+  request("/devices", { method: "POST", body: data, timeoutMs: 120_000 });
+export const updateDevice = (deviceId, data) =>
+  request(`/devices/${deviceId}`, { method: "PUT", body: data });
+export const deleteDevice = (deviceId) => request(`/devices/${deviceId}`, { method: "DELETE" });
+export const scanDevice = (deviceId) => request(`/devices/${deviceId}/scan`, { method: "POST" });
+export const scanAllDevices = () => request("/devices/scan-all", { method: "POST" });
+
+// Operations
+export const getOperations = () => request("/operations");
+export const runOperation = (operationId, deviceIds) =>
+  request(`/operations/${operationId}/jobs`, {
+    method: "POST",
+    body: { device_ids: deviceIds },
+  });
 
 // Users
 export const getUsers = () => request("/users");
@@ -140,46 +145,6 @@ export const getJobs = (params = {}) => {
 };
 export const getJob = (jobId) => request(`/jobs/${jobId}`);
 export const cancelJob = (jobId) => request(`/jobs/${jobId}/cancel`, { method: "POST" });
-
-// Drivers
-export const getDriverStatus = () => request("/drivers").then(sortByHostname);
-export const upgradeDrivers = (data) => request("/drivers/upgrade", { method: "POST", body: data });
-
-// Networking
-export const getNetworkingStatus = () => request("/networking/status").then(sortByHostname);
-export const manageFabricManager = (action, data) =>
-  request(`/networking/fabric-manager/${action}`, { method: "POST", body: data || {} });
-
-// Maintenance
-export const runSystemMaintenance = (data) =>
-  request("/maintenance/system-maintenance", { method: "POST", body: data || {} });
-export const runDockerCleanup = (data) =>
-  request("/maintenance/docker-cleanup", { method: "POST", body: data || {} });
-export const runPreflightCheck = (data) =>
-  request("/maintenance/preflight-check", { method: "POST", body: data || {} });
-export const runHealthDiagnostics = (data) =>
-  request("/maintenance/health-diagnostics", { method: "POST", body: data || {} });
-export const runHostBootstrap = (data) =>
-  request("/maintenance/host-bootstrap", { method: "POST", body: data || {} });
-export const runFirmwareInventory = (data) =>
-  request("/maintenance/firmware-inventory", { method: "POST", body: data || {} });
-export const runFirmwareUpdate = (data) =>
-  request("/maintenance/firmware-update", { method: "POST", body: data || {} });
-export const runDrainAction = (action, data) =>
-  request(`/maintenance/drain/${action}`, { method: "POST", body: data || {} });
-export const runMigAction = (action, data) =>
-  request(`/maintenance/mig/${action}`, { method: "POST", body: data || {} });
-export const getRebootRequired = () => request("/maintenance/reboot-required").then(sortByHostname);
-export const rebootHosts = (data) =>
-  request("/maintenance/reboot", { method: "POST", body: data || {} });
-export const getMaintenanceOverview = () => request("/maintenance/overview");
-export const runStorageAnalysis = (data) =>
-  request("/maintenance/storage-analysis", { method: "POST", body: data || {} });
-export const getStorageAnalysis = () => request("/maintenance/storage-analysis").then(sortByHostname);
-export const runGpuUsage = (data) =>
-  request("/maintenance/gpu-usage", { method: "POST", body: data || {} });
-export const getGpuUsage = () => request("/maintenance/gpu-usage").then(sortByHostname);
-export const getDiskUsage = () => request("/maintenance/disk-usage").then(sortByHostname);
 
 // Chat
 export const getChatStatus = () => request("/chat/status");

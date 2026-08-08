@@ -1,8 +1,8 @@
-"""On-demand documentation reindexer for the DGX Help Milvus collection.
+"""On-demand documentation reindexer for the Fleet Help Milvus collection.
 
-The Maintenance page triggers this module through /api/v1/chat/reindex-docs.
+The Operations experience triggers this module through /api/v2/chat/reindex-docs.
 Reindexing runs in a background thread and invokes the Rust crawler/ingester
-that is built into the web Docker image at /usr/local/bin/dgx-doc-ingester.
+that is built into the web Docker image at /usr/local/bin/fleet-doc-ingester.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from pathlib import Path
 
 from backend.config import settings
 
-COLLECTION_NAME = "dgx_docs"
+COLLECTION_NAME = "fleet_docs"
 EMBED_BATCH_SIZE = 16
 INSERT_BATCH_SIZE = 64
 

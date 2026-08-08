@@ -13,9 +13,9 @@ from backend.config import settings
 from backend.schemas import ChatRequest
 from backend.services import ai_helper, docs_indexer, docs_loader
 
-router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
+router = APIRouter(prefix="/api/v2/chat", tags=["assistant"])
 
-SYSTEM_PROMPT = """You are a helpful assistant for NVIDIA DGX Fleet Manager. Answer questions about DGX Spark, DGX A100, DGX H100 systems, and how to use the DGX Fleet Manager UI using the documentation provided below. Be concise, accurate, and helpful. If the documentation doesn't cover a topic, say so clearly.
+SYSTEM_PROMPT = """You are Fleet Help, a read-only assistant for Fleet Manager. Answer questions about mixed Linux compute, edge and robotics devices, supported integrations such as NVIDIA platforms, recent operation evidence, and how to use the Fleet Manager UI. Never imply that you executed an operation. Be concise, accurate, and helpful. If the documentation doesn't cover a topic, say so clearly.
 
 --- DOCUMENTATION ---
 {docs}"""
@@ -23,7 +23,7 @@ SYSTEM_PROMPT = """You are a helpful assistant for NVIDIA DGX Fleet Manager. Ans
 
 # Human-readable labels for the agent's tool calls. Extend as new tools are added.
 TOOL_STATUS = {
-    "dgx_docs": "Searching DGX docs and UI guidance",
+    "fleet_docs": "Searching fleet documentation and UI guidance",
     "fleet_job_logs": "Reviewing recent fleet job results",
 }
 
@@ -59,7 +59,7 @@ def _stream_from_nat(messages: list[dict]):
     """Stream chat completions from NeMo Agent Toolkit.
 
     Yields dicts that the SSE endpoint forwards to the client:
-      - {"type": "status", "text": "Searching DGX documentation"} when a
+      - {"type": "status", "text": "Searching fleet documentation"} when a
         tool call begins. Optionally includes "query" once arguments parse.
       - {"type": "content", "content": "..."} for answer tokens.
     """

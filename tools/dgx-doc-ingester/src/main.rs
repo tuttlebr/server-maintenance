@@ -19,7 +19,7 @@ use url::Url;
 const DEFAULT_EMBED_MODEL: &str = "nvidia/qwen/qwen3-embedding-0.6b";
 const DEFAULT_EMBED_BASE_URL: &str = "https://inference-api.nvidia.com/v1";
 const DEFAULT_MILVUS_URI: &str = "http://localhost:19530";
-const DEFAULT_COLLECTION: &str = "dgx_docs";
+const DEFAULT_COLLECTION: &str = "fleet_docs";
 const DEFAULT_MAX_CHUNK_CHARS: usize = 4000;
 const DEFAULT_TEXT_FIELD_CHARS: usize = 16_384;
 
@@ -86,7 +86,7 @@ struct Cli {
     #[arg(long, default_value_t = false)]
     dry_run: bool,
 
-    #[arg(long, default_value = "dgx-doc-ingester/0.1")]
+    #[arg(long, default_value = "fleet-doc-ingester/0.1")]
     user_agent: String,
 
     #[arg(long, default_value_t = 45)]
@@ -1359,15 +1359,15 @@ mod tests {
         let docs = vec![LocalMarkdownDoc {
             path: PathBuf::from("docs/fleet-manager-ui.md"),
             reference: "docs/fleet-manager-ui.md".to_string(),
-            source: "DGX Fleet Manager UI Guide".to_string(),
-            title: "DGX Fleet Manager UI Guide".to_string(),
-            markdown: "# DGX Fleet Manager UI Guide\n\n## Maintenance\n\nUse Maintenance to reindex documentation and inspect system maintenance actions.".to_string(),
+            source: "Fleet Manager UI Guide".to_string(),
+            title: "Fleet Manager UI Guide".to_string(),
+            markdown: "# Fleet Manager UI Guide\n\n## Operations\n\nUse Operations to run actions supported by each device's discovered capabilities.".to_string(),
         }];
 
         let chunks = build_local_chunks(&docs, 1000, 2000);
 
         assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0].source, "DGX Fleet Manager UI Guide");
+        assert_eq!(chunks[0].source, "Fleet Manager UI Guide");
         assert!(chunks[0].text.contains("docs/fleet-manager-ui.md"));
         assert!(chunks[0].heading.contains("Maintenance"));
     }

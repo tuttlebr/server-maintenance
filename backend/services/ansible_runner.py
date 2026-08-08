@@ -14,6 +14,9 @@ from backend.config import settings
 from backend.database import SessionLocal
 from backend.models import Host, Job
 from backend.services import job_log_indexer
+from backend.capabilities import NVIDIA_FABRIC_MANAGER, has_capability
+from backend.services.device_discovery import enrich_from_scan
+from backend.services.inventory_writer import regenerate_inventory
 from backend.services.secret_store import decrypt_secret
 
 logger = logging.getLogger(__name__)
@@ -354,7 +357,7 @@ def _process_scan_results(
                 host.cuda_version = report.get("cuda_version") or None
                 host.os_version = report.get("os_version") or None
                 fm_value = report.get("fabric_manager")
-                if host.machine_type == "dgx_workstation":
+                if has_capability(host, NVIDIA_FABRIC_MANAGER) or report.get("fabric_manager_available") is True:
                     host.fabric_manager_status = fm_value if fm_value and fm_value != "N/A" else None
                 else:
                     host.fabric_manager_status = None
@@ -388,6 +391,8 @@ def _process_scan_results(
                 elif nic_info and nic_info != "unknown":
                     host.nic_type = nic_info[:50]
 
+                enrich_from_scan(host, report)
+
                 db.commit()
                 processed.add(hostname)
                 scan_file.unlink()  # Clean up processed file
@@ -403,6 +408,10 @@ def _process_scan_results(
             host.status = "offline" if hostname in unreachable_hosts else "unknown"
         if target_set:
             db.commit()
+        # Discovery can change capability groups (GPU, MIG, Fabric Manager,
+        # and Kubernetes). Refresh inventory before the next operation uses it.
+        if processed:
+            regenerate_inventory(db)
     finally:
         db.close()
     return warnings
@@ -440,9 +449,15 @@ def _resolve_targets(db, hosts: list[str] | None, all_hosts: bool) -> tuple[list
     if all_hosts and hosts:
         raise PlaybookRequestError("Provide either hosts or all_hosts, not both")
     if all_hosts:
-        targets = [h.hostname for h in db.query(Host).order_by(Host.hostname).all()]
+        targets = [
+            h.hostname
+            for h in db.query(Host)
+            .filter((Host.transport == "ssh") | (Host.transport.is_(None)))
+            .order_by(Host.hostname)
+            .all()
+        ]
         if not targets:
-            raise PlaybookRequestError("No hosts are registered")
+            raise PlaybookRequestError("No SSH-managed devices are registered")
         return None, targets
     if hosts is None or len(hosts) == 0:
         raise PlaybookRequestError("Target hosts are required unless all_hosts=true")
@@ -456,7 +471,12 @@ def _resolve_targets(db, hosts: list[str] | None, all_hosts: bool) -> tuple[list
 
     existing = {
         h.hostname
-        for h in db.query(Host.hostname).filter(Host.hostname.in_(deduped)).all()
+        for h in db.query(Host.hostname)
+        .filter(
+            Host.hostname.in_(deduped),
+            (Host.transport == "ssh") | (Host.transport.is_(None)),
+        )
+        .all()
     }
     missing = [host for host in deduped if host not in existing]
     if missing:

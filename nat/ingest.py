@@ -22,7 +22,7 @@ from pymilvus import (
 from pymilvus.exceptions import MilvusException
 
 DOCS_DIR = "/app/docs"
-COLLECTION_NAME = "dgx_docs"
+COLLECTION_NAME = "fleet_docs"
 JOB_LOG_COLLECTION_NAME = "fleet_job_logs"
 MILVUS_URI = os.environ.get("MILVUS_URI", "http://milvus:19530")
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/qwen/qwen3-embedding-0.6b")
@@ -239,7 +239,7 @@ def ensure_job_log_collection(embed_dim):
         FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=embed_dim),
     ]
     schema = CollectionSchema(
-        fields, description="Redacted DGX Fleet Manager completed job logs"
+        fields, description="Redacted Fleet Manager completed operation logs"
     )
     collection = Collection(JOB_LOG_COLLECTION_NAME, schema)
     collection.create_index(

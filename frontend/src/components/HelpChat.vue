@@ -5,21 +5,21 @@
       class="chat-fab"
       :class="{ 'chat-fab-pulse': showCoach }"
       type="button"
-      aria-label="Ask DGX Help — questions about drivers, networking, troubleshooting"
-      title="Ask DGX Help"
+      aria-label="Ask Fleet Help about devices, operations, and troubleshooting"
+      title="Ask Fleet Help"
       @click="open"
     >
       <i class="fas fa-comments" aria-hidden="true"></i>
     </button>
     <span v-if="!isOpen && showCoach" class="chat-fab-coach" role="status">
-      Ask DGX Help
+      Ask Fleet Help
       <button class="chat-fab-coach-close" type="button" aria-label="Dismiss tip" @click.stop="dismissCoach">&times;</button>
     </span>
 
-    <div v-if="isOpen" class="chat-panel" role="dialog" aria-label="DGX Help">
+    <div v-if="isOpen" class="chat-panel" role="dialog" aria-label="Fleet Help">
       <div class="chat-header">
         <span class="chat-title">
-          <i class="fas fa-robot" aria-hidden="true"></i> DGX Help
+          <i class="fas fa-comments" aria-hidden="true"></i> Fleet Help
         </span>
         <div class="chat-header-actions">
           <button
@@ -38,8 +38,8 @@
 
       <div ref="messagesEl" class="chat-messages">
         <div v-if="messages.length === 0 && !isStreaming" class="chat-welcome">
-          <p><strong>Hi! I can help with DGX systems.</strong></p>
-          <p>Ask about DGX Spark, A100, H100 setup, drivers, networking, and more.</p>
+          <p><strong>Hi! I can help with your fleet.</strong></p>
+          <p>Ask about device health, recent operations, Linux maintenance, NVIDIA systems, and supported integrations.</p>
         </div>
 
         <template v-for="(msg, i) in messages" :key="i">
@@ -92,13 +92,13 @@
       </div>
 
       <form class="chat-input-area" @submit.prevent="send">
-        <label class="visually-hidden" for="chat-input">Ask DGX Help</label>
+        <label class="visually-hidden" for="chat-input">Ask Fleet Help</label>
         <input
           id="chat-input"
           ref="inputEl"
           v-model="input"
           class="form-input chat-input"
-          placeholder="Ask about DGX systems…"
+          placeholder="Ask about your fleet…"
           :disabled="isStreaming"
           autocomplete="off"
         />

@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="page-header">
-      <h2>Job History</h2>
+      <h2>Activity</h2>
       <div class="flex gap-xs">
         <label class="visually-hidden" for="job-filter-status">Filter by status</label>
         <select id="job-filter-status" v-model="filterStatus" class="form-select" style="width: auto; min-width: 140px">
@@ -21,8 +21,8 @@
       <table>
         <thead>
           <tr>
-            <th>Playbook</th>
-            <th>Hosts</th>
+            <th>Operation</th>
+            <th>Devices</th>
             <th>Status</th>
             <th>Duration</th>
             <th>Triggered By</th>
@@ -33,8 +33,8 @@
         <tbody>
           <template v-for="job in jobs" :key="job.job_id">
             <tr style="cursor: pointer" @click="toggleExpand(job.job_id)">
-              <td><strong>{{ job.playbook }}</strong></td>
-              <td>{{ formatHostList(job.target_hosts) }}</td>
+              <td><strong>{{ operationLabel(job.playbook) }}</strong></td>
+              <td>{{ formatTargetList(job.target_devices) }}</td>
               <td><StatusBadge :status="job.status" /></td>
               <td>{{ job.duration_seconds ? job.duration_seconds + 's' : '--' }}</td>
               <td>{{ job.triggered_by }}</td>
@@ -106,9 +106,9 @@
     </div>
     <div v-else class="empty-state">
       <i class="fas fa-list-check" aria-hidden="true"></i>
-      <p>No jobs found</p>
+      <p>No activity found</p>
       <router-link to="/" class="btn btn-primary btn-sm" style="display: inline-flex; margin-top: var(--space-sm)">
-        <i class="fas fa-home" aria-hidden="true"></i> Back to Dashboard
+        <i class="fas fa-home" aria-hidden="true"></i> Back to overview
       </router-link>
     </div>
   </div>
@@ -119,7 +119,7 @@ import { ref, watch, onMounted, onUnmounted, nextTick, computed } from "vue";
 import AnsiToHtml from "ansi-to-html";
 import { getJobs, getJob, streamJobOutput } from "../api.js";
 import StatusBadge from "../components/StatusBadge.vue";
-import { formatHostList } from "../utils/hosts.js";
+import { formatTargetList, operationLabel } from "../utils/devices.js";
 
 const jobs = ref([]);
 const filterStatus = ref("");

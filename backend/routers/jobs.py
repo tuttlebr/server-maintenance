@@ -12,7 +12,7 @@ from backend.schemas import JobResponse
 from backend.services.ansible_runner import cancel_job, get_log_path
 from backend.services.tokens import TokenError, decode_token
 
-router = APIRouter(prefix="/api/v1/jobs", tags=["jobs"])
+router = APIRouter(prefix="/api/v2/jobs", tags=["activity"])
 
 
 @router.get("/", response_model=list[JobResponse])
@@ -55,6 +55,11 @@ async def cancel_job_output(
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
     if job.status not in ("pending", "running"):
         raise HTTPException(status_code=400, detail=f"Job {job_id} is not running")
+    if job.playbook in {"reachy.daemon.restart", "reachy.software.update"}:
+        raise HTTPException(
+            status_code=400,
+            detail="This Reachy operation cannot be cancelled after the daemon accepts it",
+        )
     cancel_job(job_id)
     job.status = "cancelled"
     job.error_summary = f"Cancellation requested by {user}"

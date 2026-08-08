@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from backend.auth import get_current_user
 from backend.database import get_db
 from backend.models import Host, ManagedUser, UserHostAssociation
+from backend.capabilities import USERS_MANAGE, has_capability
 from backend.schemas import (
     BulkPasswordResetRequest,
     BulkUserAdd,
@@ -17,16 +18,15 @@ from backend.schemas import (
 from backend.services.ansible_runner import run_playbook
 from backend.services.csv_parser import parse_csv
 
-router = APIRouter(prefix="/api/v1/users", tags=["users"])
+router = APIRouter(prefix="/api/v2/users", tags=["access"])
 
 
-def _get_user_hosts(db: Session, user_id: int) -> list[str]:
+def _get_user_devices(db: Session, user_id: int) -> list[int]:
     assocs = db.query(UserHostAssociation).filter(UserHostAssociation.user_id == user_id).all()
     host_ids = [a.host_id for a in assocs]
     if not host_ids:
         return []
-    hosts = db.query(Host).filter(Host.id.in_(host_ids)).all()
-    return [h.hostname for h in hosts]
+    return sorted(host_ids)
 
 
 def _user_to_response(db: Session, user: ManagedUser) -> dict:
@@ -37,7 +37,7 @@ def _user_to_response(db: Session, user: ManagedUser) -> dict:
         "email": user.email,
         "is_sudoer": user.is_sudoer,
         "groups": user.groups,
-        "hosts": _get_user_hosts(db, user.id),
+        "device_ids": _get_user_devices(db, user.id),
         "created_at": user.created_at,
     }
     return data
@@ -48,6 +48,23 @@ def _validated_username(username: str) -> str:
         return _validate_linux_name(username)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _target_devices(payload, db: Session) -> list[Host]:
+    query = db.query(Host).filter((Host.transport == "ssh") | (Host.transport.is_(None)))
+    devices = query.order_by(Host.hostname).all() if payload.all_devices else query.filter(
+        Host.id.in_(payload.device_ids or [])
+    ).order_by(Host.hostname).all()
+    if not payload.all_devices and len(devices) != len(payload.device_ids or []):
+        found = {device.id for device in devices}
+        missing = [str(device_id) for device_id in payload.device_ids or [] if device_id not in found]
+        raise HTTPException(status_code=404, detail=f"Unknown or non-SSH device IDs: {', '.join(missing)}")
+    unsupported = [device.name for device in devices if not has_capability(device, USERS_MANAGE)]
+    if unsupported:
+        raise HTTPException(status_code=400, detail=f"Linux account management is not supported on: {', '.join(unsupported)}")
+    if not devices:
+        raise HTTPException(status_code=400, detail="No access-capable devices are available")
+    return devices
 
 
 @router.get("/")
@@ -72,11 +89,13 @@ async def bulk_add_users(
     if payload.password:
         extra_vars["default_password"] = payload.password
 
+    target_devices = _target_devices(payload, db)
+    target_names = [device.hostname for device in target_devices]
     job_id = await run_playbook(
         db=db,
         playbook="user_management.yml",
-        hosts=payload.hosts,
-        all_hosts=payload.all_hosts,
+        hosts=target_names,
+        all_hosts=False,
         extra_vars=extra_vars,
         triggered_by=user,
     )
@@ -97,9 +116,7 @@ async def bulk_add_users(
         else:
             managed = existing
 
-        target_hosts = payload.hosts or [h.hostname for h in db.query(Host).all()]
-        for host_name in target_hosts:
-            host = db.query(Host).filter(Host.hostname == host_name).first()
+        for host in target_devices:
             if host:
                 assoc = (
                     db.query(UserHostAssociation)
@@ -119,7 +136,7 @@ async def bulk_add_users(
 @router.post("/bulk-add-csv")
 async def bulk_add_users_csv(
     file: UploadFile = File(...),
-    hosts: str = "",
+    device_ids: str = "",
     password: str | None = None,
     db: Session = Depends(get_db),
     user: str = Depends(get_current_user),
@@ -130,10 +147,13 @@ async def bulk_add_users_csv(
     if not users:
         raise HTTPException(status_code=400, detail="No valid users found in CSV")
 
-    host_list = [h.strip() for h in hosts.split(",") if h.strip()]
-    if not host_list:
-        raise HTTPException(status_code=400, detail="At least one target host is required for CSV provisioning")
-    payload = BulkUserAdd(users=users, hosts=host_list, password=password)
+    try:
+        target_ids = [int(value.strip()) for value in device_ids.split(",") if value.strip()]
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="device_ids must be comma-separated integers") from exc
+    if not target_ids:
+        raise HTTPException(status_code=400, detail="At least one target device is required for CSV provisioning")
+    payload = BulkUserAdd(users=users, device_ids=target_ids, password=password)
 
     return await bulk_add_users(payload, db=db, user=user)
 
@@ -153,11 +173,12 @@ async def bulk_update_users(
     if payload.shell:
         extra_vars["user_shell"] = payload.shell
 
+    target_devices = _target_devices(payload, db)
     job_id = await run_playbook(
         db=db,
         playbook="user_management.yml",
-        hosts=payload.hosts,
-        all_hosts=payload.all_hosts,
+        hosts=[device.hostname for device in target_devices],
+        all_hosts=False,
         extra_vars=extra_vars,
         triggered_by=user,
     )
@@ -179,11 +200,12 @@ async def change_password(
         "interactive_mode": False,
     }
 
+    target_devices = _target_devices(payload, db)
     job_id = await run_playbook(
         db=db,
         playbook="change_password.yml",
-        hosts=payload.hosts,
-        all_hosts=payload.all_hosts,
+        hosts=[device.hostname for device in target_devices],
+        all_hosts=False,
         extra_vars=extra_vars,
         triggered_by=user,
     )
@@ -204,11 +226,12 @@ async def bulk_password_reset(
         extra_vars["users_to_reset"] = payload.usernames
     extra_vars["temp_password"] = payload.temp_password
 
+    target_devices = _target_devices(payload, db)
     job_id = await run_playbook(
         db=db,
         playbook="bulk_password_reset.yml",
-        hosts=payload.hosts,
-        all_hosts=payload.all_hosts,
+        hosts=[device.hostname for device in target_devices],
+        all_hosts=False,
         extra_vars=extra_vars,
         triggered_by=user,
     )
@@ -225,11 +248,12 @@ async def add_sudoers(
     username = _validated_username(username)
     extra_vars = {"root_users": [username]}
 
+    target_devices = _target_devices(payload, db)
     job_id = await run_playbook(
         db=db,
         playbook="manage_sudoers.yml",
-        hosts=payload.hosts,
-        all_hosts=payload.all_hosts,
+        hosts=[device.hostname for device in target_devices],
+        all_hosts=False,
         extra_vars=extra_vars,
         triggered_by=user,
     )
@@ -252,11 +276,12 @@ async def remove_sudoers(
     username = _validated_username(username)
     extra_vars = {"target_username": username}
 
+    target_devices = _target_devices(payload, db)
     job_id = await run_playbook(
         db=db,
         playbook="remove_sudoers.yml",
-        hosts=payload.hosts,
-        all_hosts=payload.all_hosts,
+        hosts=[device.hostname for device in target_devices],
+        all_hosts=False,
         extra_vars=extra_vars,
         triggered_by=user,
     )
@@ -282,11 +307,12 @@ async def remove_user(
         "remove_home": payload.remove_home,
     }
 
+    target_devices = _target_devices(payload, db)
     job_id = await run_playbook(
         db=db,
         playbook="remove_user.yml",
-        hosts=payload.hosts,
-        all_hosts=payload.all_hosts,
+        hosts=[device.hostname for device in target_devices],
+        all_hosts=False,
         extra_vars=extra_vars,
         triggered_by=user,
     )

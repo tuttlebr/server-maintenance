@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="page-header">
-      <h2>User Management</h2>
+      <div><h2>Access</h2><p style="margin: 4px 0 0; color: var(--text-secondary)">Manage Linux accounts only on devices that support user provisioning.</p></div>
     </div>
 
     <div class="tabs">
@@ -19,7 +19,7 @@
               <h4 style="margin-bottom: var(--space-sm)">Manual Entry</h4>
               <div v-for="(u, i) in newUsers" :key="i" class="flex gap-xs" style="margin-bottom: var(--space-xs)">
                 <input v-model="u.full_name" class="form-input" placeholder="Full Name" :aria-label="`Full name for row ${i + 1}`" style="flex: 1" />
-                <input v-model="u.email" class="form-input" placeholder="email@nvidia.com" :aria-label="`Email for row ${i + 1}`" style="flex: 1" />
+                <input v-model="u.email" class="form-input" placeholder="name@example.com" :aria-label="`Email for row ${i + 1}`" style="flex: 1" />
                 <button class="btn btn-ghost btn-sm btn-icon" type="button" :aria-label="`Remove row ${i + 1}`" :disabled="newUsers.length === 1" @click="newUsers.splice(i, 1)">
                   <i class="fas fa-times" aria-hidden="true"></i>
                 </button>
@@ -42,23 +42,23 @@
 
       <div class="card" style="margin-top: var(--space-sm)">
         <div class="card-body">
-          <h4 style="margin-bottom: var(--space-sm)">Target Hosts</h4>
+          <h4 style="margin-bottom: var(--space-sm)">Target Devices</h4>
           <div class="checkbox-group" style="margin-bottom: var(--space-sm)">
-            <label class="checkbox-label" v-for="h in hosts" :key="h.hostname">
-              <input type="checkbox" :value="h.hostname" v-model="selectedHosts" />
-              {{ h.hostname }}
-              <span :class="['badge', getMachineType(h.machine_type).badge]" style="font-size: 10px">{{ getMachineType(h.machine_type).short }}</span>
+            <label class="checkbox-label" v-for="device in devices" :key="device.id">
+              <input type="checkbox" :value="device.id" v-model="selectedDeviceIds" />
+              {{ device.name }}
+              <span :class="['badge', deviceKind(device.kind).badge]" style="font-size: 10px">{{ deviceKind(device.kind).short }}</span>
             </label>
           </div>
           <div class="flex gap-xs" style="margin-bottom: var(--space-sm)">
-            <button v-for="(mt, key) in MACHINE_TYPES" :key="key" type="button" class="btn btn-ghost btn-sm" @click="selectGroup(key)">All {{ mt.short }}</button>
-            <button type="button" class="btn btn-ghost btn-sm" @click="selectedHosts = hosts.map(h => h.hostname)">Select All</button>
+            <button v-for="key in availableKinds" :key="key" type="button" class="btn btn-ghost btn-sm" @click="selectGroup(key)">All {{ deviceKind(key).short }}</button>
+            <button type="button" class="btn btn-ghost btn-sm" @click="selectedDeviceIds = devices.map(device => device.id)">Select All</button>
           </div>
           <div class="form-group">
             <label class="form-label" for="add-password">Password (optional, defaults to group_vars setting)</label>
             <input id="add-password" v-model="addPassword" type="password" class="form-input" placeholder="Leave blank for default" />
           </div>
-          <button class="btn btn-green" type="button" :disabled="!canProvision" @click="provisionUsers">
+          <button class="btn btn-primary" type="button" :disabled="!canProvision" @click="provisionUsers">
             <i class="fas fa-user-plus" aria-hidden="true"></i> Provision Users
           </button>
         </div>
@@ -199,8 +199,8 @@
 
     <ConfirmDialog
       :visible="!!confirmRemoveUser"
-      title="Remove user from all hosts"
-      :message="confirmRemoveUser ? `This removes ${confirmRemoveUser.username} from every host in the fleet. The user's home directory is preserved.` : ''"
+      title="Remove user from all eligible devices"
+      :message="confirmRemoveUser ? `This removes ${confirmRemoveUser.username} from every device that supports Linux account management. The user's home directory is preserved.` : ''"
       confirm-text="Remove user"
       :danger-mode="true"
       :require-text="confirmRemoveUser ? confirmRemoveUser.username : ''"
@@ -211,7 +211,7 @@
     <ConfirmDialog
       :visible="confirmBulkReset"
       title="Bulk reset all user passwords"
-      message="This resets passwords for every non-system user on every host. Users will be forced to change their password on next login. The temporary password is not stored in job logs."
+      message="This resets passwords for every non-system user on every eligible device. Users will be forced to change their password on next login. The temporary password is not stored in job logs."
       confirm-text="Reset all passwords"
       :danger-mode="true"
       require-text="RESET"
@@ -229,20 +229,19 @@
 <script setup>
 import { ref, computed, onMounted } from "vue";
 import {
-  getUsers, getHosts, bulkAddUsers, changePassword, bulkPasswordReset,
+  getUsers, getDevices, bulkAddUsers, changePassword, bulkPasswordReset,
   addSudoers, removeSudoers, removeUser,
 } from "../api.js";
 import CsvUpload from "../components/CsvUpload.vue";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
 import BaseModal from "../components/BaseModal.vue";
-import { getMachineType, MACHINE_TYPES } from "../machineTypes.js";
-import { sortHostnames } from "../utils/hosts.js";
+import { deviceKind } from "../utils/devices.js";
 
 const tab = ref("add");
-const hosts = ref([]);
+const devices = ref([]);
 const users = ref([]);
 const search = ref("");
-const selectedHosts = ref([]);
+const selectedDeviceIds = ref([]);
 const newUsers = ref([{ full_name: "", email: "" }]);
 const csvUsers = ref([]);
 const addPassword = ref("");
@@ -267,6 +266,7 @@ const filteredUsers = computed(() => {
 
 const sudoerUsers = computed(() => users.value.filter((u) => u.is_sudoer));
 const nonSudoerUsers = computed(() => users.value.filter((u) => !u.is_sudoer));
+const availableKinds = computed(() => [...new Set(devices.value.map((device) => device.kind))].sort());
 
 const allUsersToAdd = computed(() => {
   const manual = newUsers.value.filter((u) => u.full_name && u.email);
@@ -274,13 +274,13 @@ const allUsersToAdd = computed(() => {
 });
 
 const canProvision = computed(
-  () => allUsersToAdd.value.length > 0 && selectedHosts.value.length > 0
+  () => allUsersToAdd.value.length > 0 && selectedDeviceIds.value.length > 0
 );
 
 function selectGroup(type) {
-  selectedHosts.value = hosts.value
-    .filter((h) => h.machine_type === type)
-    .map((h) => h.hostname);
+  selectedDeviceIds.value = devices.value
+    .filter((device) => device.kind === type)
+    .map((device) => device.id);
 }
 
 function onCsvParsed(parsed) {
@@ -295,11 +295,11 @@ async function loadUsers() {
   }
 }
 
-async function loadHosts() {
+async function loadDevices() {
   try {
-    hosts.value = await getHosts();
+    devices.value = (await getDevices()).filter((device) => device.capabilities.includes("users.manage"));
   } catch (e) {
-    window.$toast?.error("Couldn't load hosts", e);
+    window.$toast?.error("Couldn't load access-capable devices", e);
   }
 }
 
@@ -307,11 +307,11 @@ async function provisionUsers() {
   try {
     const payload = {
       users: allUsersToAdd.value,
-      hosts: sortHostnames(selectedHosts.value),
+      device_ids: [...selectedDeviceIds.value].sort((a, b) => a - b),
     };
     if (addPassword.value) payload.password = addPassword.value;
     await bulkAddUsers(payload);
-    window.$toast?.success(`Adding ${payload.users.length} user(s) to ${selectedHosts.value.length} host(s)`);
+    window.$toast?.success(`Adding ${payload.users.length} user(s) to ${selectedDeviceIds.value.length} device(s)`);
     newUsers.value = [{ full_name: "", email: "" }];
     csvUsers.value = [];
     addPassword.value = "";
@@ -330,7 +330,7 @@ function openPasswordModal(user) {
 async function handleChangePassword() {
   try {
     await changePassword(passwordModal.value.username, {
-      all_hosts: true,
+      all_devices: true,
       new_password: newPassword.value,
       force_change: forceChange.value,
     });
@@ -348,7 +348,7 @@ async function handleBulkReset() {
     return;
   }
   try {
-    await bulkPasswordReset({ all_hosts: true, temp_password: bulkResetPassword.value });
+    await bulkPasswordReset({ all_devices: true, temp_password: bulkResetPassword.value });
     window.$toast?.success("Bulk password reset started");
     bulkResetPassword.value = "";
   } catch (e) {
@@ -364,10 +364,10 @@ function closeBulkReset() {
 async function toggleSudoers(user) {
   try {
     if (user.is_sudoer) {
-      await removeSudoers(user.username, { all_hosts: true });
+      await removeSudoers(user.username, { all_devices: true });
       window.$toast?.success(`Removed ${user.username} from sudoers`);
     } else {
-      await addSudoers(user.username, { all_hosts: true });
+      await addSudoers(user.username, { all_devices: true });
       window.$toast?.success(`Added ${user.username} to sudoers`);
     }
     loadUsers();
@@ -378,7 +378,7 @@ async function toggleSudoers(user) {
 
 async function handleAddSudoers() {
   try {
-    await addSudoers(sudoerToAdd.value, { all_hosts: true });
+    await addSudoers(sudoerToAdd.value, { all_devices: true });
     window.$toast?.success(`Added ${sudoerToAdd.value} to sudoers`);
     sudoerToAdd.value = "";
     loadUsers();
@@ -389,7 +389,7 @@ async function handleAddSudoers() {
 
 async function handleRemoveSudoers(username) {
   try {
-    await removeSudoers(username, { all_hosts: true });
+    await removeSudoers(username, { all_devices: true });
     window.$toast?.success(`Removed ${username} from sudoers`);
     loadUsers();
   } catch (e) {
@@ -402,8 +402,8 @@ async function handleRemoveUser() {
   try {
     const u = confirmRemoveUser.value;
     confirmRemoveUser.value = null;
-    await removeUser(u.username, { all_hosts: true, remove_home: false });
-    window.$toast?.success(`Removing ${u.username} from all hosts`);
+    await removeUser(u.username, { all_devices: true, remove_home: false });
+    window.$toast?.success(`Removing ${u.username} from all eligible devices`);
     loadUsers();
   } catch (e) {
     window.$toast?.error("Couldn't remove user", e);
@@ -412,6 +412,6 @@ async function handleRemoveUser() {
 
 onMounted(() => {
   loadUsers();
-  loadHosts();
+  loadDevices();
 });
 </script>

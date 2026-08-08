@@ -9,14 +9,12 @@
       register: gpu_info
       ignore_errors: true
       changed_when: false
-      when: "'nvidia_gpu' in group_names"
 
     - name: Get CUDA version
       shell: nvcc --version 2>/dev/null | grep "release" | sed 's/.*release //' | sed 's/,.*//'
       register: cuda_info
       ignore_errors: true
       changed_when: false
-      when: "'nvidia_gpu' in group_names"
 
     - name: Discover mounted storage
       ansible.builtin.include_tasks: tasks/discover_storage.yml
@@ -47,7 +45,24 @@
       register: fm_status
       failed_when: false
       changed_when: false
-      when: "'fabric_manager' in group_names"
+
+    - name: Check whether fabric manager is installed
+      command: systemctl cat nvidia-fabricmanager
+      register: fm_available
+      failed_when: false
+      changed_when: false
+
+    - name: Check whether MIG is supported
+      command: nvidia-smi --query-gpu=mig.mode.current --format=csv,noheader
+      register: mig_available
+      failed_when: false
+      changed_when: false
+
+    - name: Check whether kubectl is available
+      shell: command -v kubectl
+      register: kubectl_available
+      failed_when: false
+      changed_when: false
 
     - name: Check if reboot is required
       stat:
@@ -81,7 +96,12 @@
           hostname: "{{ inventory_hostname }}"
           ip_address: "{{ ansible_facts['default_ipv4']['address'] | default('unknown') }}"
           os_version: "{{ os_info.stdout | default('unknown') }}"
+          os_family: "{{ ansible_facts['os_family'] | default('unknown') }}"
+          architecture: "{{ ansible_facts['architecture'] | default('unknown') }}"
+          system_vendor: "{{ ansible_facts['system_vendor'] | default('unknown') }}"
+          product_name: "{{ ansible_facts['product_name'] | default('unknown') }}"
           gpu_info: "{{ gpu_info.stdout | default('unknown') }}"
+          gpu_vendor: "{{ 'NVIDIA' if (gpu_info.rc | default(1)) == 0 else 'unknown' }}"
           cuda_version: "{{ cuda_info.stdout | default('unknown') }}"
           driver_version: "{{ (gpu_info.stdout | default('')).split(', ')[1] | default('unknown') }}"
           gpu_model: "{{ (gpu_info.stdout | default('')).split(', ')[0] | default('unknown') }}"
@@ -92,7 +112,10 @@
           disk_data_type: "{{ busiest_non_root_storage.type | default('') }}"
           storage_mounts: "{{ storage_mounts }}"
           nic_info: "{{ nic_info.stdout | default('unknown') }}"
-          fabric_manager: "{{ fm_status.stdout if 'fabric_manager' in group_names else 'N/A' }}"
+          fabric_manager: "{{ fm_status.stdout | default('N/A') }}"
+          fabric_manager_available: "{{ (fm_available.rc | default(1)) == 0 }}"
+          mig_available: "{{ (mig_available.rc | default(1)) == 0 }}"
+          kubernetes_available: "{{ (kubectl_available.rc | default(1)) == 0 }}"
           uptime_seconds: "{{ ansible_facts['uptime_seconds'] | default(0) }}"
           reboot_required: "{{ reboot_flag.stat.exists }}"
           machine_type: "{{ machine_type | default('unknown') }}"

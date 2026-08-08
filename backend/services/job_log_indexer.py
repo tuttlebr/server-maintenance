@@ -133,7 +133,7 @@ def build_job_documents(job: Job) -> list[IndexDocument]:
     targets = job.target_hosts or "none recorded"
     metadata = "\n".join(
         [
-            "Document type: completed DGX Fleet Manager job log",
+            "Document type: completed Fleet Manager operation log",
             f"Job ID: {job.job_id}",
             f"Terminal status: {status}",
             f"Playbook: {job.playbook}",
@@ -226,7 +226,7 @@ def build_fleet_snapshot_documents(db) -> list[IndexDocument]:
     generated_at = datetime.now(timezone.utc).isoformat()
     summary = "\n".join(
         [
-            "Document type: current DGX Fleet Manager fleet job status snapshot",
+            "Document type: current Fleet Manager device operation snapshot",
             f"Snapshot generated at (UTC): {generated_at}",
             (
                 "Interpretation: For each registered host, the latest completed job that targeted that host is "
@@ -368,7 +368,7 @@ def _get_or_create_collection(embed_dim: int):
         FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=embed_dim),
     ]
     schema = CollectionSchema(
-        fields, description="Redacted DGX Fleet Manager completed job logs"
+        fields, description="Redacted Fleet Manager completed operation logs"
     )
     collection = Collection(COLLECTION_NAME, schema, using=COLLECTION_ALIAS)
     collection.create_index(

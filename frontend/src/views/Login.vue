@@ -2,10 +2,9 @@
   <div class="login-page">
     <div class="login-card">
       <div class="login-logo">
-        <svg viewBox="0 0 120 44" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="NVIDIA">
-          <text x="10" y="32" fill="#76B900" font-family="NVIDIA Sans, sans-serif" font-weight="700" font-size="28">NVIDIA</text>
-        </svg>
-        <p class="login-subtitle">Fleet Manager</p>
+        <div class="login-mark" aria-hidden="true"><i class="fas fa-layer-group"></i></div>
+        <h1>Fleet Manager</h1>
+        <p class="login-subtitle">One place for compute, edge, and robotics operations</p>
       </div>
 
       <form @submit.prevent="handleLogin">
@@ -33,7 +32,7 @@
           />
         </div>
         <p v-if="error" class="login-error" role="alert">{{ error }}</p>
-        <button type="submit" class="btn btn-green login-btn" :disabled="loading">
+        <button type="submit" class="btn btn-primary login-btn" :disabled="loading">
           {{ loading ? "Signing in…" : "Sign In" }}
         </button>
       </form>
@@ -74,7 +73,7 @@ async function handleLogin() {
   align-items: center;
   justify-content: center;
   background:
-    radial-gradient(circle at 20% 10%, rgba(118, 185, 0, 0.18) 0%, transparent 45%),
+    radial-gradient(circle at 20% 10%, rgba(0, 116, 223, 0.2) 0%, transparent 45%),
     radial-gradient(circle at 80% 90%, rgba(0, 116, 223, 0.12) 0%, transparent 50%),
     var(--surface-dark);
 }
@@ -94,11 +93,8 @@ async function handleLogin() {
   margin-bottom: var(--space-md);
 }
 
-.login-logo svg {
-  height: 36px;
-  margin: 0 auto;
-  display: block;
-}
+.login-mark { width: 46px; height: 46px; margin: 0 auto 12px; border-radius: 12px; display: grid; place-items: center; background: var(--color-accent); color: #fff; font-size: 20px; }
+.login-logo h1 { margin: 0; font-size: 24px; }
 
 .login-subtitle {
   color: var(--text-secondary);

@@ -53,13 +53,13 @@ class RequestValidationTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             BulkUserAdd(users=[UserInfo(full_name="Jane User", email="juser@example.com")])
 
-    def test_bulk_user_add_accepts_all_hosts_flag(self):
+    def test_bulk_user_add_accepts_all_devices_flag(self):
         payload = BulkUserAdd(
             users=[UserInfo(full_name="Jane User", email="juser@example.com")],
-            all_hosts=True,
+            all_devices=True,
         )
-        self.assertTrue(payload.all_hosts)
-        self.assertIsNone(payload.hosts)
+        self.assertTrue(payload.all_devices)
+        self.assertIsNone(payload.device_ids)
 
     def test_maintenance_request_rejects_empty_host_list_without_all_hosts(self):
         with self.assertRaises(ValidationError):
@@ -103,7 +103,7 @@ class RequestValidationTests(unittest.TestCase):
     def test_password_rejects_template_expression(self):
         with self.assertRaises(ValidationError):
             BulkPasswordResetRequest(
-                hosts=["dgx-01"],
+                device_ids=[1],
                 temp_password="SafePrefix{{ 7 * 7 }}",
             )
 
@@ -216,7 +216,8 @@ class HostCredentialTests(unittest.TestCase):
         self.assertIn("managed_hosts", parsed["all"]["children"])
         self.assertIn("gpu", parsed["all"]["children"])
         self.assertIn("nvidia_gpu", parsed["all"]["children"])
-        self.assertIn("dgx_spark", parsed["all"]["children"]["gpu"]["children"])
+        self.assertIn("dgx-01", parsed["all"]["children"]["gpu"]["hosts"])
+        self.assertIn("dgx-01", parsed["all"]["children"]["managed_hosts"]["hosts"])
         self.assertEqual(validation.returncode, 0, validation.stderr)
 
     def test_unrecognized_legacy_machine_type_is_quarantined_as_unknown(self):

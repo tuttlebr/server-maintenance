@@ -1,123 +1,44 @@
 # Fleet Manager UI Guide
 
-This guide teaches DGX Help how to help users operate the Fleet Manager web UI. Use it for questions about navigation, where to click, what each page does, and how to monitor actions after they start.
+This guide teaches Fleet Help how to explain the vendor-neutral Fleet Manager UI. Fleet Help is read-only: it may interpret documentation and recorded operation output, but it must never claim to inspect a device live or execute an operation.
 
-DGX Help should guide users through the UI and explain consequences, but it should not claim to execute destructive actions itself. For actions that affect hosts, users, drivers, reboots, Docker cleanup, package updates, or documentation indexing, tell the user which page and control to use and remind them to review the confirmation dialog and Job History.
+## Information Architecture
 
-## Main Navigation
+- **Overview** summarizes reachability, devices needing attention, active jobs, and recent activity. GPU and robot metrics appear only when those device capabilities exist.
+- **Devices** is the mixed-fleet inventory. Filter by status, type, vendor, or capability. Device types are server, workstation, edge, robot, and generic.
+- **Operations** shows only actions supported by at least one current device. Operators select eligible devices, review impact, confirm, and then monitor Activity.
+- **Access** manages Linux accounts on devices with `users.manage`. Robots and devices without Linux account management are excluded.
+- **Activity** contains background and completed jobs, including target devices, status, recap, logs, and errors.
+- **Fleet Help** answers documentation and recorded-operation questions. It does not operate devices.
 
-The main navigation bar contains Dashboard, Users, Drivers, Networking, Maintenance, Jobs, Active, and Sign Out.
+## Adding Devices
 
-Dashboard is the fleet landing page. Use it to review host cards, add hosts, scan hosts, and open a host detail page.
+Use **Devices → Add device**. The flow is connection, details, discovery, and review.
 
-Users opens User Management. Use it for provisioning users, importing users from CSV, resetting passwords, managing sudo access, and removing managed users.
+For Linux over SSH, enter an inventory-safe device name, endpoint, SSH user, and authentication details. Fleet Manager retrieves the ED25519 host fingerprint. Compare it through the device console or another trusted channel before approving it. The application rechecks the key, verifies authentication, and only then stores the device.
 
-Drivers opens Driver Management. Use it to review driver versions and start driver upgrades. Firmware inventory and updates live on Maintenance.
+For Reachy Mini Wireless, provide the network endpoint and daemon port. Discovery calls read-only state, daemon-status, and update-availability endpoints. The integration does not expose movement, motors, camera, audio, or app controls. Reachy's local daemon connection is not identity-verified, so enroll robots only on a trusted management network.
 
-Networking opens Fabric Manager controls and networking status. Fabric Manager actions only apply to DGX Workstation hosts with NVSwitch support. DGX Spark does not support Fabric Manager.
+Use **Import CSV** for larger fleets. The importer parses rows locally, discovers every device, shows per-row failures and SSH fingerprints, requires explicit verification of all listed fingerprints, and enrolls only ready rows. Required columns are `name`, `endpoint`, and `transport`; SSH rows also require `ssh_user`.
 
-Maintenance opens System Maintenance. Use it for disk usage, reboot required, storage analysis, GPU usage, Docker cleanup, preflight checks, diagnostics, advanced full-system maintenance, host bootstrap, firmware actions, drain/resume, MIG controls, and the DGX Help Documentation Index.
+Discovery assigns a general device kind and explicit capabilities. Failure to identify a vendor or product model does not prevent a reachable Linux device from being managed as generic.
 
-Maintenance Targets sets the host scope for host-scoped maintenance actions. All Hosts uses each playbook's supported host group. Selected Hosts can target one machine or any subset. Firmware support is detected by the playbook at runtime, GPU usage is limited to known NVIDIA GPU nodes, and MIG actions are limited to DGX Workstation hosts.
+## Device Details
 
-Jobs opens Job History. Use it to inspect playbook output, status, timing, and AI error analysis.
+Device Summary shows identity, connection, reachability, and last discovery. Hardware and Software omit facts that do not apply instead of displaying empty placeholders. Operations lists the device's discovered capabilities and links to the capability-filtered Operations experience.
 
-Active opens the active jobs tray. It shows currently running jobs and links to Job History.
+Scanning an SSH device runs the portable facts playbook. It probes Linux, storage, architecture, vendor and product facts, NVIDIA GPU availability, Fabric Manager, MIG, and Kubernetes without assuming those capabilities from a product name. Scanning Reachy checks daemon connectivity and state without moving the robot.
 
-## Dashboard Workflows
+## Operations and Safety
 
-Use Dashboard to understand fleet health at a glance. Host cards show status, machine type, driver version, disk usage, and other summary information. Click a host card or hostname to open Host Detail.
+Operation eligibility is enforced twice: the UI shows only eligible targets, and the backend rejects unsupported device IDs. A device name or vendor never grants an operation by itself.
 
-To add a host, use the add host controls on Dashboard. Enter the hostname or address, the existing remote SSH username, and the correct machine type group. Choose Unknown / Auto-detect when the platform class is not known. Unknown hosts are not assumed to have GPUs. The container's local `fleet` user is not the remote SSH account.
+Low-impact observations include device scan, storage analysis, GPU usage, Fabric Manager status, MIG status, Kubernetes readiness, Reachy health, and bounded Reachy daemon-log collection. Reboots, driver updates, cleanup, Reachy software updates, and Reachy daemon restarts require stronger confirmation. Reachy software operations use documented daemon endpoints and still never send motion commands.
 
-For dedicated-key authentication, the fleet SSH agent must be healthy. If its public key is already authorized for the remote account, leave the one-time bootstrap password blank. Otherwise provide the remote account password so Fleet Manager can install the public key; this password is not stored.
+After starting an operation, use **Activity** to monitor progress and review output. A successful historical job is not proof of current live health.
 
-Select **Verify SSH & Add** to retrieve the host's ED25519 fingerprint. Compare it through the host console or another trusted channel before approving it. Fleet Manager rechecks the approved key, verifies authentication, and only then saves the host. Bulk CSV import follows the same workflow for every row. After enrollment succeeds, run a scan so the system gathers facts and populates driver, disk, GPU, and reboot status.
+## Fleet Help Evidence Rules
 
-To refresh host facts, use scan on an individual host or scan all hosts from Dashboard when available. Scans start background jobs. Tell users to check the Active jobs tray or Job History if a scan does not update the card immediately.
+Always search recorded operation logs for questions about the user's fleet. Treat results as time-stamped historical observations. Use integration documentation for product or procedure questions, and do not represent documentation as the user's current device state.
 
-## Host Detail Workflows
-
-Host Detail is for single-host operations. Use it when the user asks about one specific host, wants to edit SSH connection settings, scan one host, delete one host, or start a driver upgrade on one host.
-
-After starting a Host Detail action, the UI creates a job. If the card still shows old data, wait for the job to complete and refresh or rescan the host.
-
-Deleting a host removes it from Fleet Manager inventory. It does not describe wiping the remote machine. Users should confirm the hostname before deleting.
-
-## User Management Workflows
-
-The Users page has Add Users and Manage Users tabs.
-
-Use Add Users to provision new accounts. Users can be entered manually with full name and email, or imported with CSV. Select one or more target hosts before clicking Provision Users. Provisioning creates remote user accounts, home directories, SSH configuration, and related managed-user records.
-
-For CSV import, use columns that provide names and email addresses. Review the parsed preview before provisioning. If a user is missing from the preview, fix the CSV before starting the job.
-
-Use Manage Users to search existing managed users, change a single user password, reset passwords in bulk, add a user to sudoers, remove a user from sudoers, or remove a managed user. Password resets and removals use confirmation dialogs because they affect multiple hosts.
-
-Removing a managed user preserves the home directory unless the UI explicitly says otherwise. Users should review the confirmation text and then check Job History for the remote command result.
-
-## Driver Management Workflows
-
-Use Drivers to review driver status across the fleet and start upgrades. Select target hosts and choose the desired upgrade mode or target version shown in the UI. Driver upgrades run as jobs and can take several minutes.
-
-Driver upgrades are high-impact maintenance actions. Tell users to schedule an appropriate maintenance window, read the confirmation dialog, and monitor Job History. Major version mode installs a target `nvidia-driver-<branch>` package. Firmware updates are separate Maintenance actions.
-
-For a single host, users can also open Host Detail and click Upgrade Drivers for that host.
-
-## Networking And Fabric Manager
-
-Use Networking to view Fabric Manager state and start, stop, restart, or check Fabric Manager on supported hosts.
-
-Fabric Manager is only supported on DGX Workstation hosts that have NVSwitch. If the UI shows Fabric Manager as unsupported or disabled for DGX Spark, that is expected. DGX Spark is a single-GPU desktop system and does not use multi-GPU NVSwitch Fabric Manager controls.
-
-After starting a Fabric Manager action, check the active job and Job History for status and output.
-
-## Maintenance Workflows
-
-The Maintenance page contains sections for Targets, Disk, Reboot, Storage, GPU, Quick Maintenance, Advanced Maintenance, and Docs.
-
-Disk shows current root usage and the busiest non-root mounted filesystem by host. Use it for quick capacity checks.
-
-Reboot Required lists hosts that report a pending reboot. Reboot All is a high-blast-radius action and reboots one host at a time. Targeted Reboot follows the maintenance target selection and can force-reboot one host, all hosts, or a subset. The reboot playbook verifies fstab syntax and confirms that automatically mounted fstab targets return after reboot. Users should confirm hostnames and expect temporary loss of access.
-
-Storage Analysis runs a deeper storage report for the selected maintenance targets and shows mount usage and large entries. Start Analyze Storage, then wait for the inline job status or inspect Job History.
-
-GPU Usage runs GPU utilization collection for the selected maintenance targets. Start Analyze GPU Usage, then review the resulting per-host report or Job History.
-
-Full System Maintenance is an advanced operation that runs the broader `system_maintenance.yml` workflow on the selected targets. It can update packages and firmware, configure or remediate mounts, clean kernels and container artifacts, perform system checks, and remediate zombie processes. It automatically reboots a host after firmware changes or when zombie processes are detected. Docker cleanup remains available separately as a narrower action.
-
-Docker Cleanup prunes unused Docker images, build cache, networks, and containerd images across hosts. It does not remove running containers or volumes according to the UI confirmation text, but users should still review the confirmation before starting.
-
-Preflight runs read-only maintenance readiness checks. Use it before full system maintenance, driver upgrades, firmware updates, reboots, or MIG changes. It reports apt or dpkg activity, disk pressure, reboot-required state, active GPU processes, GPU containers, Kubernetes schedulability when available, and DGX Workstation service health.
-
-Health Diagnostics collects deeper host output for troubleshooting, including nvidia-smi, GPU ECC and thermal data, Fabric Manager, DCGM, NVSM, IB status, failed systemd units, critical journal entries, and storage summaries. It is diagnostic and should be reviewed in Job History.
-
-Host Bootstrap runs common groups, admin sudo setup, Docker and NVIDIA Container Toolkit installation, and a host scan. Use it for onboarding a newly added host after SSH access is working.
-
-Firmware Inventory lists available firmware information for the selected maintenance targets. Firmware Update applies available firmware updates independently from driver upgrades and may require a later reboot.
-
-Drain / Resume checks active GPU work and runs Kubernetes cordon, drain, or uncordon when kubectl is configured on the target host. If Kubernetes is not configured, the job reports that status rather than inventing cluster state.
-
-MIG actions query, enable, or disable MIG mode on DGX Workstation hosts. Enable and disable refuse to run when active GPU processes are detected.
-
-The Docs section contains DGX Help Documentation Index. Click Reindex Documentation to crawl URLs from `docs/urls.txt`, include local Markdown guidance from `docs/*.md`, convert content to Markdown, rebuild the Milvus collection, and re-embed documentation using the configured embedding model. DGX Help may have incomplete answers while reindexing runs.
-
-## Job History And Troubleshooting
-
-Use Jobs to see every background job, including scans, user management, driver upgrades, reboots, storage analysis, GPU usage, Docker cleanup, full system maintenance, preflight checks, diagnostics, bootstrap, firmware actions, drain/resume, MIG actions, and documentation reindexing.
-
-DGX Help can also search completed job output. After any job succeeds, fails, or is cancelled, Fleet Manager indexes its redacted log, recap, target hosts, status, and timestamps in a separate Milvus collection. Ask questions such as “What failed in the last driver upgrade?”, “Which hosts had cancelled jobs?”, or “What’s the overall status of my fleet based on the most recent jobs?” Overall fleet answers use the newest completed job that targeted each registered host and distinguish job results from live host health.
-
-Open a job to view status and output. For failed jobs, use AI analysis when available to summarize likely causes from the job output. If a user asks why an operation failed, ask for the job ID or direct them to the failed job in Job History.
-
-If a UI action appears stuck, check the Active jobs tray first, then Job History. A browser refresh does not stop a backend job that has already started.
-
-## DGX Help Behavior
-
-DGX Help should answer DGX hardware and documentation questions from the indexed documentation and answer UI usage questions from this guide.
-
-When a user asks how to perform an action in the tool, answer with the page name, the control or section name, and what to verify after starting the action. Example: "Go to Maintenance, open the Docs section, click Reindex Documentation, confirm the dialog, then watch the progress card or Jobs."
-
-When a user asks whether DGX Help can perform an action for them, explain that DGX Help can guide the workflow but the user must start destructive or operational actions from the UI confirmation dialog.
-
-When a user asks about current UI state, job status, selected hosts, or page-specific context that is not included in the chat, say what page to check. Do not invent live state.
+If a required fact has not been recorded, say which evidence is missing and direct the user to the narrowest eligible operation that collects it. Carry device names and scope forward in follow-up questions.

@@ -10,7 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from backend.auth import create_access_token, verify_admin
 from backend.config import settings
 from backend.database import SessionLocal, init_db
-from backend.routers import chat, drivers, hosts, jobs, maintenance, networking, users
+from backend.routers import chat, devices, jobs, operations, users
 from backend.schemas import LoginRequest, TokenResponse
 from backend.services.ansible_runner import PlaybookRequestError
 from backend.services.inventory_writer import regenerate_inventory
@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Fleet Manager",
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -83,12 +83,10 @@ if STATIC_DIR.exists():
     app.add_middleware(SPAMiddleware)
 
 # API routes
-app.include_router(hosts.router)
+app.include_router(devices.router)
+app.include_router(operations.router)
 app.include_router(users.router)
 app.include_router(jobs.router)
-app.include_router(drivers.router)
-app.include_router(networking.router)
-app.include_router(maintenance.router)
 app.include_router(chat.router)
 
 
@@ -97,7 +95,7 @@ async def playbook_request_error_handler(request: Request, exc: PlaybookRequestE
     return JSONResponse(status_code=exc.status_code, content={"detail": str(exc)})
 
 
-@app.post("/api/v1/auth/login", response_model=TokenResponse)
+@app.post("/api/v2/auth/login", response_model=TokenResponse)
 def login(payload: LoginRequest, request: Request):
     client_address = request.client.host if request.client else "unknown"
     if login_is_blocked(client_address, payload.username):

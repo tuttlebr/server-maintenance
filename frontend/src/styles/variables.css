@@ -1,25 +1,14 @@
 :root {
-  /* Brand Colors (do not reference directly in components — use semantic tokens) */
-  --nv-green: #76b900;
-  --nv-purple: #952fc6;
-  --nv-orange: #ef9100;
-  --nv-yellow: #9c5000;
-  --nv-blue: #0074df;
-  --nv-red: #e52020;
-  --nv-magenta: #d2308e;
-  --nv-teal: #1d8ba4;
-
   /* Semantic colors */
-  --color-success: var(--nv-green);
-  --color-warning: var(--nv-orange);
-  --color-danger:  var(--nv-red);
-  --color-info:    var(--nv-blue);
-  --color-accent:  var(--nv-green);
+  --color-success: #27864b;
+  --color-warning: #c56a08;
+  --color-danger:  #d32f2f;
+  --color-info:    #1769d2;
+  --color-accent:  #1769d2;
 
   /* Surfaces (light theme default) */
   --surface-dark: #000000;
   --surface-dark-secondary: #333333;
-  --surface-green-accent: #76b900;
   --surface-lighter: #eeeeee;
   --surface-light: #f7f7f7;
   --surface-white: #ffffff;
@@ -34,7 +23,7 @@
   --border-subtle: #d4d4d4;
 
   /* Status surfaces (translucent overlays) */
-  --surface-success-soft: rgba(118, 185, 0, 0.10);
+  --surface-success-soft: rgba(39, 134, 75, 0.10);
   --surface-warning-soft: rgba(239, 145, 0, 0.10);
   --surface-danger-soft:  rgba(229, 32, 32, 0.10);
   --surface-info-soft:    rgba(0, 116, 223, 0.10);
@@ -43,11 +32,10 @@
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.06);
   --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.14);
   --shadow-dropdown: 0 6px 16px rgba(0, 0, 0, 0.18);
-  --shadow-focus: 0 0 0 3px rgba(118, 185, 0, 0.32);
+  --shadow-focus: 0 0 0 3px rgba(0, 116, 223, 0.30);
 
   /* Typography */
-  --font-family: "NVIDIA Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
-    Roboto, sans-serif;
+  --font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", "Menlo", "Consolas",
     "Courier New", monospace;
 
@@ -87,7 +75,7 @@
   --border-color: #3a3a3a;
   --border-subtle: #2a2a2a;
 
-  --surface-success-soft: rgba(118, 185, 0, 0.16);
+  --surface-success-soft: rgba(39, 134, 75, 0.16);
   --surface-warning-soft: rgba(239, 145, 0, 0.16);
   --surface-danger-soft:  rgba(229, 32, 32, 0.18);
   --surface-info-soft:    rgba(0, 116, 223, 0.18);
@@ -113,7 +101,7 @@
     --border-color: #3a3a3a;
     --border-subtle: #2a2a2a;
 
-    --surface-success-soft: rgba(118, 185, 0, 0.16);
+    --surface-success-soft: rgba(39, 134, 75, 0.16);
     --surface-warning-soft: rgba(239, 145, 0, 0.16);
     --surface-danger-soft:  rgba(229, 32, 32, 0.18);
     --surface-info-soft:    rgba(0, 116, 223, 0.18);

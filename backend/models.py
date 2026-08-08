@@ -1,17 +1,33 @@
 from datetime import datetime
 
+import json
+
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, func
 
 from backend.database import Base
 
 
-class Host(Base):
+class Device(Base):
     __tablename__ = "hosts"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     hostname = Column(String, unique=True, nullable=False, index=True)
     ip_address = Column(String)
-    machine_type = Column(String)  # unknown | dgx_spark | dgx_workstation | cpu_node | gpu_node
+    # Legacy deployment classification. It is retained only so the migration can
+    # enrich existing rows and older playbooks can finish moving to capabilities.
+    machine_type = Column(String)
+    display_name = Column(String)
+    kind = Column(String, default="generic")  # server | workstation | edge | robot | generic
+    vendor = Column(String)
+    model = Column(String)
+    architecture = Column(String)
+    os_family = Column(String)
+    transport = Column(String, default="ssh")  # ssh | reachy_daemon
+    endpoint = Column(String)
+    daemon_port = Column(Integer)
+    capabilities_json = Column(Text, default="[]")
+    facts_json = Column(Text, default="{}")
+    discovered_at = Column(DateTime)
     ansible_user = Column(String)
     # Keep the deployed column names while making the ciphertext-only storage
     # contract explicit in the ORM. Plaintext credentials never belong here.
@@ -36,6 +52,39 @@ class Host(Base):
     @property
     def passwordless_ssh(self) -> bool:
         return not bool(self.encrypted_ansible_password)
+
+    @property
+    def capabilities(self) -> list[str]:
+        try:
+            value = json.loads(self.capabilities_json or "[]")
+            return sorted({str(item) for item in value if item}) if isinstance(value, list) else []
+        except (TypeError, ValueError):
+            return []
+
+    @capabilities.setter
+    def capabilities(self, value: list[str]) -> None:
+        self.capabilities_json = json.dumps(sorted(set(value or [])))
+
+    @property
+    def facts(self) -> dict:
+        try:
+            value = json.loads(self.facts_json or "{}")
+            return value if isinstance(value, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+
+    @facts.setter
+    def facts(self, value: dict) -> None:
+        self.facts_json = json.dumps(value or {}, sort_keys=True)
+
+    @property
+    def name(self) -> str:
+        return self.display_name or self.hostname
+
+
+# Internal compatibility alias while the Ansible-oriented services are renamed
+# incrementally. Public API contracts expose Device only.
+Host = Device
 
 
 class ManagedUser(Base):
@@ -75,6 +124,10 @@ class Job(Base):
     error_summary = Column(Text)
     recap = Column(Text)  # PLAY RECAP summary
     created_at = Column(DateTime, default=func.now())
+
+    @property
+    def target_devices(self) -> str | None:
+        return self.target_hosts
 
 
 class LoginThrottle(Base):

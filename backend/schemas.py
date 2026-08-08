@@ -13,6 +13,8 @@ GROUPS_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}(,[a-z_][a-z0-9_-]{0,31})*$")
 SAFE_TEXT_RE = re.compile(r"^[^{}<>\r\n$`|;]{1,120}$")
 MACHINE_TYPE_VALUES = {"unknown", "dgx_spark", "dgx_workstation", "cpu_node", "gpu_node"}
 MachineType = Literal["unknown", "dgx_spark", "dgx_workstation", "cpu_node", "gpu_node"]
+DeviceKind = Literal["server", "workstation", "edge", "robot", "generic"]
+DeviceTransport = Literal["ssh", "reachy_daemon"]
 ALLOWED_SHELLS = {"/bin/bash", "/bin/sh", "/bin/zsh", "/usr/bin/bash", "/usr/bin/zsh", "/usr/sbin/nologin", "/bin/false"}
 JINJA_MARKERS = ("{{", "}}", "{%", "%}", "{#", "#}")
 
@@ -85,6 +87,13 @@ def _validate_targeting(hosts: list[str] | None, all_hosts: bool) -> None:
         raise ValueError("select at least one host or set all_hosts=true")
 
 
+def _validate_device_targeting(device_ids: list[int] | None, all_devices: bool) -> None:
+    if all_devices and device_ids:
+        raise ValueError("provide either device_ids or all_devices, not both")
+    if not all_devices and not device_ids:
+        raise ValueError("select at least one device or set all_devices=true")
+
+
 # Auth
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=128)
@@ -94,6 +103,152 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+# Devices (v2 public contract)
+class DeviceCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=253)
+    endpoint: str
+    transport: DeviceTransport = "ssh"
+    ssh_user: str | None = None
+    ssh_password: str | None = None
+    become_password: str | None = None
+    bootstrap_password: str | None = None
+    passwordless_ssh: bool = True
+    daemon_port: int | None = Field(default=None, ge=1, le=65535)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return _validate_hostname(value)
+
+    @field_validator("endpoint")
+    @classmethod
+    def validate_endpoint(cls, value: str) -> str:
+        value = value.strip()
+        if not ADDRESS_RE.fullmatch(value):
+            raise ValueError("endpoint contains unsupported characters")
+        return value
+
+    @field_validator("ssh_user")
+    @classmethod
+    def validate_ssh_user(cls, value: str | None) -> str | None:
+        return _validate_optional_linux_name(value)
+
+    @field_validator("ssh_password", "become_password", "bootstrap_password")
+    @classmethod
+    def validate_connection_secrets(cls, value: str | None, info) -> str | None:
+        return _validate_ansible_string(value, info.field_name)
+
+    @model_validator(mode="after")
+    def validate_transport_requirements(self):
+        if self.transport == "ssh" and not self.ssh_user:
+            raise ValueError("ssh_user is required for SSH devices")
+        if self.transport == "ssh" and not self.passwordless_ssh and not self.ssh_password:
+            raise ValueError("ssh_password is required when passwordless_ssh is false")
+        if self.transport == "reachy_daemon" and self.daemon_port is None:
+            self.daemon_port = 8000
+        return self
+
+
+class DeviceUpdate(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=120)
+    endpoint: str | None = None
+    ssh_user: str | None = None
+    ssh_password: str | None = None
+    become_password: str | None = None
+    passwordless_ssh: bool | None = None
+    daemon_port: int | None = Field(default=None, ge=1, le=65535)
+
+    @field_validator("endpoint")
+    @classmethod
+    def validate_endpoint(cls, value: str | None) -> str | None:
+        value = _strip(value)
+        if value and not ADDRESS_RE.fullmatch(value):
+            raise ValueError("endpoint contains unsupported characters")
+        return value
+
+    @field_validator("ssh_user")
+    @classmethod
+    def validate_ssh_user(cls, value: str | None) -> str | None:
+        return _validate_optional_linux_name(value)
+
+    @field_validator("ssh_password", "become_password")
+    @classmethod
+    def validate_connection_secrets(cls, value: str | None, info) -> str | None:
+        return _validate_ansible_string(value, info.field_name)
+
+
+class DeviceResponse(BaseModel):
+    id: int
+    name: str
+    inventory_name: str
+    endpoint: str
+    transport: str
+    kind: str
+    vendor: str | None = None
+    model: str | None = None
+    architecture: str | None = None
+    os_family: str | None = None
+    os_version: str | None = None
+    status: str
+    capabilities: list[str] = Field(default_factory=list)
+    facts: dict = Field(default_factory=dict)
+    memory_gb: int | None = None
+    gpu_model: str | None = None
+    driver_version: str | None = None
+    cuda_version: str | None = None
+    nic_type: str | None = None
+    nic_speed: str | None = None
+    disk_root_percent: int | None = None
+    disk_data_percent: int | None = None
+    reboot_required: bool = False
+    last_seen: datetime | None = None
+    discovered_at: datetime | None = None
+    created_at: datetime | None = None
+
+
+class DiscoveryResponse(BaseModel):
+    reachable: bool
+    trust_required: bool = False
+    fingerprint: str | None = None
+    kind: str = "generic"
+    vendor: str | None = None
+    model: str | None = None
+    architecture: str | None = None
+    os_family: str | None = None
+    capabilities: list[str] = Field(default_factory=list)
+    detail: str
+
+
+class DeviceKeyApproval(BaseModel):
+    fingerprint: str = Field(pattern=r"^SHA256:[A-Za-z0-9+/]{43}$")
+
+
+class DeviceEnrollmentRequest(BaseModel):
+    device: DeviceCreate
+    approval: DeviceKeyApproval | None = None
+
+
+class OperationResponse(BaseModel):
+    id: str
+    label: str
+    description: str
+    category: str
+    risk: str
+    confirmation: str
+    icon: str
+    eligible_device_ids: list[int]
+    eligible_count: int
+
+
+class OperationRunRequest(BaseModel):
+    device_ids: list[int] = Field(min_length=1, max_length=200)
+
+    @field_validator("device_ids")
+    @classmethod
+    def validate_device_ids(cls, value: list[int]) -> list[int]:
+        return list(dict.fromkeys(value))
 
 
 # Hosts
@@ -257,14 +412,14 @@ class UserInfo(BaseModel):
 
 class BulkUserAdd(BaseModel):
     users: list[UserInfo] = Field(min_length=1, max_length=500)
-    hosts: list[str] | None = None
-    all_hosts: bool = False
+    device_ids: list[int] | None = None
+    all_devices: bool = False
     password: str | None = None
 
-    @field_validator("hosts")
+    @field_validator("device_ids")
     @classmethod
-    def validate_hosts(cls, value: list[str] | None) -> list[str] | None:
-        return _validate_hosts(value)
+    def validate_device_ids(cls, value: list[int] | None) -> list[int] | None:
+        return list(dict.fromkeys(value)) if value else value
 
     @field_validator("password")
     @classmethod
@@ -273,14 +428,14 @@ class BulkUserAdd(BaseModel):
 
     @model_validator(mode="after")
     def validate_targeting(self):
-        _validate_targeting(self.hosts, self.all_hosts)
+        _validate_device_targeting(self.device_ids, self.all_devices)
         return self
 
 
 class BulkUserUpdate(BaseModel):
     usernames: list[str] = Field(min_length=1, max_length=500)
-    hosts: list[str] | None = None
-    all_hosts: bool = False
+    device_ids: list[int] | None = None
+    all_devices: bool = False
     groups: str | None = None
     shell: str | None = None
 
@@ -289,10 +444,10 @@ class BulkUserUpdate(BaseModel):
     def validate_usernames(cls, value: list[str]) -> list[str]:
         return [_validate_linux_name(item) for item in value]
 
-    @field_validator("hosts")
+    @field_validator("device_ids")
     @classmethod
-    def validate_hosts(cls, value: list[str] | None) -> list[str] | None:
-        return _validate_hosts(value)
+    def validate_device_ids(cls, value: list[int] | None) -> list[int] | None:
+        return list(dict.fromkeys(value)) if value else value
 
     @field_validator("groups")
     @classmethod
@@ -317,22 +472,22 @@ class BulkUserUpdate(BaseModel):
 
     @model_validator(mode="after")
     def validate_targeting(self):
-        _validate_targeting(self.hosts, self.all_hosts)
+        _validate_device_targeting(self.device_ids, self.all_devices)
         if not self.groups and not self.shell:
             raise ValueError("provide at least one update field")
         return self
 
 
 class ChangePasswordRequest(BaseModel):
-    hosts: list[str] | None = None
-    all_hosts: bool = False
+    device_ids: list[int] | None = None
+    all_devices: bool = False
     new_password: str
     force_change: bool = False
 
-    @field_validator("hosts")
+    @field_validator("device_ids")
     @classmethod
-    def validate_hosts(cls, value: list[str] | None) -> list[str] | None:
-        return _validate_hosts(value)
+    def validate_device_ids(cls, value: list[int] | None) -> list[int] | None:
+        return list(dict.fromkeys(value)) if value else value
 
     @field_validator("new_password")
     @classmethod
@@ -341,20 +496,20 @@ class ChangePasswordRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_targeting(self):
-        _validate_targeting(self.hosts, self.all_hosts)
+        _validate_device_targeting(self.device_ids, self.all_devices)
         return self
 
 
 class BulkPasswordResetRequest(BaseModel):
-    hosts: list[str] | None = None
-    all_hosts: bool = False
+    device_ids: list[int] | None = None
+    all_devices: bool = False
     usernames: list[str] | None = None
     temp_password: str | None = None
 
-    @field_validator("hosts")
+    @field_validator("device_ids")
     @classmethod
-    def validate_hosts(cls, value: list[str] | None) -> list[str] | None:
-        return _validate_hosts(value)
+    def validate_device_ids(cls, value: list[int] | None) -> list[int] | None:
+        return list(dict.fromkeys(value)) if value else value
 
     @field_validator("usernames")
     @classmethod
@@ -370,38 +525,38 @@ class BulkPasswordResetRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_targeting(self):
-        _validate_targeting(self.hosts, self.all_hosts)
+        _validate_device_targeting(self.device_ids, self.all_devices)
         return self
 
 
 class SudoersRequest(BaseModel):
-    hosts: list[str] | None = None
-    all_hosts: bool = False
+    device_ids: list[int] | None = None
+    all_devices: bool = False
 
-    @field_validator("hosts")
+    @field_validator("device_ids")
     @classmethod
-    def validate_hosts(cls, value: list[str] | None) -> list[str] | None:
-        return _validate_hosts(value)
+    def validate_device_ids(cls, value: list[int] | None) -> list[int] | None:
+        return list(dict.fromkeys(value)) if value else value
 
     @model_validator(mode="after")
     def validate_targeting(self):
-        _validate_targeting(self.hosts, self.all_hosts)
+        _validate_device_targeting(self.device_ids, self.all_devices)
         return self
 
 
 class RemoveUserRequest(BaseModel):
-    hosts: list[str] | None = None
-    all_hosts: bool = False
+    device_ids: list[int] | None = None
+    all_devices: bool = False
     remove_home: bool = False
 
-    @field_validator("hosts")
+    @field_validator("device_ids")
     @classmethod
-    def validate_hosts(cls, value: list[str] | None) -> list[str] | None:
-        return _validate_hosts(value)
+    def validate_device_ids(cls, value: list[int] | None) -> list[int] | None:
+        return list(dict.fromkeys(value)) if value else value
 
     @model_validator(mode="after")
     def validate_targeting(self):
-        _validate_targeting(self.hosts, self.all_hosts)
+        _validate_device_targeting(self.device_ids, self.all_devices)
         return self
 
 
@@ -412,7 +567,7 @@ class UserResponse(BaseModel):
     email: str | None
     is_sudoer: bool
     groups: str | None
-    hosts: list[str] = []
+    device_ids: list[int] = Field(default_factory=list)
     created_at: datetime | None
 
     class Config:
@@ -424,7 +579,7 @@ class JobResponse(BaseModel):
     id: int
     job_id: str
     playbook: str
-    target_hosts: str | None
+    target_devices: str | None
     status: str
     started_at: datetime | None
     finished_at: datetime | None

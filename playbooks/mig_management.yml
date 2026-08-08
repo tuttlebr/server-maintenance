@@ -1,6 +1,6 @@
 ---
 - name: MIG Management
-  hosts: dgx_workstation
+  hosts: mig
   become: true
   serial: 4
   gather_facts: false

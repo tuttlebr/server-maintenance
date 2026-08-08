@@ -323,7 +323,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "dgx-doc-ingester"
+name = "fleet-doc-ingester"
 version = "0.1.0"
 dependencies = [
  "anyhow",

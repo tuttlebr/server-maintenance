@@ -1,17 +1,8 @@
-I prepared the complete draft below. I haven’t written any files yet because the skill requires confirmation first.
-
-Proposed classifications:
-
-- Repository: `Internal`, based on the self-managed NVIDIA GitLab origin.
-- Service: `Internal-Sensitive` with medium confidence, based on privileged fleet automation, stored host credentials, SSH agent access, and administrative workflows.
-- TAVA: None found or supplied.
-
-```markdown
-# Security Policy: DGX Fleet Manager
+# Security Policy: Fleet Manager
 
 ## Reporting a Vulnerability
 
-If you discover a potential security vulnerability in DGX Fleet Manager, please **do not open a public issue, merge request, or discussion.**
+If you discover a potential security vulnerability in Fleet Manager, please **do not open a public issue, merge request, or discussion.**
 
 Report the vulnerability privately through one of these channels:
 
@@ -22,7 +13,7 @@ Report the vulnerability privately through one of these channels:
 
 Include:
 
-- DGX Fleet Manager version, branch, or commit
+- Fleet Manager version, branch, or commit
 - Affected component or API
 - Vulnerability type
 - Reproduction steps
@@ -37,7 +28,7 @@ NVIDIA's Product Security Incident Response Team will acknowledge the report, va
 
 ## Security Architecture & Context
 
-DGX Fleet Manager is a Dockerized FastAPI and Vue application for administering DGX and Linux fleet hosts through Ansible. It supports host registration and scanning, account and sudoers management, password changes, driver and firmware updates, reboots, Kubernetes drain operations, MIG configuration, diagnostics, and other system-maintenance workflows. Its Ansible playbooks can also be invoked directly from a trusted command line.
+Fleet Manager is a Dockerized FastAPI and Vue application for administering Linux compute, edge devices, and supported robots. It uses capability-gated Ansible operations for SSH devices and documented adapter APIs for other transports, including Reachy Mini Wireless.
 
 This software operates as an administrative application and service. Its primary security responsibility is protecting fleet-management authority, host credentials, SSH access, privileged automation, operational state, and job output.
 
@@ -49,8 +40,8 @@ Basis: the service performs privileged fleet administration, handles SSH and sud
 
 ### Components and Security Boundaries
 
-- The Vue SPA communicates with the FastAPI API through `/api/v1`.
-- `/api/v1/auth/login` accepts the configured administrator credentials. Successful authentication produces an HS256 bearer token with an eight-hour lifetime.
+- The Vue SPA communicates with the FastAPI API through `/api/v2`.
+- `/api/v2/auth/login` accepts the configured administrator credentials. Successful authentication produces an HS256 bearer token with an eight-hour lifetime.
 - With the exception of login, health, favicon, and static frontend routes, API operations require a valid bearer token.
 - The application has one administrative identity and no role separation. An authenticated user can perform every supported fleet operation.
 - `backend/services/ansible_runner.py` restricts execution to an explicit playbook allowlist, validates target hosts and extra variables, and applies per-host locking and concurrency limits.
@@ -58,9 +49,10 @@ Basis: the service performs privileged fleet administration, handles SSH and sud
 - SSH and sudo passwords are encrypted with Fernet before storage. They are decrypted only when a job runs and are passed to Ansible through an anonymous file descriptor rather than command-line arguments.
 - Job metadata and output are stored in SQLite and in mode `0600` log files under the application data volume. Known sensitive values are redacted before output is persisted.
 - The web container receives a dedicated SSH agent socket and a read-only verified `known_hosts` file.
+- Reachy Mini adapters use the robot daemon's local HTTP and WebSocket endpoints. That transport doesn't provide the SSH fingerprint trust flow and must remain on a trusted, segmented management network.
 - The web container runs as a non-root user with a read-only root filesystem, all Linux capabilities dropped, and `no-new-privileges` enabled.
 - Milvus, MinIO, etcd, and the NeMo Agent Toolkit service communicate over the Docker network. Milvus host ports are bound to loopback; the other auxiliary services aren't published by the Compose configuration.
-- The documentation indexer crawls configured NVIDIA documentation URL prefixes, sends document chunks to an embedding service, and rebuilds the `dgx_docs` Milvus collection.
+- The documentation indexer crawls configured integration documentation URL prefixes, sends document chunks to an embedding service, and rebuilds the `fleet_docs` Milvus collection.
 - The help-chat path can send prompts and retrieved documentation to configured LLM, embedding, and documentation services.
 - Direct command-line use of the Ansible playbooks is outside the web authentication boundary and depends on host operating-system access controls.
 
@@ -84,7 +76,7 @@ Basis: the service performs privileged fleet administration, handles SSH and sud
 
 ### Threat Model
 
-1. **Administrative Session Compromise:** DGX Fleet Manager uses one administrator identity without RBAC or operation-level authorization. Theft or guessing of the administrator password, JWT signing key, or an active bearer token would permit host registration, user and sudoers changes, password resets, driver or firmware operations, reboots, and other privileged Ansible actions across the fleet. Login throttling reduces online guessing but doesn't limit the authority of a valid session.
+1. **Administrative Session Compromise:** Fleet Manager uses one administrator identity without RBAC or operation-level authorization. Theft or guessing of the administrator password, JWT signing key, or an active bearer token would permit device registration, access changes, software operations, reboots, and other privileged actions across the fleet. Login throttling reduces online guessing but doesn't limit the authority of a valid session.
 
 2. **Management-Plane Compromise Exposes Delegated Host Access:** The web process can access the SSH agent socket, the SQLite database, encrypted host credentials, and `HOST_SECRET_KEY`. Code execution in the web container could therefore request SSH signatures, decrypt stored passwords, and invoke allowed playbooks against registered hosts. Container hardening limits host-level privileges but doesn't preserve these application-level boundaries after process compromise.
 
@@ -117,7 +109,7 @@ Basis: the service performs privileged fleet administration, handles SSH and sud
 
 ## Trust Model
 
-DGX Fleet Manager treats the authenticated administrator as fully trusted. It doesn't attempt to protect managed hosts from an authorized administrator or distinguish read-only, maintenance, user-management, and security-sensitive roles.
+Fleet Manager treats the authenticated administrator as fully trusted. It doesn't attempt to protect managed devices from an authorized administrator or distinguish read-only, maintenance, user-management, and security-sensitive roles.
 
 The principal trust boundaries are:
 
@@ -149,8 +141,3 @@ Operators should:
 The repository uses npm and Cargo lockfiles, but Python dependencies are primarily specified as version ranges and container base images aren't pinned by digest. Production builds can therefore change when rebuilt.
 
 CI runs Python, npm, and Rust vulnerability audits. Maintainers should also review audit failures, rebuild images regularly from approved versions, pin security-sensitive production dependencies where reproducibility is required, and validate updates before deploying them to the management environment.
-```
-
-The source review is complete, but the local hardening test suite couldn't run because the system Python environment doesn't have FastAPI installed.
-
-Reply `approve` to confirm the proposed classifications, confirm there's no TAVA, and authorize writing `SECURITY.md`. I’ll record the classification confirmation as `Brandon Tuttle <btuttle@nvidia.com>` in `.security-triage.yaml`. You can also provide corrections or a TAVA path before approval.

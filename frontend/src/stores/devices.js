@@ -1,19 +1,17 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 import { useDocumentVisibility, useIntervalFn } from "@vueuse/core";
-import { getHosts, getJobs } from "../api.js";
+import { getDevices, getJobs } from "../api.js";
 
-// Shared store for fleet state. Polls /hosts on a 30s cadence when the tab is
-// visible; pauses on background tabs. Multiple views subscribe and reflect the
-// same data so the UI doesn't show stale info across navigations.
-export const useHostsStore = defineStore("hosts", () => {
-  const hosts = ref([]);
+// Shared fleet state. Poll only while the tab is visible so navigation stays
+// current without multiplying requests across screens.
+export const useDevicesStore = defineStore("devices", () => {
+  const devices = ref([]);
   const recentJobs = ref([]);
   const lastUpdated = ref(null);
   const loading = ref(false);
   const hasLoadedOnce = ref(false);
   const error = ref(null);
-
   let inFlight = null;
 
   async function refresh({ force = false } = {}) {
@@ -22,16 +20,16 @@ export const useHostsStore = defineStore("hosts", () => {
     error.value = null;
     inFlight = (async () => {
       try {
-        const [h, j] = await Promise.all([
-          getHosts(),
+        const [deviceRows, jobs] = await Promise.all([
+          getDevices(),
           getJobs({ limit: 10 }).catch(() => []),
         ]);
-        hosts.value = h;
-        recentJobs.value = j;
+        devices.value = deviceRows;
+        recentJobs.value = jobs;
         lastUpdated.value = new Date();
         hasLoadedOnce.value = true;
-      } catch (e) {
-        error.value = e;
+      } catch (caught) {
+        error.value = caught;
       } finally {
         loading.value = false;
         inFlight = null;
@@ -40,7 +38,6 @@ export const useHostsStore = defineStore("hosts", () => {
     return inFlight;
   }
 
-  // Visibility-gated polling
   const visibility = useDocumentVisibility();
   const { pause, resume } = useIntervalFn(
     () => {
@@ -54,25 +51,14 @@ export const useHostsStore = defineStore("hosts", () => {
     if (!hasLoadedOnce.value) refresh();
     resume();
   }
-  function stop() {
-    pause();
-  }
+  function stop() { pause(); }
 
-  // Active (running/pending) jobs — surfaced in NavBar tray
   const activeJobs = computed(() =>
-    recentJobs.value.filter((j) => j.status === "running" || j.status === "pending")
+    recentJobs.value.filter((job) => job.status === "running" || job.status === "pending")
   );
 
   return {
-    hosts,
-    recentJobs,
-    activeJobs,
-    lastUpdated,
-    loading,
-    hasLoadedOnce,
-    error,
-    refresh,
-    start,
-    stop,
+    devices, recentJobs, activeJobs, lastUpdated, loading, hasLoadedOnce,
+    error, refresh, start, stop,
   };
 });

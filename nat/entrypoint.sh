@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "=== DGX Help Chat Agent ==="
+echo "=== Fleet Help Chat Agent ==="
 echo "Ingesting documentation into Milvus..."
 if python ingest.py; then
     echo "Milvus collections are ready."

@@ -22,8 +22,8 @@
 }
 
 .btn-primary {
-  background-color: var(--surface-dark);
-  color: var(--text-on-dark);
+  background-color: var(--color-accent);
+  color: #fff;
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -157,6 +157,9 @@
   background-color: var(--border-color);
   color: var(--text-on-light);
 }
+
+.badge-purple { background-color: #6d35a8; color: #fff; }
+.badge-teal { background-color: #0b7285; color: #fff; }
 
 /* Status badge — extends .badge with an in-progress pulse variant */
 .badge-status {
@@ -603,7 +606,7 @@ textarea.form-input {
   border: 1px solid #161616;
   /* faint phosphor texture */
   background-image:
-    linear-gradient(rgba(118, 185, 0, 0.03) 1px, transparent 1px);
+    linear-gradient(rgba(23, 105, 210, 0.03) 1px, transparent 1px);
   background-size: 100% 3px;
 }
 
@@ -682,7 +685,7 @@ textarea.form-input {
 .callout-warn    .callout-icon { color: var(--color-warning); }
 .callout-danger  { background: var(--surface-danger-soft);  border-color: rgba(229, 32, 32, 0.30); }
 .callout-danger  .callout-icon { color: var(--color-danger); }
-.callout-success { background: var(--surface-success-soft); border-color: rgba(118, 185, 0, 0.30); }
+.callout-success { background: var(--surface-success-soft); border-color: rgba(39, 134, 75, 0.30); }
 .callout-success .callout-icon { color: var(--color-success); }
 
 /* Skeleton placeholder */
