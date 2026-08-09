@@ -21,6 +21,8 @@ services:
       SSH_AUTH_SOCK: /run/fleet-agent/agent.sock
       SSH_KNOWN_HOSTS_FILE: /app/data/ssh/known_hosts
       SSH_KNOWN_HOSTS_SEED_FILE: /run/fleet-known-hosts-seed
+      # This binary is built into the web image; don't inherit a stale host path.
+      DOCS_INGESTER_BIN: /usr/local/bin/fleet-doc-ingester
       # The .env default is host-facing; containers reach Milvus by service name.
       MILVUS_URI: http://milvus:19530
     restart: unless-stopped
