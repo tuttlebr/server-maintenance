@@ -109,6 +109,8 @@ export const addDevice = (data) =>
   request("/devices", { method: "POST", body: data, timeoutMs: 120_000 });
 export const updateDevice = (deviceId, data) =>
   request(`/devices/${deviceId}`, { method: "PUT", body: data });
+export const updateDeviceAnnotations = (deviceId, annotations) =>
+  request(`/devices/${deviceId}/annotations`, { method: "PUT", body: { annotations } });
 export const deleteDevice = (deviceId) => request(`/devices/${deviceId}`, { method: "DELETE" });
 export const scanDevice = (deviceId) => request(`/devices/${deviceId}/scan`, { method: "POST" });
 export const scanAllDevices = () => request("/devices/scan-all", { method: "POST" });
@@ -150,6 +152,15 @@ export const cancelJob = (jobId) => request(`/jobs/${jobId}/cancel`, { method: "
 export const getChatStatus = () => request("/chat/status");
 export const getDocsIndexStatus = () => request("/chat/index-status");
 export const reindexDocs = () => request("/chat/reindex-docs", { method: "POST" });
+
+// Context management
+export const getContextStatus = () => request("/context/status");
+export const getContextDocuments = () => request("/context/documents");
+export const uploadContextDocument = (formData) =>
+  request("/context/documents", { method: "POST", body: formData, timeoutMs: 120_000 });
+export const deleteContextDocument = (documentId) =>
+  request(`/context/documents/${documentId}`, { method: "DELETE" });
+export const reindexContext = () => request("/context/reindex", { method: "POST" });
 
 // Job output streaming — uses fetch streaming so the bearer token sits in a
 // real Authorization header instead of the URL (no token leak in logs/history).

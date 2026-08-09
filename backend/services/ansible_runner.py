@@ -390,6 +390,11 @@ def _process_scan_results(
                     host.nic_type = "CX7"
                 elif nic_info and nic_info != "unknown":
                     host.nic_type = nic_info[:50]
+                try:
+                    nic_speed = int(report.get("nic_speed_mbps") or 0)
+                    host.nic_speed = f"{nic_speed} Mbps" if nic_speed > 0 else None
+                except (ValueError, TypeError):
+                    host.nic_speed = None
 
                 enrich_from_scan(host, report)
 

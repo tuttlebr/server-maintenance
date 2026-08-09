@@ -1,6 +1,6 @@
-"""On-demand documentation reindexer for the Fleet Help Milvus collection.
+"""On-demand context reindexer for the Fleet Help Milvus collection.
 
-The Operations experience triggers this module through /api/v2/chat/reindex-docs.
+The Context experience triggers this module through /api/v2/context/reindex.
 Reindexing runs in a background thread and invokes the Rust crawler/ingester
 that is built into the web Docker image at /usr/local/bin/fleet-doc-ingester.
 """
@@ -11,11 +11,13 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
 from backend.config import settings
+from backend.services.context_manager import prepare_index_sources
 
 COLLECTION_NAME = "fleet_docs"
 EMBED_BATCH_SIZE = 16
@@ -80,7 +82,7 @@ def _set(**kwargs) -> None:
 def _peek_count() -> int | None:
     """Return current entity count from Milvus. None on connection/import errors."""
     try:
-        from pymilvus import Collection, connections, utility
+        from pymilvus import Collection, utility
     except ImportError:
         return None
 
@@ -140,12 +142,19 @@ def _run_reindex_inner() -> None:
         )
         return
 
+    with tempfile.TemporaryDirectory(prefix="fleet-context-", dir=settings.data_dir) as staging:
+        source_count = prepare_index_sources(Path(staging))
+        _set(message=f"Prepared {source_count} local context document(s)")
+        _run_ingester(command, Path(staging))
+
+
+def _run_ingester(command: list[str], local_docs_dir: Path) -> None:
     args = [
         *command,
         "--urls",
         str(settings.docs_urls_file),
         "--local-docs-dir",
-        str(settings.docs_dir),
+        str(local_docs_dir),
         "--markdown-dir",
         str(settings.docs_markdown_dir),
         "--collection",

@@ -164,8 +164,32 @@ def enrich_from_scan(device, report: dict) -> None:
     device.facts = {
         "system_vendor": vendor,
         "product_name": model,
+        "product_version": _clean_fact(report.get("product_version")),
         "architecture": architecture,
         "os_family": os_family,
+        "motherboard": {
+            "vendor": _clean_fact(report.get("motherboard_vendor")),
+            "model": _clean_fact(report.get("motherboard_model")),
+            "version": _clean_fact(report.get("motherboard_version")),
+        },
+        "bios": {
+            "vendor": _clean_fact(report.get("bios_vendor")),
+            "version": _clean_fact(report.get("bios_version")),
+            "date": _clean_fact(report.get("bios_date")),
+        },
+        "cpu": {
+            "model": _clean_fact(report.get("cpu_model")),
+            "sockets": _clean_number(report.get("cpu_sockets")),
+            "cores_per_socket": _clean_number(report.get("cpu_cores")),
+            "vcpus": _clean_number(report.get("cpu_vcpus")),
+        },
+        "kernel": _clean_fact(report.get("kernel")),
+        "virtualization": _clean_fact(report.get("virtualization_type")),
+        "network": {
+            "primary_interface": _clean_fact(report.get("primary_interface")),
+            "interfaces": report.get("network_interfaces") if isinstance(report.get("network_interfaces"), list) else [],
+        },
+        "storage_mounts": report.get("storage_mounts") if isinstance(report.get("storage_mounts"), list) else [],
         "secure_boot": report.get("secure_boot"),
         "firmware": report.get("firmware_info"),
     }
@@ -197,3 +221,11 @@ def _clean_fact(value) -> str | None:
     if not text or text.lower() in {"unknown", "none", "n/a", "not specified"}:
         return None
     return text[:160]
+
+
+def _clean_number(value) -> int | None:
+    try:
+        number = int(value)
+        return number if number >= 0 else None
+    except (TypeError, ValueError):
+        return None

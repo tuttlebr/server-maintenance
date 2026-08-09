@@ -1,5 +1,3 @@
-from datetime import datetime
-
 import json
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, func
@@ -27,6 +25,7 @@ class Device(Base):
     daemon_port = Column(Integer)
     capabilities_json = Column(Text, default="[]")
     facts_json = Column(Text, default="{}")
+    annotations_json = Column(Text, default="{}")
     discovered_at = Column(DateTime)
     ansible_user = Column(String)
     # Keep the deployed column names while making the ciphertext-only storage
@@ -76,6 +75,20 @@ class Device(Base):
     @facts.setter
     def facts(self, value: dict) -> None:
         self.facts_json = json.dumps(value or {}, sort_keys=True)
+
+    @property
+    def annotations(self) -> dict[str, str]:
+        try:
+            value = json.loads(self.annotations_json or "{}")
+            if not isinstance(value, dict):
+                return {}
+            return {str(key): str(item) for key, item in value.items() if key and item is not None}
+        except (TypeError, ValueError):
+            return {}
+
+    @annotations.setter
+    def annotations(self, value: dict[str, str]) -> None:
+        self.annotations_json = json.dumps(value or {}, sort_keys=True)
 
     @property
     def name(self) -> str:
@@ -128,6 +141,21 @@ class Job(Base):
     @property
     def target_devices(self) -> str | None:
         return self.target_hosts
+
+
+class ContextDocument(Base):
+    __tablename__ = "context_documents"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String(200), nullable=False)
+    original_filename = Column(String(255), nullable=False)
+    content_type = Column(String(80), nullable=False)
+    content = Column(Text, nullable=False)
+    size_bytes = Column(Integer, nullable=False)
+    sha256 = Column(String(64), nullable=False, index=True)
+    device_id = Column(Integer, ForeignKey("hosts.id", ondelete="SET NULL"), nullable=True, index=True)
+    uploaded_by = Column(String(128), nullable=False)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
 
 
 class LoginThrottle(Base):

@@ -281,9 +281,9 @@ ansible-playbook playbooks/system_maintenance.yml --limit ast-spark-01
 
 ## Fleet Documentation Ingestion
 
-The Rust doc ingester crawls every HTML page under each URL prefix in `docs/urls.txt`, includes local Markdown guidance from `docs/*.md`, converts content to Markdown, embeds the chunks with the `.env` embedding settings, and rebuilds the `fleet_docs` collection in Milvus. The included `docs/fleet-manager-ui.md` file teaches Fleet Help how to guide users through the UI.
+The Rust doc ingester crawls every HTML page under each URL prefix in `docs/urls.txt`, includes local Markdown guidance from `docs/*.md`, converts content to Markdown, embeds the chunks with the `.env` embedding settings, and rebuilds the `fleet_docs` collection in Milvus. The Context UI also accepts UTF-8 `.txt`, `.md`, and `.markdown` uploads, optionally associates them with a device, and adds current discovery facts plus manual device attributes to the same rebuild. The included `docs/fleet-manager-ui.md` file teaches Fleet Help how to guide users through the UI.
 
-In Docker, the web image builds this tool into `/usr/local/bin/fleet-doc-ingester`. The documentation reindex endpoint runs that binary inside the web container and writes generated Markdown to `/app/data/docs-crawled`.
+In Docker, the web image builds this tool into `/usr/local/bin/fleet-doc-ingester`. The Context page's re-index action runs that binary inside the web container and writes generated Markdown to `/app/data/docs-crawled`. Uploaded source text and associations are stored in the Fleet Manager database; temporary Markdown index sources are generated for each rebuild.
 
 ```bash
 # Start Milvus first

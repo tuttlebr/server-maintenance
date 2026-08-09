@@ -179,6 +179,28 @@ class DeviceUpdate(BaseModel):
         return _validate_ansible_string(value, info.field_name)
 
 
+class DeviceAnnotationsUpdate(BaseModel):
+    annotations: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("annotations")
+    @classmethod
+    def validate_annotations(cls, value: dict[str, str]) -> dict[str, str]:
+        if len(value) > 50:
+            raise ValueError("a device may have at most 50 manual attributes")
+        cleaned: dict[str, str] = {}
+        for raw_key, raw_value in value.items():
+            key = str(raw_key).strip()
+            item = str(raw_value).strip()
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _./-]{0,79}", key):
+                raise ValueError(f"unsupported attribute name: {key or '<empty>'}")
+            if not item:
+                continue
+            if len(item) > 500 or "\x00" in item:
+                raise ValueError(f"attribute {key} is too long or contains unsupported characters")
+            cleaned[key] = item
+        return cleaned
+
+
 class DeviceResponse(BaseModel):
     id: int
     name: str
@@ -194,6 +216,7 @@ class DeviceResponse(BaseModel):
     status: str
     capabilities: list[str] = Field(default_factory=list)
     facts: dict = Field(default_factory=dict)
+    annotations: dict[str, str] = Field(default_factory=dict)
     memory_gb: int | None = None
     gpu_model: str | None = None
     driver_version: str | None = None
@@ -206,6 +229,34 @@ class DeviceResponse(BaseModel):
     last_seen: datetime | None = None
     discovered_at: datetime | None = None
     created_at: datetime | None = None
+
+
+class ContextDocumentResponse(BaseModel):
+    id: int
+    title: str
+    original_filename: str
+    content_type: str
+    size_bytes: int
+    sha256: str
+    device_id: int | None = None
+    device_name: str | None = None
+    uploaded_by: str
+    created_at: datetime
+
+
+class ContextStatusResponse(BaseModel):
+    record_count: int | None = None
+    document_count: int = 0
+    annotated_device_count: int = 0
+    running: bool = False
+    phase: str = "idle"
+    message: str = ""
+    progress: int = 0
+    total: int = 0
+    started_at: str | None = None
+    completed_at: str | None = None
+    last_indexed_at: str | None = None
+    error: str | None = None
 
 
 class DiscoveryResponse(BaseModel):

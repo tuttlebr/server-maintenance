@@ -9,6 +9,7 @@ This guide teaches Fleet Help how to explain the vendor-neutral Fleet Manager UI
 - **Operations** shows only actions supported by at least one current device. Operators select eligible devices, review impact, confirm, and then monitor Activity.
 - **Access** manages Linux accounts on devices with `users.manage`. Robots and devices without Linux account management are excluded.
 - **Activity** contains background and completed jobs, including target devices, status, recap, logs, and errors.
+- **Context** shows the current Fleet Help record count, manages uploaded text and Markdown sources, and runs context re-indexing.
 - **Fleet Help** answers documentation and recorded-operation questions. It does not operate devices.
 
 ## Adding Devices
@@ -25,9 +26,15 @@ Discovery assigns a general device kind and explicit capabilities. Failure to id
 
 ## Device Details
 
-Device Summary shows identity, connection, reachability, and last discovery. Hardware and Software omit facts that do not apply instead of displaying empty placeholders. Operations lists the device's discovered capabilities and links to the capability-filtered Operations experience.
+Device Summary shows identity, connection, reachability, and last discovery. Hardware and Software omit facts that do not apply instead of displaying empty placeholders. Context stores operator-provided key/value attributes and links to documentation associated with that device. Operations lists the device's discovered capabilities and links to the capability-filtered Operations experience.
 
-Scanning an SSH device runs the portable facts playbook. It probes Linux, storage, architecture, vendor and product facts, NVIDIA GPU availability, Fabric Manager, MIG, and Kubernetes without assuming those capabilities from a product name. Scanning Reachy checks daemon connectivity and state without moving the robot.
+Scanning an SSH device runs the portable facts playbook. It probes Linux, storage, architecture, system and motherboard identity, BIOS, CPU topology, network interfaces, virtualization, NVIDIA GPU availability, Fabric Manager, MIG, and Kubernetes without assuming those capabilities from a product name. Scanning Reachy checks daemon connectivity and state without moving the robot. A scan refreshes discovered facts but does not replace manual attributes.
+
+## Managing Context
+
+Use **Context** to upload UTF-8 `.txt`, `.md`, or `.markdown` documents. A source may apply to the fleet generally or be associated with one device. For example, associate a motherboard owner's manual with `daedalus-02` and add its exact motherboard model under **Devices → daedalus-02 → Context**. The generated index source includes the device name, current discovered identity, manual attributes, and document content together.
+
+Uploads, deletions, and attribute edits are staged changes. Select **Re-index context** to rebuild `fleet_docs`. The page reports the current indexed record count, source counts, phase, progress, completion time, and errors. Removing a document does not remove its old vector records until the next successful re-index.
 
 ## Operations and Safety
 

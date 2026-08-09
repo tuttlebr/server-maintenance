@@ -18,7 +18,7 @@ from backend.database import Base
 from backend.models import Device, ManagedUser, UserHostAssociation
 from backend.routers.devices import delete_device
 from backend.routers.operations import list_operations, run_operation
-from backend.schemas import DeviceCreate, OperationRunRequest
+from backend.schemas import DeviceAnnotationsUpdate, DeviceCreate, OperationRunRequest
 from backend.services.device_discovery import enrich_from_scan, initial_profile, probe_reachy
 
 
@@ -45,6 +45,12 @@ class DeviceSchemaTests(unittest.TestCase):
         )
         self.assertEqual(payload.daemon_port, 8000)
         self.assertIsNone(payload.ssh_user)
+
+    def test_manual_device_attributes_are_trimmed_and_validated(self):
+        payload = DeviceAnnotationsUpdate(
+            annotations={" Motherboard model ": " ASRock Rack ROMED6U-2L2T "}
+        )
+        self.assertEqual(payload.annotations, {"Motherboard model": "ASRock Rack ROMED6U-2L2T"})
 
 
 class CapabilityDiscoveryTests(unittest.TestCase):
@@ -81,6 +87,27 @@ class CapabilityDiscoveryTests(unittest.TestCase):
         self.assertEqual(device.machine_type, "gpu_node")
         self.assertIn(NVIDIA_DRIVER_MANAGE, device.capabilities)
         self.assertEqual(device.vendor, "Dell Inc.")
+
+    def test_scan_captures_detailed_hardware_without_replacing_manual_attributes(self):
+        device = Device(hostname="daedalus-02", kind="generic", machine_type="unknown")
+        device.annotations = {"rack": "basement"}
+        enrich_from_scan(
+            device,
+            {
+                "system_vendor": "To Be Filled By O.E.M.",
+                "product_name": "Server",
+                "motherboard_vendor": "ASRock Rack",
+                "motherboard_model": "ROMED6U-2L2T",
+                "bios_version": "P3.80",
+                "cpu_model": "AMD EPYC 7443P 24-Core Processor",
+                "cpu_sockets": 1,
+                "cpu_cores": 24,
+                "cpu_vcpus": 48,
+            },
+        )
+        self.assertEqual(device.facts["motherboard"]["model"], "ROMED6U-2L2T")
+        self.assertEqual(device.facts["cpu"]["vcpus"], 48)
+        self.assertEqual(device.annotations, {"rack": "basement"})
 
     def test_reachy_probe_never_calls_a_motion_endpoint(self):
         with patch(

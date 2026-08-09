@@ -8,8 +8,9 @@ from sqlalchemy.orm import Session
 from backend.auth import get_current_user
 from backend.capabilities import device_capabilities
 from backend.database import get_db
-from backend.models import Device, UserHostAssociation
+from backend.models import ContextDocument, Device, UserHostAssociation
 from backend.schemas import (
+    DeviceAnnotationsUpdate,
     DeviceCreate,
     DeviceEnrollmentRequest,
     DeviceResponse,
@@ -50,6 +51,7 @@ def device_response(device: Device) -> DeviceResponse:
         status=device.status or "unknown",
         capabilities=device_capabilities(device),
         facts=device.facts,
+        annotations=device.annotations,
         memory_gb=device.memory_gb,
         gpu_model=device.gpu_model,
         driver_version=device.driver_version,
@@ -76,6 +78,22 @@ def get_device(device_id: int, db: Session = Depends(get_db), user: str = Depend
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
+    return device_response(device)
+
+
+@router.put("/{device_id}/annotations", response_model=DeviceResponse)
+def update_device_annotations(
+    device_id: int,
+    payload: DeviceAnnotationsUpdate,
+    db: Session = Depends(get_db),
+    user: str = Depends(get_current_user),
+):
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    device.annotations = payload.annotations
+    db.commit()
+    db.refresh(device)
     return device_response(device)
 
 
@@ -241,6 +259,9 @@ def delete_device(
     name = device.name
     db.query(UserHostAssociation).filter(UserHostAssociation.host_id == device.id).delete(
         synchronize_session=False
+    )
+    db.query(ContextDocument).filter(ContextDocument.device_id == device.id).update(
+        {ContextDocument.device_id: None}, synchronize_session=False
     )
     db.delete(device)
     db.commit()

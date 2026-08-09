@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     docs_urls_file: Path = Path("/app/docs/urls.txt")
     docs_markdown_dir: Path = Path("/app/data/docs-crawled")
     docs_ingester_bin: Path = Path("/usr/local/bin/fleet-doc-ingester")
+    context_upload_max_bytes: int = 10 * 1024 * 1024
 
     @property
     def is_development(self) -> bool:

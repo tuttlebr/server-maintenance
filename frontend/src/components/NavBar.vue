@@ -75,6 +75,7 @@ const navigation = [
   { to: "/operations", label: "Operations", icon: "fa-bolt" },
   { to: "/access", label: "Access", icon: "fa-users" },
   { to: "/activity", label: "Activity", icon: "fa-list-check" },
+  { to: "/context", label: "Context", icon: "fa-book-open" },
 ];
 const router = useRouter();
 const store = useDevicesStore();
