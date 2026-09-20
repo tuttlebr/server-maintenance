@@ -56,6 +56,40 @@
               <td colspan="7" style="padding: 0">
                 <div class="job-detail">
                   <div v-if="job.recap" class="job-recap-expanded"><pre>{{ job.recap }}</pre></div>
+                  <section v-if="expandedJob?.result_artifacts?.length" class="result-grid" aria-label="Structured operation results">
+                    <article v-for="result in expandedJob.result_artifacts" :key="`${result.report_type}-${result.hostname}`" class="result-card">
+                      <div class="result-heading">
+                        <span>{{ resultTitle(result.report_type) }}</span>
+                        <strong>{{ result.hostname }}</strong>
+                      </div>
+                      <template v-if="result.report_type === 'assessment'">
+                        <div class="result-metrics">
+                          <span class="metric-good"><strong>{{ result.summary?.pass_count || 0 }}</strong> passed</span>
+                          <span class="metric-warn"><strong>{{ result.summary?.warning_count || 0 }}</strong> warnings</span>
+                          <span class="metric-bad"><strong>{{ result.summary?.blocker_count || 0 }}</strong> blockers</span>
+                        </div>
+                      </template>
+                      <template v-else-if="result.report_type === 'gpu'">
+                        <div class="result-metrics">
+                          <span><strong>{{ result.active_gpus || 0 }}</strong> active</span>
+                          <span><strong>{{ result.idle_gpus || 0 }}</strong> idle</span>
+                          <span><strong>{{ result.free_gpus || 0 }}</strong> free</span>
+                        </div>
+                        <p v-if="result.user_summary?.length">Top owners: {{ result.user_summary.slice(0, 5).map(item => item.user).join(', ') }}</p>
+                      </template>
+                      <template v-else-if="result.report_type === 'storage'">
+                        <div class="result-metrics">
+                          <span :class="storagePressure(result).length ? 'metric-warn' : 'metric-good'"><strong>{{ storagePressure(result).length }}</strong> pressured mounts</span>
+                        </div>
+                        <p v-if="storagePressure(result).length">{{ storagePressure(result).map(item => `${item.mountpoint} ${item.use_pct}%`).join(' · ') }}</p>
+                        <p v-if="topStorageOwners(result).length">Largest: {{ topStorageOwners(result).map(item => `${item.path} (${item.size_mb} MB)`).join(' · ') }}</p>
+                      </template>
+                      <template v-else-if="result.report_type === 'driver'">
+                        <div class="driver-change"><code>{{ result.pre_driver_version || 'unknown' }}</code><i class="fas fa-arrow-right" aria-hidden="true"></i><code>{{ result.post_driver_version || 'unknown' }}</code></div>
+                        <p>{{ result.reboot_performed ? 'Reboot completed' : 'No reboot performed' }}</p>
+                      </template>
+                    </article>
+                  </section>
                   <div v-if="job.extra_vars" class="job-vars">
                     <strong>Parameters:</strong> {{ job.extra_vars }}
                   </div>
@@ -70,6 +104,9 @@
                         </span>
                       </strong>
                       <div class="log-toolbar-right">
+                        <button type="button" class="btn btn-ghost btn-sm" @click="askAboutJob(job)">
+                          Ask Fleet Help
+                        </button>
                         <button
                           type="button"
                           :class="['log-toggle', { active: autoScroll }]"
@@ -116,12 +153,15 @@
 
 <script setup>
 import { ref, watch, onMounted, onUnmounted, nextTick, computed } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import AnsiToHtml from "ansi-to-html";
 import { getJobs, getJob, streamJobOutput } from "../api.js";
 import StatusBadge from "../components/StatusBadge.vue";
 import { formatTargetList, operationLabel } from "../utils/devices.js";
 
 const jobs = ref([]);
+const route = useRoute();
+const router = useRouter();
 const filterStatus = ref("");
 const expanded = ref(null);
 const expandedJob = ref(null);
@@ -229,6 +269,8 @@ async function startStream(jobId) {
 }
 
 async function toggleExpand(jobId) {
+  const selected = expanded.value === jobId ? undefined : jobId;
+  await router.replace({ query: { ...route.query, job: selected } });
   if (expanded.value === jobId) {
     expanded.value = null;
     expandedJob.value = null;
@@ -255,10 +297,28 @@ async function toggleExpand(jobId) {
   }
 }
 
+function askAboutJob(job) {
+  window.dispatchEvent(new CustomEvent("helpchat:open", {
+    detail: { prompt: `Explain ${job.playbook} job ${job.job_id}: what happened on each device, what evidence supports it, and what should I do next?` },
+  }));
+}
+
 function formatTime(dt) {
   if (!dt) return "--";
   const str = String(dt).endsWith("Z") || String(dt).includes("+") ? dt : dt + "Z";
   return new Date(str).toLocaleString("en-US", { timeZone: "America/Los_Angeles" });
+}
+
+function resultTitle(type) {
+  return ({ assessment: "Maintenance assessment", driver: "Driver update", gpu: "GPU usage", storage: "Storage analysis" })[type] || "Result";
+}
+
+function storagePressure(result) {
+  return (result?.mounts || []).filter((mount) => mount?.accessible && Number(mount.use_pct || 0) >= 85);
+}
+
+function topStorageOwners(result) {
+  return (result?.mounts || []).flatMap((mount) => mount?.entries || []).sort((a, b) => Number(b.size_mb || 0) - Number(a.size_mb || 0)).slice(0, 3);
 }
 
 onUnmounted(stopStream);
@@ -279,6 +339,55 @@ onMounted(load);
   margin-bottom: var(--space-xs);
   word-break: break-all;
 }
+
+.result-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 10px;
+  margin-bottom: var(--space-sm);
+}
+
+.result-card {
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-white);
+}
+
+.result-heading,
+.result-metrics,
+.driver-change {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.result-heading {
+  justify-content: space-between;
+  margin-bottom: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.result-heading strong,
+.driver-change code {
+  color: var(--text-primary);
+}
+
+.result-metrics {
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.result-card p {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.metric-good { color: var(--color-success); }
+.metric-warn { color: var(--color-warning); }
+.metric-bad { color: var(--color-danger); }
 
 .job-recap,
 .job-recap-expanded {

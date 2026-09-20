@@ -1,6 +1,6 @@
 ---
 - name: Manage Sudoers
-  hosts: all
+  hosts: managed_hosts
   become: true
   vars:
     # Debug variable to see what's happening

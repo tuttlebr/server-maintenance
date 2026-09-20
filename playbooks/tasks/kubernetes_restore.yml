@@ -1,0 +1,30 @@
+---
+- name: Restore the Kubernetes node to schedulable
+  kubernetes.core.k8s_drain:
+    state: uncordon
+    name: "{{ kubernetes_resolved_node_name }}"
+    kubeconfig: "{{ kubernetes_effective_kubeconfig | default(omit, true) }}"
+    context: "{{ kubernetes_context | default(omit, true) }}"
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  register: kubernetes_restore_result
+  failed_when: >-
+    kubernetes_restore_result.failed | default(false)
+    and not (force | default(false) | bool)
+  when:
+    - kubernetes_restore_required | default(false) | bool
+    - kubernetes_node_found | default(false) | bool
+
+- name: Warn when emergency scheduling restoration failed
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: {{ kubernetes_resolved_node_name }} could not be uncordoned.
+      Manual recovery is required. Continuing because force=true.
+      {{ kubernetes_restore_result.msg | default('') }}
+  when:
+    - force | default(false) | bool
+    - kubernetes_restore_result is defined
+    - kubernetes_restore_result.failed | default(false)
+

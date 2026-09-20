@@ -1,0 +1,56 @@
+---
+- name: Reset Reachy Mini App Environment
+  hosts: reachy_ssh
+  become: true
+  gather_facts: false
+  serial: 1
+  vars:
+    reachy_apps_venv_path: /venvs/apps_venv
+  tasks:
+    - name: Keep the reset target fixed to the Reachy apps environment
+      ansible.builtin.assert:
+        that:
+          - reachy_apps_venv_path == '/venvs/apps_venv'
+        fail_msg: Refusing to remove a path other than /venvs/apps_venv
+
+    - name: Verify this host has the Reachy Mini daemon environment
+      ansible.builtin.stat:
+        path: /venvs/mini_daemon
+        follow: false
+        get_checksum: false
+        get_attributes: false
+        get_mime: false
+      register: reachy_daemon_environment
+      changed_when: false
+
+    - name: Refuse to reset a host that is not a Reachy Mini
+      ansible.builtin.assert:
+        that:
+          - reachy_daemon_environment.stat.exists | default(false)
+          - reachy_daemon_environment.stat.isdir | default(false)
+        fail_msg: >-
+          /venvs/mini_daemon was not found. Refusing to remove the app
+          environment from a host that cannot be verified as a Reachy Mini.
+
+    - name: Check whether the apps environment exists
+      ansible.builtin.stat:
+        path: "{{ reachy_apps_venv_path }}"
+        follow: false
+        get_checksum: false
+        get_attributes: false
+        get_mime: false
+      register: reachy_apps_environment
+      changed_when: false
+
+    - name: Remove the Reachy apps environment
+      ansible.builtin.file:
+        path: "{{ reachy_apps_venv_path }}"
+        state: absent
+
+    - name: Report reset result
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'Removed /venvs/apps_venv.'
+             if (reachy_apps_environment.stat.exists | default(false))
+             else '/venvs/apps_venv was already absent.' }}
+          Reachy apps must be reinstalled before they can run again.

@@ -55,8 +55,8 @@
             <button type="button" class="btn btn-ghost btn-sm" @click="selectedDeviceIds = devices.map(device => device.id)">Select All</button>
           </div>
           <div class="form-group">
-            <label class="form-label" for="add-password">Password (optional, defaults to group_vars setting)</label>
-            <input id="add-password" v-model="addPassword" type="password" class="form-input" placeholder="Leave blank for default" />
+            <label class="form-label" for="add-password">Initial password (optional)</label>
+            <input id="add-password" v-model="addPassword" type="password" class="form-input" placeholder="Leave blank to avoid setting a password" />
           </div>
           <button class="btn btn-primary" type="button" :disabled="!canProvision" @click="provisionUsers">
             <i class="fas fa-user-plus" aria-hidden="true"></i> Provision Users
@@ -311,7 +311,7 @@ async function provisionUsers() {
     };
     if (addPassword.value) payload.password = addPassword.value;
     await bulkAddUsers(payload);
-    window.$toast?.success(`Adding ${payload.users.length} user(s) to ${selectedDeviceIds.value.length} device(s)`);
+    window.$toast?.success(`User provisioning started; accounts appear here after the job succeeds`);
     newUsers.value = [{ full_name: "", email: "" }];
     csvUsers.value = [];
     addPassword.value = "";
@@ -365,10 +365,10 @@ async function toggleSudoers(user) {
   try {
     if (user.is_sudoer) {
       await removeSudoers(user.username, { all_devices: true });
-      window.$toast?.success(`Removed ${user.username} from sudoers`);
+      window.$toast?.success(`Sudo removal started for ${user.username}`);
     } else {
       await addSudoers(user.username, { all_devices: true });
-      window.$toast?.success(`Added ${user.username} to sudoers`);
+      window.$toast?.success(`Sudo grant started for ${user.username}`);
     }
     loadUsers();
   } catch (e) {
@@ -379,7 +379,7 @@ async function toggleSudoers(user) {
 async function handleAddSudoers() {
   try {
     await addSudoers(sudoerToAdd.value, { all_devices: true });
-    window.$toast?.success(`Added ${sudoerToAdd.value} to sudoers`);
+    window.$toast?.success(`Sudo grant started for ${sudoerToAdd.value}`);
     sudoerToAdd.value = "";
     loadUsers();
   } catch (e) {
@@ -390,7 +390,7 @@ async function handleAddSudoers() {
 async function handleRemoveSudoers(username) {
   try {
     await removeSudoers(username, { all_devices: true });
-    window.$toast?.success(`Removed ${username} from sudoers`);
+    window.$toast?.success(`Sudo removal started for ${username}`);
     loadUsers();
   } catch (e) {
     window.$toast?.error(`Couldn't remove ${username} from sudoers`, e);

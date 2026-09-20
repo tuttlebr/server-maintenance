@@ -1,4 +1,4 @@
-"""Capability definitions shared by discovery, operations, and legacy playbooks."""
+"""Capability definitions shared by discovery and operations."""
 
 from __future__ import annotations
 
@@ -8,11 +8,15 @@ from typing import Iterable
 
 
 SYSTEM_SCAN = "system.scan"
+SYSTEM_ASSESS = "system.assess"
+SYSTEM_BOOTSTRAP = "system.bootstrap"
 SYSTEM_REBOOT = "system.reboot"
 SYSTEM_UPDATE = "system.update"
 STORAGE_INSPECT = "storage.inspect"
 CONTAINERS_CLEANUP = "containers.cleanup"
 USERS_MANAGE = "users.manage"
+FIRMWARE_INSPECT = "firmware.inspect"
+FIRMWARE_UPDATE = "firmware.update"
 GPU_INSPECT = "gpu.inspect"
 NVIDIA_DRIVER_MANAGE = "nvidia.driver.manage"
 NVIDIA_FABRIC_MANAGER = "nvidia.fabric_manager.manage"
@@ -22,9 +26,12 @@ REACHY_HEALTH = "reachy.health"
 REACHY_DAEMON_RESTART = "reachy.daemon.restart"
 REACHY_SOFTWARE_UPDATE = "reachy.software.update"
 REACHY_LOGS_READ = "reachy.logs.read"
+REACHY_APP_RESET = "reachy.apps.reset"
 
 BASE_LINUX_CAPABILITIES = {
     SYSTEM_SCAN,
+    SYSTEM_ASSESS,
+    SYSTEM_BOOTSTRAP,
     SYSTEM_REBOOT,
     STORAGE_INSPECT,
     USERS_MANAGE,
@@ -61,17 +68,6 @@ LEGACY_MACHINE_PROFILES = {
     ),
 }
 
-# Compatibility constants used only by playbook-specific v1 implementation
-# modules. New code must call has_capability().
-MACHINE_TYPES = tuple(LEGACY_MACHINE_PROFILES)
-GPU_MACHINE_TYPES = tuple(
-    name for name, (_, capabilities) in LEGACY_MACHINE_PROFILES.items() if GPU_INSPECT in capabilities
-)
-FABRIC_MANAGER_MACHINE_TYPES = tuple(
-    name for name, (_, capabilities) in LEGACY_MACHINE_PROFILES.items() if NVIDIA_FABRIC_MANAGER in capabilities
-)
-
-
 def normalize_capabilities(values: Iterable[str]) -> list[str]:
     return sorted({str(value).strip() for value in values if str(value).strip()})
 
@@ -89,7 +85,10 @@ def device_capabilities(device) -> list[str]:
         try:
             values = json.loads(raw)
             if isinstance(values, list):
-                return normalize_capabilities(values)
+                capabilities = set(normalize_capabilities(values))
+                if (getattr(device, "transport", None) or "ssh") == "ssh":
+                    capabilities.update(BASE_LINUX_CAPABILITIES)
+                return normalize_capabilities(capabilities)
         except (TypeError, ValueError):
             pass
     return legacy_profile(getattr(device, "machine_type", None))[1]
@@ -118,6 +117,10 @@ OPERATIONS = (
         "Observe", SYSTEM_SCAN, "low", "none", "host_facts.yml", "fa-satellite-dish",
     ),
     OperationDefinition(
+        "system.assess", "Assess maintenance readiness", "Summarize maintenance blockers, warnings, and host health.",
+        "Observe", SYSTEM_ASSESS, "low", "none", "maintenance_assessment.yml", "fa-stethoscope",
+    ),
+    OperationDefinition(
         "storage.inspect", "Analyze storage", "Find filesystem pressure and large directory owners.",
         "Observe", STORAGE_INSPECT, "low", "none", "storage_analysis.yml", "fa-hard-drive",
     ),
@@ -128,6 +131,14 @@ OPERATIONS = (
     OperationDefinition(
         "system.reboot", "Reboot", "Restart selected devices one at a time after safety checks.",
         "System", SYSTEM_REBOOT, "high", "typed-target", "reboot.yml", "fa-power-off",
+    ),
+    OperationDefinition(
+        "system.update", "Update system packages", "Apply operating-system package updates one device at a time.",
+        "System", SYSTEM_UPDATE, "high", "confirm", "system_update.yml", "fa-arrows-rotate",
+    ),
+    OperationDefinition(
+        "system.bootstrap", "Bootstrap device", "Configure baseline groups, administrator access, container tooling, and scan facts.",
+        "System", SYSTEM_BOOTSTRAP, "high", "typed-target", "host_bootstrap.yml", "fa-wand-magic-sparkles",
     ),
     OperationDefinition(
         "containers.cleanup", "Clean container cache", "Prune unused images, cache, and networks without removing volumes.",
@@ -144,6 +155,14 @@ OPERATIONS = (
     OperationDefinition(
         "nvidia.mig.manage", "Check MIG mode", "Query NVIDIA Multi-Instance GPU mode without changing it.",
         "NVIDIA", NVIDIA_MIG_MANAGE, "low", "none", "mig_management.yml", "fa-layer-group",
+    ),
+    OperationDefinition(
+        "firmware.inspect", "Inspect firmware", "Inventory firmware devices and available updates without changing them.",
+        "Firmware", FIRMWARE_INSPECT, "low", "none", "firmware_inventory.yml", "fa-microchip",
+    ),
+    OperationDefinition(
+        "firmware.update", "Update firmware", "Apply available firmware updates without automatically rebooting.",
+        "Firmware", FIRMWARE_UPDATE, "high", "typed-target", "firmware_update.yml", "fa-download",
     ),
     OperationDefinition(
         "kubernetes.drain", "Check Kubernetes readiness", "Inspect active work and node schedulability.",
@@ -164,6 +183,10 @@ OPERATIONS = (
     OperationDefinition(
         "reachy.software.update", "Update Reachy software", "Install the latest stable Reachy Mini software through its daemon.",
         "Reachy Mini", REACHY_SOFTWARE_UPDATE, "high", "confirm", None, "fa-cloud-arrow-down",
+    ),
+    OperationDefinition(
+        "reachy.apps.reset", "Reset Reachy apps", "Delete /venvs/apps_venv so the app environment can be rebuilt. Installed apps must be reinstalled.",
+        "Reachy Mini", REACHY_APP_RESET, "high", "typed-target", "reachy_app_reset.yml", "fa-eraser",
     ),
 )
 

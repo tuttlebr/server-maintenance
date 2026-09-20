@@ -1,0 +1,62 @@
+---
+- name: Drain Kubernetes node while respecting disruption safeguards
+  kubernetes.core.k8s_drain:
+    state: drain
+    name: "{{ kubernetes_resolved_node_name }}"
+    kubeconfig: "{{ kubernetes_effective_kubeconfig | default(omit, true) }}"
+    context: "{{ kubernetes_context | default(omit, true) }}"
+    delete_options:
+      ignore_daemonsets: true
+      delete_emptydir_data: >-
+        {{ kubernetes_delete_emptydir_data | default(false) | bool }}
+      force: false
+      disable_eviction: false
+      wait_timeout: "{{ kubernetes_drain_timeout | default(900) | int }}"
+      wait_sleep: 5
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  register: kubernetes_drain_result
+  failed_when: >-
+    kubernetes_drain_result.failed | default(false)
+    or
+    'timeout reached' in
+      (kubernetes_drain_result.warnings | default([]) | join(' ') | lower)
+  when: not (force | default(false) | bool)
+
+- name: Emergency drain Kubernetes node
+  kubernetes.core.k8s_drain:
+    state: drain
+    name: "{{ kubernetes_resolved_node_name }}"
+    kubeconfig: "{{ kubernetes_effective_kubeconfig | default(omit, true) }}"
+    context: "{{ kubernetes_context | default(omit, true) }}"
+    delete_options:
+      ignore_daemonsets: true
+      delete_emptydir_data: true
+      force: true
+      disable_eviction: true
+      wait_timeout: "{{ kubernetes_drain_timeout | default(900) | int }}"
+      wait_sleep: 5
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  register: kubernetes_emergency_drain_result
+  failed_when: false
+  when: force | default(false) | bool
+
+- name: Warn when emergency drain did not complete
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: emergency Kubernetes drain did not complete for
+      {{ kubernetes_resolved_node_name }}. Continuing because force=true.
+      {{ kubernetes_emergency_drain_result.msg | default('') }}
+  when:
+    - force | default(false) | bool
+    - >-
+      kubernetes_emergency_drain_result.failed | default(false)
+      or
+      'timeout reached' in
+        (kubernetes_emergency_drain_result.warnings | default([]) | join(' ') | lower)
+

@@ -82,7 +82,7 @@ Basis: the service performs privileged fleet administration, handles SSH and sud
 
 3. **Credential Interception Without TLS:** Uvicorn listens over HTTP, and Compose publishes the web service through `FLEET_PORT`. If the service is exposed without a trusted TLS reverse proxy, login credentials, bearer tokens, host passwords, and user password operations could be intercepted or modified in transit.
 
-4. **Automation Pivot Through Registered Targets:** `HostCreate` and the generated inventory validate the syntax of hostnames and addresses but don't enforce network ranges or an approved-host registry. A compromised administrator session could register another reachable address and run privileged allowlisted playbooks against it. Strict host-key verification mitigates impersonation only when `known_hosts` entries have been independently verified.
+4. **Automation Pivot Through Registered Targets:** `DeviceCreate` and the generated inventory validate the syntax of names and addresses but don't enforce network ranges or an approved-device registry. A compromised administrator session could register another reachable address and run privileged allowlisted playbooks against it. Strict host-key verification mitigates impersonation only when `known_hosts` entries have been independently verified.
 
 5. **Operational Data Disclosure Through Job History:** Ansible output is streamed to log files and copied into the `Job.output_log` database field. Redaction covers known secret keys and concrete secret values, but playbook output can still contain hostnames, account names, package state, hardware details, process information, filesystem information, and unexpected sensitive output from future tasks. Every authenticated administrator can retrieve this history.
 

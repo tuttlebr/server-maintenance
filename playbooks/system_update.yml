@@ -1,0 +1,51 @@
+---
+- name: Update System Packages
+  hosts: managed_hosts
+  become: true
+  gather_facts: true
+  serial: "{{ maintenance_batch_size | default(1) }}"
+  force_handlers: true
+  tasks:
+    - name: Validate supported package manager
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['os_family'] in ['Debian', 'RedHat']
+        fail_msg: "System package updates support Debian and Red Hat families only."
+
+    - name: Prepare Kubernetes member for system update
+      ansible.builtin.include_tasks: tasks/kubernetes_prepare.yml
+
+    - name: Apply Debian-family package updates
+      ansible.builtin.apt:
+        upgrade: dist
+        update_cache: true
+        cache_valid_time: 3600
+        autoremove: false
+        autoclean: false
+        install_recommends: false
+      register: debian_update
+      when: ansible_facts['os_family'] == 'Debian'
+
+    - name: Apply Red Hat-family package updates
+      ansible.builtin.dnf:
+        name: "*"
+        state: latest
+        update_cache: true
+      register: redhat_update
+      when: ansible_facts['os_family'] == 'RedHat'
+
+    - name: Check whether a reboot is required
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: reboot_required_file
+
+    - name: Report system update result
+      ansible.builtin.debug:
+        msg:
+          - "Host: {{ inventory_hostname }}"
+          - "Changed: {{ (debian_update.changed | default(false)) or (redhat_update.changed | default(false)) }}"
+          - "Reboot required: {{ reboot_required_file.stat.exists }}"
+
+  handlers:
+    - name: Restore Kubernetes node scheduling
+      ansible.builtin.include_tasks: tasks/kubernetes_restore.yml

@@ -10,23 +10,24 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from backend.config import Settings
+from backend.capabilities import REACHY_APP_RESET
 from backend.database import Base
-from backend.routers.hosts import _ssh_password
 from backend.schemas import (
     BulkPasswordResetRequest,
     BulkUserAdd,
-    HostCreate,
-    MaintenanceRequest,
+    DeviceCreate,
     UserInfo,
 )
 from backend.services.ansible_runner import (
     FLEET_CREDENTIALS_VAR,
+    FLEET_JOB_ID_VAR,
+    FLEET_RESULTS_DIR_VAR,
+    FLEET_SCAN_DIR_VAR,
     PlaybookRequestError,
     _run_playbook_streaming,
     _validate_extra_vars,
@@ -61,34 +62,31 @@ class RequestValidationTests(unittest.TestCase):
         self.assertTrue(payload.all_devices)
         self.assertIsNone(payload.device_ids)
 
-    def test_maintenance_request_rejects_empty_host_list_without_all_hosts(self):
+    def test_password_auth_device_requires_password(self):
         with self.assertRaises(ValidationError):
-            MaintenanceRequest(hosts=[])
+            DeviceCreate(
+                name="dgx-01",
+                endpoint="192.0.2.10",
+                ssh_user="fleetadmin",
+                passwordless_ssh=False,
+            )
 
-    def test_password_auth_host_requires_password(self):
-        with self.assertRaises(ValidationError):
-            HostCreate(hostname="dgx-01", ansible_user="fleetadmin", passwordless_ssh=False)
-
-    def test_key_auth_host_does_not_require_password(self):
-        payload = HostCreate(hostname="dgx-01", ansible_user="fleetadmin", passwordless_ssh=True)
-        self.assertIsNone(payload.ansible_password)
-
-    def test_host_defaults_to_unknown_machine_type(self):
-        payload = HostCreate(hostname="server-01", ansible_user="fleetadmin")
-        self.assertEqual(payload.machine_type, "unknown")
-
-    def test_router_guard_rejects_password_auth_without_password(self):
-        payload = HostCreate.model_construct(
-            ansible_user="fleetadmin",
-            passwordless_ssh=False,
-            ansible_password=None,
+    def test_key_auth_device_does_not_require_password(self):
+        payload = DeviceCreate(
+            name="dgx-01",
+            endpoint="192.0.2.10",
+            ssh_user="fleetadmin",
+            passwordless_ssh=True,
         )
-        with self.assertRaisesRegex(HTTPException, "SSH password is required"):
-            _ssh_password(payload)
+        self.assertIsNone(payload.ssh_password)
 
-    def test_host_requires_explicit_remote_ssh_user(self):
+    def test_device_requires_explicit_remote_ssh_user(self):
         with self.assertRaises(ValidationError):
-            HostCreate(hostname="dgx-01", passwordless_ssh=True)
+            DeviceCreate(
+                name="dgx-01",
+                endpoint="192.0.2.10",
+                passwordless_ssh=True,
+            )
 
     def test_full_name_rejects_template_expression(self):
         with self.assertRaises(ValidationError):
@@ -129,7 +127,14 @@ class RedactionTests(unittest.TestCase):
             _validate_extra_vars({"password": "{{ lookup('pipe', 'id') }}"})
 
     def test_rejects_reserved_connection_extra_vars(self):
-        for key in (FLEET_CREDENTIALS_VAR, "ansible_password", "ansible_become_password"):
+        for key in (
+            FLEET_CREDENTIALS_VAR,
+            FLEET_JOB_ID_VAR,
+            FLEET_RESULTS_DIR_VAR,
+            FLEET_SCAN_DIR_VAR,
+            "ansible_password",
+            "ansible_become_password",
+        ):
             with self.subTest(key=key):
                 with self.assertRaises(PlaybookRequestError):
                     _validate_extra_vars({key: "not-allowed"})
@@ -249,6 +254,39 @@ class HostCredentialTests(unittest.TestCase):
         self.assertEqual(unknown_hostvars["machine_type"], "unknown")
         self.assertNotIn("server-01", parsed["all"]["children"]["gpu_node"]["hosts"])
 
+    def test_dual_transport_reachy_only_enters_the_reset_inventory_group(self):
+        host = SimpleNamespace(
+            hostname="reachy-lab",
+            endpoint="reachy-mini.local",
+            ip_address="reachy-mini.local",
+            transport="reachy_daemon",
+            kind="robot",
+            machine_type="unknown",
+            ansible_user="pollen",
+            encrypted_ansible_password=None,
+            encrypted_ansible_become_password=None,
+            capabilities_json=json.dumps([REACHY_APP_RESET]),
+        )
+
+        class Query:
+            def all(self):
+                return [host]
+
+        class Database:
+            def query(self, model):
+                return Query()
+
+        with tempfile.TemporaryDirectory() as directory:
+            inventory = Path(directory) / "hosts.json"
+            with patch("backend.services.inventory_writer.settings.inventory_file", inventory):
+                regenerate_inventory(Database())
+            parsed = json.loads(inventory.read_text())
+
+        groups = parsed["all"]["children"]
+        self.assertIn("reachy-lab", groups["reachy_ssh"]["hosts"])
+        self.assertIn("reachy-lab", groups["robot"]["hosts"])
+        self.assertNotIn("reachy-lab", groups["managed_hosts"]["hosts"])
+
     def test_fleet_ansible_secrets_use_named_pipe_not_process_arguments(self):
         captured = {"commands": []}
 
@@ -320,6 +358,9 @@ class HostCredentialTests(unittest.TestCase):
         self.assertFalse(captured["extra_vars_path"].exists())
         payload = json.loads(captured["payload"])
         self.assertEqual(payload["new_password"], "account-password")
+        self.assertEqual(payload[FLEET_JOB_ID_VAR], "job-id")
+        self.assertEqual(payload[FLEET_RESULTS_DIR_VAR], str(root / "job-results"))
+        self.assertEqual(payload[FLEET_SCAN_DIR_VAR], str(root / "scans"))
         self.assertEqual(
             payload[FLEET_CREDENTIALS_VAR],
             {

@@ -5,6 +5,7 @@ from unittest.mock import patch
 from pydantic import ValidationError
 
 from backend.routers.chat import _stream_from_nat
+from backend.routers import chat as chat_router
 from backend.schemas import ChatRequest
 
 
@@ -112,6 +113,49 @@ class NatChatCompletionTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(RuntimeError, "upstream rejected the request"):
                 list(_stream_from_nat([{"role": "user", "content": "Question"}]))
+
+
+class GroundedChatTests(unittest.IsolatedAsyncioTestCase):
+    async def test_both_transports_receive_fresh_job_evidence_and_history(self):
+        for use_nat in (False, True):
+            with (
+                self.subTest(use_nat=use_nat),
+                patch.object(chat_router.settings, "nat_base_url", "http://nat:8000"),
+                patch.object(chat_router, "_nat_available", return_value=use_nat),
+                patch.object(chat_router, "_direct_llm_available", return_value=True),
+                patch.object(chat_router.job_context, "get_job_context", return_value="TASK [Check disk] FAILED disk full") as retrieve,
+                patch.object(chat_router, "_stream_from_nat", return_value=iter([{"type": "content", "content": "NAT answer"}])) as nat,
+                patch.object(chat_router, "_stream_from_llm", return_value=iter([{"type": "content", "content": "Direct answer"}])) as direct,
+            ):
+                request = ChatRequest(job_id="selected-job", device_id=1, messages=[
+                    {"role": "user", "content": "First question"},
+                    {"role": "assistant", "content": "Previous answer"},
+                    {"role": "user", "content": "Why did this fail?"},
+                ])
+                response = await chat_router.chat(request, user="admin")
+                events = "".join([chunk async for chunk in response.body_iterator])
+                sent = (nat if use_nat else direct).call_args.args[0]
+                self.assertEqual(sent[1]["content"], "Previous answer")
+                self.assertIn("FAILED disk full", sent[-1]["content"])
+                self.assertIn("Why did this fail?", sent[-1]["content"])
+                self.assertIn("event: done", events)
+                self.assertIn("current job records", events)
+                retrieve.assert_called_once_with(
+                    [m.model_dump() for m in request.messages], job_id="selected-job", device_id=1,
+                )
+
+    async def test_evidence_failure_is_disclosed_without_breaking_chat(self):
+        with (
+            patch.object(chat_router.settings, "nat_base_url", ""),
+            patch.object(chat_router, "_direct_llm_available", return_value=True),
+            patch.object(chat_router.job_context, "get_job_context", side_effect=RuntimeError("database unavailable")),
+            patch.object(chat_router, "_stream_from_llm", return_value=iter([])) as direct,
+            self.assertLogs(chat_router.logger, level="ERROR"),
+        ):
+            response = await chat_router.chat(ChatRequest(messages=[{"role": "user", "content": "Status?"}]), user="admin")
+            events = "".join([chunk async for chunk in response.body_iterator])
+        self.assertIn("Job evidence is unavailable", direct.call_args.args[0][-1]["content"])
+        self.assertIn("event: done", events)
 
 
 if __name__ == "__main__":

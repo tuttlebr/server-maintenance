@@ -1,0 +1,100 @@
+---
+- name: Test DGX Spark first-scan detection
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    dgx_detection_cases:
+      - name: canonical DGX release metadata
+        expected: true
+        ansible_facts:
+          architecture: aarch64
+          product_name: GX10
+          product_version: 5.36_GX10DGX
+          board_name: GX10
+        dgx_release:
+          name: DGX Spark
+          pretty_name: NVIDIA DGX Spark
+          platform: GX10
+        gpu_info:
+          rc: 0
+          stdout: NVIDIA GB10, 580.173.02
+      - name: OEM GX10 hardware fallback
+        expected: true
+        ansible_facts:
+          architecture: aarch64
+          product_name: GX10
+          product_version: 5.36_GX10DGX
+          board_name: GX10
+        dgx_release: {}
+        gpu_info:
+          rc: 0
+          stdout: NVIDIA GB10, 580.173.02
+      - name: platform name without ARM or GB10
+        expected: false
+        ansible_facts:
+          architecture: x86_64
+          product_name: Workstation
+          product_version: "1.0"
+          board_name: Example
+        dgx_release:
+          platform: GX10
+        gpu_info:
+          rc: 1
+          stdout: ""
+      - name: suffixed release name
+        expected: false
+        ansible_facts:
+          architecture: aarch64
+          product_name: ARM Developer Kit
+          product_version: "1.0"
+          board_name: Example
+        dgx_release:
+          name: DGX Spark compatible
+        gpu_info:
+          rc: 0
+          stdout: NVIDIA GB10
+      - name: split release names
+        expected: false
+        ansible_facts:
+          architecture: aarch64
+          product_name: ARM Developer Kit
+          product_version: "1.0"
+          board_name: Example
+        dgx_release:
+          name: DGX
+          pretty_name: Spark
+        gpu_info:
+          rc: 0
+          stdout: NVIDIA GB10
+      - name: swapped release names
+        expected: false
+        ansible_facts:
+          architecture: aarch64
+          product_name: ARM Developer Kit
+          product_version: "1.0"
+          board_name: Example
+        dgx_release:
+          name: NVIDIA DGX Spark
+          pretty_name: DGX Spark
+        gpu_info:
+          rc: 0
+          stdout: NVIDIA GB10
+      - name: negated DMI name
+        expected: false
+        ansible_facts:
+          architecture: x86_64
+          product_name: Not a DGX Spark
+          product_version: "1.0"
+          board_name: Example
+        dgx_release: {}
+        gpu_info:
+          rc: 1
+          stdout: AMD Radeon Pro
+  tasks:
+    - name: Evaluate DGX detection case
+      ansible.builtin.include_tasks: tasks/assert_dgx_case.yml
+      loop: "{{ dgx_detection_cases }}"
+      loop_control:
+        loop_var: dgx_case
+        label: "{{ dgx_case.name }}"

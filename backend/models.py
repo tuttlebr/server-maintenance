@@ -108,7 +108,7 @@ class ManagedUser(Base):
     full_name = Column(String)
     email = Column(String)
     is_sudoer = Column(Boolean, default=False)
-    groups = Column(String, default="users,docker")
+    groups = Column(String, default="users")
     created_at = Column(DateTime, default=func.now())
 
 

@@ -119,6 +119,7 @@
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { getChatStatus, streamChat } from "../api";
 
 const MARKDOWN_TAGS = [
@@ -137,6 +138,7 @@ const MARKDOWN_OPTIONS = {
 };
 
 const chatAvailable = ref(false);
+const route = useRoute();
 const isOpen = ref(false);
 const messages = ref([]);
 const input = ref("");
@@ -291,6 +293,8 @@ function send() {
   streamController = new AbortController();
 
   streamChat(chatMessages, {
+    jobId: route.path === "/activity" ? route.query.job || undefined : undefined,
+    deviceId: route.path.startsWith("/devices/") ? Number(route.params.id) || undefined : undefined,
     signal: streamController.signal,
     onStatus: (statusText) => {
       // De-dupe back-to-back identical statuses; collapse minor variants

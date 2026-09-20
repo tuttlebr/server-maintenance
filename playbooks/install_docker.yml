@@ -2,9 +2,20 @@
 - name: Install Docker Engine and NVIDIA Container Toolkit
   hosts: managed_hosts
   become: true
+  serial: "{{ maintenance_batch_size | default(1) }}"
+  force_handlers: true
   vars:
-    docker_group_users: "{{ [admin_username] if admin_username | default('') | length > 0 else [] }}"
+    docker_group_users: []
   tasks:
+    - name: Require Ubuntu for the configured Docker repositories
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+        fail_msg: "Docker bootstrap currently supports Ubuntu repositories only."
+
+    - name: Prepare Kubernetes member for container runtime changes
+      ansible.builtin.include_tasks: tasks/kubernetes_prepare.yml
+
     # ---------------------------------------------------------------
     # Prerequisites
     # ---------------------------------------------------------------
@@ -188,3 +199,6 @@
       systemd:
         name: docker
         state: restarted
+
+    - name: Restore Kubernetes node scheduling
+      ansible.builtin.include_tasks: tasks/kubernetes_restore.yml

@@ -1,6 +1,6 @@
 ---
 - name: Manage Users
-  hosts: all
+  hosts: managed_hosts
   become: true
   vars:
     debug_mode: false
@@ -10,6 +10,11 @@
     target_usernames: []
     user_groups: ""
     user_shell: ""
+    user_defaults:
+      groups:
+        - users
+      shell: /bin/bash
+      create_home: true
   tasks:
     - name: Ensure we're running on Ubuntu
       fail:
@@ -198,14 +203,14 @@
         - users_to_create | length > 0
         - user_defaults.groups is defined
 
-    - name: Create new users
+    - name: Ensure managed users exist
       user:
         name: "{{ item.username }}"
         comment: "{{ item.full_name }}"
         shell: "{{ user_defaults.shell }}"
         create_home: "{{ user_defaults.create_home | bool }}"
         state: present
-      loop: "{{ new_users | default([]) }}"
+      loop: "{{ users_to_create | default([]) }}"
 
     - name: Set user passwords
       user:
@@ -221,7 +226,7 @@
         name: "{{ item.username }}"
         groups: "{{ user_group_list | join(',') }}"
         append: yes
-      loop: "{{ new_users | default([]) }}"
+      loop: "{{ users_to_create | default([]) }}"
       when: user_defaults.groups is defined
 
     - name: Set user email in ~/.profile
@@ -235,7 +240,7 @@
         owner: "{{ item.username }}"
         group: "{{ item.username }}"
         mode: "0644"
-      loop: "{{ new_users | default([]) }}"
+      loop: "{{ users_to_create | default([]) }}"
       when: user_defaults.create_home | bool
 
     - name: Create SSH directory for users
@@ -245,20 +250,21 @@
         owner: "{{ item.username }}"
         group: "{{ item.username }}"
         mode: "0700"
-      loop: "{{ new_users | default([]) }}"
+      loop: "{{ users_to_create | default([]) }}"
       when: user_defaults.create_home | bool
 
-    - name: Create empty authorized_keys file
-      file:
-        path: "/home/{{ item.username }}/.ssh/authorized_keys"
-        state: touch
+    - name: Create empty authorized_keys file when absent
+      ansible.builtin.copy:
+        dest: "/home/{{ item.username }}/.ssh/authorized_keys"
+        content: ""
+        force: false
         owner: "{{ item.username }}"
         group: "{{ item.username }}"
         mode: "0600"
-      loop: "{{ new_users | default([]) }}"
+      loop: "{{ users_to_create | default([]) }}"
       when: user_defaults.create_home | bool
 
-    - name: Set standard configuration files for new users
+    - name: Set standard configuration files for managed users
       copy:
         src: "../templates/user_configs/example/"
         dest: "/home/{{ item.username }}/"
@@ -266,9 +272,8 @@
         group: "{{ item.username }}"
         mode: "0644"
         directory_mode: "0755"
-      loop: "{{ new_users | default([]) }}"
+      loop: "{{ users_to_create | default([]) }}"
       when: user_defaults.create_home | bool
-      failed_when: false
 
     - name: Create user directories in /raid
       file:
@@ -277,7 +282,7 @@
         owner: "{{ item.username }}"
         group: "{{ item.username }}"
         mode: "0750"
-      loop: "{{ new_users | default([]) }}"
+      loop: "{{ users_to_create | default([]) }}"
 
     - name: Add RAID directory reference to user profile
       blockinfile:
@@ -291,7 +296,7 @@
         owner: "{{ item.username }}"
         group: "{{ item.username }}"
         mode: "0644"
-      loop: "{{ new_users | default([]) }}"
+      loop: "{{ users_to_create | default([]) }}"
       when: user_defaults.create_home | bool
 
     - name: Force password change on first login
@@ -302,6 +307,4 @@
           - "0"
           - "{{ item.username }}"
       loop: "{{ new_users | default([]) }}"
-      failed_when: false
-      changed_when: true
       when: force_password_change | bool

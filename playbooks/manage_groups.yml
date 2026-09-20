@@ -1,6 +1,6 @@
 ---
 - name: Manage System Groups
-  hosts: all
+  hosts: managed_hosts
   become: true
   vars:
     groups_to_create:

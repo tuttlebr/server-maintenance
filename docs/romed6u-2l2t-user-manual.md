@@ -1,13 +1,49 @@
-# ASRock Rack ROMED6U-2L2T
+# ASRock Rack ROMED6U-2L2T User Manual
 
-## User Manual
+| Document field | Value |
+|---|---|
+| Product | ASRock Rack ROMED6U-2L2T motherboard |
+| Cover edition | Version 1.0, published October 2020 |
+| Legal-page revision | Version 1.10, published December 2024 |
+| Copyright notices | Cover: Copyright © 2020 ASRock Rack INC. All rights reserved.<br>Legal page: Copyright © 2024 ASRock Rack Inc. All rights reserved. |
+| Language | English |
 
-**Version:** 1.0  
-**Published:** October 2020  
-**Copyright:** © 2020 ASRock Rack Inc. All rights reserved.
+> **Markdown edition.** This edition was reconstructed from the official PDF supplied by the user. Repeated page headers, footers, language tabs, and printed page numbers have been removed. Printed page references have been replaced with links to the relevant sections. Obvious extraction artifacts have been corrected, while technical names, values, and option descriptions have been preserved. Figures are retained as portable image assets where the PDF layout carries information that text alone cannot represent faithfully.
 
-> **Editing note**
-> This Markdown edition removes printed page headers, footers, and page numbers. The table of contents uses links to section headings instead of fixed page numbers. Obvious PDF-to-text artifacts were repaired, lists were normalized, and structured data was converted into tables. Product names, connector names, menu names, and technical values were retained.
+## Copyright Notice
+
+No part of this documentation may be reproduced, transcribed, transmitted, or translated in any language, in any form or by any means, except duplication of documentation by the purchaser for backup purpose, without written consent of ASRock Rack Inc.
+
+Products and corporate names appearing in this documentation may or may not be registered trademarks or copyrights of their respective companies, and are used only for identification or explanation and to the owners’ benefit, without intent to infringe.
+
+### Disclaimer
+
+Specifications and information contained in this documentation are furnished for informational use only and subject to change without notice, and should not be construed as a commitment by ASRock Rack. ASRock Rack assumes no responsibility for any errors or omissions that may appear in this documentation.
+
+With respect to the contents of this documentation, ASRock Rack does not provide warranty of any kind, either expressed or implied, including but not limited to the implied warranties or conditions of merchantability or fitness for a particular purpose.
+
+In no event shall ASRock Rack, its directors, officers, employees, or agents be liable for any indirect, special, incidental, or consequential damages (including damages for loss of profits, loss of business, loss of data, interruption of business, and the like), even if ASRock Rack has been advised of the possibility of such damages arising from any defect or error in the documentation or product.
+
+This device complies with Part 15 of the FCC Rules. Operation is subject to the following two conditions:
+
+1. This device may not cause harmful interference.
+2. This device must accept any interference received, including interference that may cause undesired operation.
+
+### California, USA Only
+
+The lithium battery adopted on this motherboard contains perchlorate, a toxic substance controlled in Perchlorate Best Management Practices (BMP) regulations passed by the California Legislature. When you discard the lithium battery in California, USA, follow the related regulations in advance.
+
+“Perchlorate Material - special handling may apply.” See <https://www.dtsc.ca.gov/hazardouswaste/perchlorate>.
+
+ASRock Rack website: <https://www.asrockrack.com>
+
+## Contact Information
+
+If you need to contact ASRock Rack or want to know more about ASRock Rack, visit the ASRock Rack website or contact your dealer.
+
+**ASRock Rack Incorporation**  
+6F., No. 37, Sec. 2, Jhongyang S. Rd., Beitou District,  
+Taipei City 112, Taiwan (R.O.C.)
 
 ## Contents
 
@@ -32,16 +68,40 @@
   - [2.10 M.2 SSD (NGFF) Module Installation Guide](#210-m2-ssd-ngff-module-installation-guide)
 - [Chapter 3: UEFI Setup Utility](#chapter-3-uefi-setup-utility)
   - [3.1 Introduction](#31-introduction)
+    - [3.1.1 UEFI Menu Bar](#311-uefi-menu-bar)
+    - [3.1.2 Navigation Keys](#312-navigation-keys)
   - [3.2 Main Screen](#32-main-screen)
   - [3.3 Advanced Screen](#33-advanced-screen)
-  - [3.4 Server Mgmt](#34-server-mgmt)
+    - [3.3.1 CPU Configuration](#331-cpu-configuration)
+    - [3.3.2 Chipset Configuration](#332-chipset-configuration)
+    - [3.3.3 Storage Configuration](#333-storage-configuration)
+    - [3.3.4 ACPI Configuration](#334-acpi-configuration)
+    - [3.3.5 USB Configuration](#335-usb-configuration)
+    - [3.3.6 Super IO Configuration](#336-super-io-configuration)
+    - [3.3.7 Serial Port Console Redirection](#337-serial-port-console-redirection)
+    - [3.3.8 H/W Monitor](#338-hw-monitor)
+    - [3.3.9 PCI Subsystem Settings](#339-pci-subsystem-settings)
+    - [3.3.10 AMD CBS](#3310-amd-cbs)
+    - [3.3.11 AMD PBS](#3311-amd-pbs)
+    - [3.3.12 PSP Firmware Versions](#3312-psp-firmware-versions)
+    - [3.3.13 Instant Flash](#3313-instant-flash)
+  - [3.4 Server Management](#34-server-management)
+    - [3.4.1 System Event Log](#341-system-event-log)
+    - [3.4.2 BMC Network Configuration](#342-bmc-network-configuration)
+    - [3.4.3 BMC Tools](#343-bmc-tools)
   - [3.5 Security](#35-security)
+    - [3.5.1 Key Management](#351-key-management)
   - [3.6 Boot Screen](#36-boot-screen)
+    - [3.6.1 CSM Parameters](#361-csm-parameters)
   - [3.7 Event Logs](#37-event-logs)
   - [3.8 Exit Screen](#38-exit-screen)
 - [Chapter 4: Software Support](#chapter-4-software-support)
   - [4.1 Install Operating System](#41-install-operating-system)
   - [4.2 Support CD Information](#42-support-cd-information)
+    - [4.2.1 Running the Support CD](#421-running-the-support-cd)
+    - [4.2.2 Drivers Menu](#422-drivers-menu)
+    - [4.2.3 Utilities Menu](#423-utilities-menu)
+    - [4.2.4 Contact Information](#424-contact-information)
 - [Chapter 5: Troubleshooting](#chapter-5-troubleshooting)
   - [5.1 Troubleshooting Procedures](#51-troubleshooting-procedures)
   - [5.2 Technical Support Procedures](#52-technical-support-procedures)
@@ -49,235 +109,251 @@
 
 ---
 
-# Chapter 1: Introduction
+## Chapter 1: Introduction
 
-Thank you for purchasing the ASRock Rack ROMED6U-2L2T motherboard. It is produced under ASRock Rack's stringent quality control and is designed for reliable performance and endurance.
+Thank you for purchasing the ASRock Rack ROMED6U-2L2T motherboard, a reliable motherboard produced under ASRock Rack's consistently stringent quality control. It delivers excellent performance with a robust design that conforms to ASRock Rack's commitment to quality and endurance.
 
-This manual covers:
+Chapters 1 and 2 introduce the motherboard and provide a step-by-step guide to hardware installation. Chapters 3 and 4 contain the BIOS setup configuration guide and information about the Support CD.
 
-- Motherboard introduction and hardware installation.
-- UEFI setup and configuration.
-- Support CD information.
+> **Important:** The motherboard specifications and BIOS software might be updated, so the contents of this manual are subject to change without notice. Updated versions will be available on the [ASRock Rack website](https://www.asrockrack.com/) without further notice. The latest memory and CPU support lists are also available there.
+>
+> For technical support related to this motherboard, visit [ASRock Rack Support](http://www.asrockrack.com/support/) for model-specific information.
 
-## 1.1 Package Contents
+### 1.1 Package Contents
 
-- ASRock Rack ROMED6U-2L2T motherboard
-  - microATX form factor: 9.6 in × 9.6 in (24.4 cm × 24.4 cm)
+- ASRock Rack ROMED6U-2L2T motherboard (microATX form factor: 9.6 in x 9.6 in, 24.4 cm x 24.4 cm)
 - Quick Installation Guide
-- 1 × I/O shield
-- 2 × screws for M.2 sockets
-- 1 × SATA3 cable, 60 cm
-- 1 × Mini-SAS HD-to-4-SATA cable, 60 cm
-- 1 × ATX 4-pin-to-24-pin power cable, 8 cm
-- 1 × SATA power cable, 80 cm
+- 1 x I/O shield
+- 2 x screws for M.2 sockets
+- 1 x SATA3 cable (60 cm)
+- 1 x Mini-SAS HD to 4 SATA cable (60 cm)
+- 1 x ATX 4-pin to 24-pin power cable (8 cm)
+- 1 x SATA power cable (80 cm)
 
-If any items are missing or damaged, contact your authorized dealer.
+> **Note:** If any items are missing or appear damaged, contact your authorized dealer.
 
-Motherboard specifications and BIOS software may be updated without notice. If this manual is modified, the updated version will be available on the ASRock Rack website. The website also provides the latest memory and CPU support lists.
+### 1.2 Specifications
 
-- Website: <http://www.asrockrack.com>
-- Technical support: <http://www.asrockrack.com/support/>
+#### Motherboard Physical Status
 
-## 1.2 Specifications
-
-### Motherboard and processor
-
-| Category | Specification |
+| Item | Specification |
 |---|---|
 | Form factor | microATX |
-| Dimensions | 9.6 in × 9.6 in (24.4 cm × 24.4 cm) |
+| Dimensions | 9.6 in x 9.6 in (24.4 cm x 24.4 cm) |
+
+#### Processor System
+
+| Item | Specification |
+|---|---|
 | CPU | AMD EPYC™ 7002 Series Processor |
 | Socket | Single Socket SP3 (LGA4094) |
 | Chipset | N/A |
-| Thermal design power | 280 W |
+| Thermal Design Power | 280 W |
 
-### System memory
+#### System Memory
 
 | Item | Specification |
 |---|---|
-| Memory technology | Six-channel DDR4 |
-| Supported memory | DDR4 RDIMM, LRDIMM, and NVDIMM |
-| RDIMM sizes | 64 GB, 32 GB, 16 GB, 8 GB per DIMM |
-| LRDIMM sizes | 128 GB, 64 GB, 32 GB per DIMM |
-| NVDIMM size | 32 GB per DIMM |
-| RDIMM frequency | 3200 MHz |
-| LRDIMM frequency | 2666 MHz |
-| NVDIMM frequency | 2666 MHz |
+| Type | Six-channel DDR4 memory technology<br>Supports DDR4 RDIMM, LRDIMM, and NVDIMM |
+| DIMM size per DIMM | RDIMM: 64 GB, 32 GB, 16 GB, 8 GB<br>LRDIMM: 128 GB, 64 GB, 32 GB<br>NVDIMM: 32 GB |
+| DIMM frequency | RDIMM: 3200 MHz<br>LRDIMM: 2666 MHz<br>NVDIMM: 2666 MHz |
 | Voltage | 1.2 V |
 
-### Expansion and storage
-
-| Category | Specification |
-|---|---|
-| PCIe slots | PCIE7, PCIE6, PCIE5, and PCIE4: PCIe 4.0 ×16 links |
-| Slimline connectors | SLIM1: PCIe Gen4 ×8, supports SATA; SLIM2: PCIe Gen4 ×8, supports SATA; SLIM3: PCIe Gen4 ×8 |
-| SATA connectors | 2 × 7-pin SATA3; 12 × SATA3 at 6.0 Gb/s from Mini-SAS HD, Gen3 |
-| M.2 sockets | 2: M2_1, Type 2280; M2_2, Type 2260. Each supports SATA ×1 or PCIe ×4 |
-
-### Ethernet
+#### Expansion Slots
 
 | Item | Specification |
 |---|---|
-| 10GbE controller | Intel® X710-AT2 |
-| 1GbE controller | Intel® I210-AT2 |
-| 10GbE ports | 2 × RJ45 10GBASE-T |
-| 1GbE port | 1 × RJ45 1GBASE-T |
-| Dedicated management port | 1 × RJ45 dedicated IPMI LAN port using Realtek RTL8211E |
-| Other features | Wake-on-LAN; Energy Efficient Ethernet 802.3az; dual LAN teaming; PXE |
-| LAN1 | Supports NCSI |
+| PCIe 4.0 x16 | PCIE7: Gen4 x16 link<br>PCIE6: Gen4 x16 link<br>PCIE5: Gen4 x16 link<br>PCIE4: Gen4 x16 link |
 
-### Management and graphics
+#### Storage
 
-| Category | Specification |
+| Item | Specification |
+|---|---|
+| Slimline | SLIM1: PCIe Gen4 x8 (supports SATA)<br>SLIM2: PCIe Gen4 x8 (supports SATA)<br>SLIM3: PCIe Gen4 x8 |
+| SATA | 2 x 7-pin SATA3; 12 x SATA3 6.0 Gb/s from Mini-SAS HD (Gen3) |
+| M.2 slots | 2 (M2_1: Type 2280; M2_2: Type 2260; supports SATA x1 or PCIe x4) |
+
+#### Ethernet
+
+| Item | Specification |
+|---|---|
+| Interface | 10G by Intel X710-AT2; 1000/100/10 Mbps by Intel I210 |
+| LAN controller | 2 x RJ-45 10GBASE-T by Intel® X710-AT2<br>2 x RJ-45 1GBASE-T provided by two Intel® I210-AT2 controllers<br>1 x RJ-45 dedicated IPMI LAN port by RTL8211E<br>Supports Wake-on-LAN<br>Supports Energy Efficient Ethernet 802.3az<br>Supports dual LAN with teaming<br>Supports PXE<br>LAN1 supports NCSI |
+
+> **Source clarification:** The PDF's specifications table says `1 x RJ-45 1GBASE-T by Intel I210-AT2`, while its motherboard layout, rear I/O table, and block diagram show two Intel I210-AT2 controllers and two 1G ports (LAN3 and LAN4). The breakdown above follows those three mutually consistent sections.
+
+#### Management
+
+| Item | Specification |
 |---|---|
 | BMC controller | ASPEED AST2500 |
-| Dedicated IPMI GLAN | 1 × Realtek RTL8211E |
-| Management features | Watchdog; NMI |
-| Graphics controller | ASPEED AST2500 |
-| VRAM | DDR4, 256 MB |
+| IPMI dedicated GLAN | 1 x Realtek RTL8211E for dedicated management GLAN |
+| Features | Watchdog<br>NMI |
 
-### Rear-panel I/O
+#### Graphics
 
-| Item | Quantity or specification |
+| Item | Specification |
 |---|---|
-| VGA | 1 × D-Sub |
-| USB 3.2 Gen1 | 2 ports |
-| LAN | 4 + 1 RJ45 Ethernet ports |
-| LAN indicators | ACT/LINK LED and SPEED LED on LAN ports |
+| Controller | ASPEED AST2500 |
+| VRAM | DDR4 256 MB |
+
+#### Rear Panel I/O
+
+| Item | Specification |
+|---|---|
+| VGA port | 1 x D-Sub |
+| USB 3.2 Gen1 ports | 2 |
+| LAN ports | 2 x 10G RJ-45 data ports, 2 x 1G RJ-45 data ports, and 1 x dedicated IPMI RJ-45 port<br>LAN ports include ACT/LINK and SPEED LEDs |
 | UID | 1 |
 
-### Internal connectors and headers
+#### Internal Connectors
 
-| Connector or header | Quantity or specification |
+| Item | Specification |
 |---|---|
 | Auxiliary panel header | 1; includes chassis intrusion, location button and LED, and front LAN LED |
 | TPMS header | 1 |
 | IPMB header | 1 |
-| Fan headers | 6 × 4-pin |
-| ATX power | 1 × 8-pin, 1 × 8-pin, and 1 × 4-pin |
-| SATA power | 1 × 4-pin |
+| Fan headers | 6 fans x 4-pin |
+| ATX power | 2 x 8-pin + 1 x 4-pin |
+| SATA power | 1 x 4-pin |
 | USB 3.2 Gen1 header | 1; supports 2 USB 3.2 Gen1 ports |
-| M.2 | 2: M2_1 Type 2280 and M2_2 Type 2260; SATA ×1 or PCIe ×4 |
-| Slimline | 3: SLIM1 and SLIM2 support PCIe ×8 or SATA Gen3 ×8; SLIM3 supports PCIe ×8 |
-| Mini-SAS HD | 2: MSAS_HD0 supports SATA Gen3 ×8; MSAS_HD1 supports SATA Gen3 ×4 |
+| M.2 | 2 (M2_1: Type 2280; M2_2: Type 2260; supports SATA x1 or PCIe x4) |
+| Slimline | 3 (SLIM1 and SLIM2: PCIe x8 or SATA Gen3 x8; SLIM3: PCIe x8) |
+| Mini-SAS HD | 2 (MSAS_HD0: SATA Gen3 x8; MSAS_HD1: SATA Gen3 x4) |
 | SMBus from BMC | 1 |
 | PSU SMB | 1 |
 | NMI button | 1 |
 | SGPIO headers | 3 |
 | Thermal sensor header | 1 |
-| Speaker | 1 × 4-pin |
+| Speaker (4-pin) | 1 |
 | Clear CMOS | 1 short pad |
 | CPU_HSBP1 | 1 |
 | Front LAN LED | 1 |
-| OH/FanFail LEDs | 6; fan-fail LED only |
+| OH/FanFail LEDs | 6; fan-fail indication only |
 | COM header | 1 |
 | Panel header | 1 |
 
-### BIOS, hardware monitoring, and supported operating systems
+#### System BIOS
 
-| Category | Specification |
+| Item | Specification |
 |---|---|
 | BIOS type | 32 MB AMI UEFI Legal BIOS |
-| BIOS features | Plug and Play (PnP); ACPI 2.0 compliance; SMBIOS 2.8; ASRock Rack Instant Flash |
-| Temperature monitoring | CPU temperature; motherboard/card-side/TR1 temperature |
-| Fan monitoring | Fan tachometer; CPU Quiet Fan; fan multi-speed control |
-| Voltage monitoring | +12 V, +5 V, +3.3 V, CPU Vcore, DRAM, +BAT, 3VSB, 5VSB |
-| Windows | Windows Server 2016 and 2019, 64-bit |
-| Red Hat Enterprise Linux Server | 8.0 and 7.6, 64-bit |
-| CentOS | 8.0 and 7.6, 64-bit |
-| SUSE SLES | 15.1 and 12.4, 64-bit |
-| Ubuntu | 18.04.3 and 16.04.6, 64-bit |
-| Citrix | Citrix Hypervisor 8.1.0 |
-| VMware | ESXi 6.5 U3 and 6.7 U3; vSphere 6.5 U3 and 6.7 U3 |
+| BIOS features | Plug and Play (PnP)<br>ACPI 2.0-compliant wake-up events<br>SMBIOS 2.8 support<br>ASRock Rack Instant Flash |
 
-> Refer to the ASRock Rack website for the latest operating-system support list.
+#### Hardware Monitor
 
-### Environment
-
-| Condition | Range |
+| Item | Specification |
 |---|---|
-| Operating temperature | 10°C to 35°C |
-| Non-operating temperature | −40°C to 70°C |
+| Temperature | CPU temperature sensing<br>Motherboard/card-side/TR1 temperature sensing |
+| Fan | Fan tachometer<br>CPU Quiet Fan (allows automatic CPU fan-speed adjustment based on CPU temperature)<br>Fan multi-speed control |
+| Voltage | Monitoring for +12 V, +5 V, +3.3 V, CPU Vcore, DRAM, +BAT, 3VSB, and 5VSB |
 
-> **Wake-on-LAN note**
-> This motherboard supports wake from onboard LAN. Enable **Wake on Magic Packet from power off state** in **Device Manager > Intel® Ethernet Connection > Power Management**. Also enable **PCI Devices Power On** in **UEFI SETUP UTILITY > Advanced > ACPI Configuration**. Onboard LAN1 and LAN4 can then wake the system from S5 under the operating system.
->
-> Installing the Intel® LAN utility or Marvell SATA utility may cause the motherboard to fail Windows® Hardware Quality Labs (WHQL) certification tests. Installing only the drivers passes the WHQL tests.
+#### Supported Operating Systems
 
-## 1.3 Unique Features
+| Platform | Supported versions |
+|---|---|
+| Microsoft® Windows® | Server 2016 (64-bit)<br>Server 2019 (64-bit) |
+| Linux® | Red Hat Enterprise Linux Server 8.0 (64-bit) / 7.6 (64-bit)<br>CentOS 8.0 (64-bit) / 7.6 (64-bit)<br>SUSE SLES 15.1 (64-bit) / 12.4 (64-bit)<br>Ubuntu 18.04.3 (64-bit) / 16.04.6 (64-bit)<br>Citrix Hypervisor 8.1.0 |
+| Virtualization | VMware ESXi 6.5 U3 / 6.7 U3<br>vSphere 6.5 U3 / 6.7 U3 |
 
-### ASRock Rack Instant Flash
+> **Note:** Refer to the ASRock Rack website for the latest OS support list.
 
-ASRock Rack Instant Flash is a BIOS flash utility embedded in the flash ROM. It updates the system BIOS without first entering MS-DOS or Windows®.
+#### Environment
 
-To use Instant Flash:
+| Item | Specification |
+|---|---|
+| Temperature | Operating: 10°C to 35°C<br>Non-operating: -40°C to 70°C |
 
-1. Press **F6** during POST, or press **F2** to enter the UEFI setup menu.
-2. Open **ASRock Rack Instant Flash**.
-3. Save the new BIOS file to a USB flash drive, floppy disk, or hard drive.
-4. Launch the utility and follow the on-screen instructions.
+> **Note:** Refer to the ASRock Rack website for the latest specifications.
 
-The USB flash drive or hard drive must use a FAT32, FAT16, or FAT12 file system.
+> **Wake-on-LAN:** This motherboard supports wake from onboard LAN. To use this function, enable **Wake on Magic Packet from power off state** under `Device Manager > Intel® Ethernet Connection > Power Management`, then enable **PCI Devices Power On** under `UEFI Setup Utility > Advanced > ACPI Configuration`. Afterward, onboard LAN1 and LAN4 can wake the system from S5 under the operating system.
 
-## 1.4 Motherboard Layout
+> **WHQL certification:** If you install the Intel® LAN utility or Marvell SATA utility, this motherboard may fail Windows® Hardware Quality Lab (WHQL) certification tests. Installing only the drivers allows it to pass the WHQL tests.
 
-The manual includes top-view and bottom-view motherboard diagrams. The following tables provide the connector legend in a searchable format.
+### 1.3 Unique Features
 
-### Board dimensions
+ASRock Rack Instant Flash is a BIOS flash utility embedded in Flash ROM. This convenient BIOS update tool lets you update the system BIOS without first entering an operating system such as MS-DOS or Windows®. Press **F6** during POST, or press **F2** to enter the BIOS setup menu and access ASRock Rack Instant Flash.
 
-- Form factor: microATX
-- Dimensions: 24.4 cm × 24.4 cm (9.6 in × 9.6 in)
-- CPU socket: LGA4094 Socket SP3
-- DIMM slots: DDR4_A1, DDR4_C1, DDR4_D1, DDR4_E1, DDR4_G1, DDR4_H1
+Launch the tool and save the new BIOS file to a USB flash drive, floppy disk, or hard drive. You can then update the BIOS in a few clicks without preparing an additional floppy diskette or another complicated flash utility. The USB flash drive or hard drive must use a FAT32, FAT16, or FAT12 file system.
 
-### Connector and component legend
+### 1.4 Motherboard Layout
+
+![ROMED6U-2L2T motherboard layout, top view](ROMED6U-2L2T_User_Manual.assets/motherboard-layout-top.png)
+
+![ROMED6U-2L2T motherboard layout, bottom view](ROMED6U-2L2T_User_Manual.assets/motherboard-layout-bottom.png)
+
+#### Top View - Text Transcription
+
+> The original figure is a spatial motherboard drawing. The following transcription preserves its dimensions, visible labels, and numbered callouts; it does not reproduce exact physical spacing.
+
+- **Board dimensions:** 24.4 cm (9.6 in) x 24.4 cm (9.6 in)
+- **Model marking:** ROMED6U-2L2T
+- **Rear I/O edge:** UID1; USB 3.2 Gen1 (`T: USB2`, `B: USB1`); IPMI_LAN; LAN3; LAN4; VGA1; LAN1; LAN2
+- **Top-edge power and control:** ATX12V2; ATX12V1; ATX4PIN1; BATTERY1; PSU_SMB1; PWM_CFG1
+- **Fan connectors:** FAN1, FAN2, and FAN3 along the top edge; FAN4, FAN5, and FAN6 along the right edge
+- **Processor and memory:** LGA4094 Socket SP3; DDR4_H1, DDR4_G1, and DDR4_E1 above the socket; DDR4_A1, DDR4_C1, and DDR4_D1 below the socket. Each slot is labeled as a 64-bit, 288-pin module.
+- **Controllers and firmware:** Intel X710-AT2; two Intel I210-AT2 controllers; ASPEED AST2500; Super I/O; BIOS ROM; BMC ROM
+- **Expansion and storage:** PCIE7; PCIE6; PCIE5; PCIE4; M2_1 with NUT80; SLIM3; SLIM2; SLIM1; SATA1; SATA0; SATA_PWR1; MSAS_HD0; MSAS_HD1
+- **Bottom-edge headers and controls:** NMI_BTN1; IPMB_1; BMC_SMB1; AUX_PANEL1; TR1; TPMS1; COM1; USB3_3_4; LED_LAN3_4; CLRMOS1; SATA_SGPIO1; SATA_SGPIO2; SATA_SGPIO3; SPEAKER1; PANEL1; CPU_HSBP1 (listed as CPU1_HSBP1 in the component reference). The panel drawing also labels `HDLED`, `RESET`, `PLED`, and `PWRBTN`; pin-1 markers are shown for applicable headers.
+
+#### Bottom View - Text Transcription
+
+The bottom view shows callout **39**, the `M2_2` socket, and its `NUT60_2` mounting point.
+
+#### Component Reference
 
 | No. | Description |
 |---:|---|
-| 1 | ATX 12V power connector (ATX12V2) |
-| 2 | ATX 12V power connector (ATX12V1) |
-| 3 | ATX 4-pin power connector (ATX4PIN1)** |
-| 4 | PSU SMBus header (PSU_SMB1) |
-| 5 | PWM configuration header (PWM_CFG1) |
-| 6 | System fan connector (FAN1) |
-| 7 | System fan connector (FAN2) |
-| 8 | System fan connector (FAN3) |
-| 9 | System fan connector (FAN4) |
-| 10 | System fan connector (FAN5) |
-| 11 | System fan connector (FAN6) |
-| 12 | Three 288-pin DDR4 DIMM slots: DDR4_E1, DDR4_G1, DDR4_H1* |
-| 13 | Three 288-pin DDR4 DIMM slots: DDR4_A1, DDR4_C1, DDR4_D1* |
-| 14 | SATA power connector, DC-IN mode (SATA_PWR1)** |
-| 15 | M.2 socket M2_1, Type 2280 |
-| 16 | Slimline NVMe connector (SLIM3) |
-| 17 | Slimline NVMe connector (SLIM2) |
-| 18 | Slimline NVMe connector (SLIM1), right-angled |
-| 19 | SATA3 connector (SATA1) |
-| 20 | Mini-SAS HD connector (MSAS_HD0), right-angled |
-| 21 | Mini-SAS HD connector (MSAS_HD1), right-angled |
-| 22 | Speaker header (SPEAKER1) |
-| 23 | System panel header (PANEL1) |
-| 24 | Backplane PCI Express hot-plug connector (CPU1_HSBP1) |
-| 25 | SATA SGPIO connector (SATA_SGPIO3) |
-| 26 | SATA SGPIO connector (SATA_SGPIO2) |
-| 27 | SATA SGPIO connector (SATA_SGPIO1) |
-| 28 | SATA3 connector (SATA0) |
-| 29 | Front LAN LED connector (LED_LAN3_4) |
-| 30 | USB 3.2 Gen1 header (USB3_3_4), right-angled |
-| 31 | Clear CMOS pad (CLRMOS1) |
-| 32 | COM port header (COM1) |
-| 33 | TPMS header (TPMS1) |
-| 34 | Thermal sensor header (TR1) |
-| 35 | Auxiliary panel header (AUX_PANEL1) |
-| 36 | BMC SMBus header (BMC_SMB1) |
-| 37 | Intelligent Platform Management Bus header (IPMB_1) |
-| 38 | Non-Maskable Interrupt button (NMI_BTN1) |
-| 39 | M.2 socket M2_2, Type 2260 |
+| 1 | ATX 12 V Power Connector (ATX12V2) |
+| 2 | ATX 12 V Power Connector (ATX12V1) |
+| 3 | ATX 4-pin Power Connector (ATX4PIN1)[^ch1-layout-power] |
+| 4 | PSU SMBus Header (PSU_SMB1) |
+| 5 | PWM Configuration Header (PWM_CFG1) |
+| 6 | System Fan Connector (FAN1) |
+| 7 | System Fan Connector (FAN2) |
+| 8 | System Fan Connector (FAN3) |
+| 9 | System Fan Connector (FAN4) |
+| 10 | System Fan Connector (FAN5) |
+| 11 | System Fan Connector (FAN6) |
+| 12 | 3 x 288-pin DDR4 DIMM Slots (DDR4_E1, DDR4_G1, DDR4_H1)[^ch1-layout-dimm] |
+| 13 | 3 x 288-pin DDR4 DIMM Slots (DDR4_A1, DDR4_C1, DDR4_D1)[^ch1-layout-dimm] |
+| 14 | SATA Power Connector, DC-IN Mode (`SATA_PWR1`; printed as `SATAPWR1` in the source component list)[^ch1-layout-power] |
+| 15 | M.2 Socket (M2_1), Type 2280 |
+| 16 | Slimline NVMe Connector (SLIM3) |
+| 17 | Slimline NVMe Connector (SLIM2) |
+| 18 | Slimline NVMe Connector (SLIM1), right-angled |
+| 19 | SATA3 Connector (SATA1) |
+| 20 | Mini-SAS HD Connector (MSAS_HD0), right-angled |
+| 21 | Mini-SAS HD Connector (MSAS_HD1), right-angled |
+| 22 | Speaker Header (SPEAKER1) |
+| 23 | System Panel Header (PANEL1) |
+| 24 | Backplane PCI Express Hot-Plug Connector (CPU1_HSBP1) |
+| 25 | SATA SGPIO Connector (SATA_SGPIO3) |
+| 26 | SATA SGPIO Connector (SATA_SGPIO2) |
+| 27 | SATA SGPIO Connector (SATA_SGPIO1) |
+| 28 | SATA3 Connector (SATA0) |
+| 29 | Front LAN LED Connector (LED_LAN3_4) |
+| 30 | USB 3.2 Gen1 Header (USB3_3_4), right-angled |
+| 31 | Clear CMOS Pad (CLRMOS1) |
+| 32 | COM Port Header (COM1) |
+| 33 | TPMS Header (TPMS1) |
+| 34 | Thermal Sensor Header (TR1) |
+| 35 | Auxiliary Panel Header (AUX_PANEL1) |
+| 36 | BMC SMBus Header (BMC_SMB1) |
+| 37 | Intelligent Platform Management Bus Header (IPMB_1) |
+| 38 | Non-Maskable Interrupt Button (NMI_BTN1) |
+| 39 | M.2 Socket (M2_2), Type 2260 |
 
-\* See [Installation of Memory Modules (DIMM)](#24-installation-of-memory-modules-dimm) for DIMM installation and configuration instructions.  
-\*\* Misconnection between **ATX4PIN1** and **SATA_PWR1** may permanently damage the motherboard.
+[^ch1-layout-dimm]: For DIMM installation and configuration instructions, see [Section 2.4, "Installation of Memory Modules (DIMM)"](#24-installation-of-memory-modules-dimm).
+[^ch1-layout-power]: **Caution:** A misconnection between the ATX4PIN1 and SATA_PWR1 connectors may permanently damage the motherboard.
 
-## 1.5 Onboard LED Indicators
+### 1.5 Onboard LED Indicators
+
+![Locations of the onboard LED indicators](ROMED6U-2L2T_User_Manual.assets/onboard-led-layout.png)
+
+#### Location Drawing - Text Transcription
+
+> The original figure shows the eight LED locations on the motherboard. Its visible board labels are `DDR4_H1`, `DDR4_G1`, `DDR4_E1`, `DDR4_A1`, `DDR4_C1`, `DDR4_D1`, `LGA4094 Socket SP3`, and `ROMED6U-2L2T`. Callouts 1 through 6 identify the fan-failure LEDs beside FAN1 through FAN6, callout 7 identifies the BMC heartbeat LED near the lower-left edge, and callout 8 identifies the standby-power LED near the left edge.
 
 | No. | Item | Status | Description |
 |---:|---|---|---|
@@ -288,533 +364,873 @@ The manual includes top-view and bottom-view motherboard diagrams. The following
 | 5 | FAN_LED5 | Red | FAN5 failed |
 | 6 | FAN_LED6 | Red | FAN6 failed |
 | 7 | BMC_LED1 | Green | BMC heartbeat LED |
-| 8 | SB_PWR1 | Green | Standby power ready |
+| 8 | SB_PWR1 | Green | Standby power ready (`STB PWR ready`) |
 
-## 1.6 I/O Panel
+### 1.6 I/O Panel
+
+![ROMED6U-2L2T rear I/O panel](ROMED6U-2L2T_User_Manual.assets/io-panel.png)
+
+![LAN port activity, link, and speed LED locations](ROMED6U-2L2T_User_Manual.assets/lan-led-locations.png)
+
+#### Panel Drawing - Text Transcription
+
+From left to right, the rear-panel drawing shows the UID switch; the IPMI LAN port above two USB ports; LAN4 above LAN3; the VGA connector; and LAN2 above LAN1.
 
 | No. | Description |
 |---:|---|
-| 1 | UID switch (UID1) |
-| 2 | USB 3.2 Gen1 ports (USB3_1_2) |
-| 3 | LAN RJ45 port (IPMI_LAN1)* |
-| 4 | 1GbE LAN RJ45 port (LAN3)** |
-| 5 | 1GbE LAN RJ45 port (LAN4)** |
-| 6 | VGA port (VGA1) |
-| 7 | 10GbE LAN RJ45 port (LAN1)** |
-| 8 | 10GbE LAN RJ45 port (LAN2)** |
+| 1 | UID Switch (UID1) |
+| 2 | USB 3.2 Gen1 Ports (USB3_1_2) |
+| 3 | LAN RJ-45 Port (IPMI_LAN1)[^ch1-ipmi-led] |
+| 4 | 1G LAN RJ-45 Port (LAN3)[^ch1-data-led] |
+| 5 | 1G LAN RJ-45 Port (LAN4)[^ch1-data-led] |
+| 6 | VGA Port (VGA1) |
+| 7 | 10G LAN RJ-45 Port (LAN1)[^ch1-data-led] |
+| 8 | 10G LAN RJ-45 Port (LAN2)[^ch1-data-led] |
 
-### Dedicated IPMI LAN port LED indications
+[^ch1-ipmi-led]: Two LEDs sit next to the dedicated IPMI LAN port. See the dedicated IPMI LAN port LED table below.
+[^ch1-data-led]: Two LEDs sit on each 1G and 10G LAN port. See the LAN port LED tables below.
 
-| Activity/Link LED status | Description | Speed LED status | Description |
+#### LAN Port LED Placement - Text Transcription
+
+Each LAN-port drawing labels the two indicators as **ACT/LINK LED** and **SPEED LED**, with the connector labeled **LAN Port**. The dedicated IPMI drawing places ACT/LINK on the left and SPEED on the right. For the stacked 1G/10G ports, the upper port's labels appear above it and the lower port's labels appear below it, with ACT/LINK on the left and SPEED on the right.
+
+#### Dedicated IPMI LAN Port LED Indications
+
+| Activity/Link Status | Activity/Link Description | Speed Status | Speed Description |
 |---|---|---|---|
 | Off | No link | Off | 10 Mbps connection or no link |
 | Blinking yellow | Data activity | Yellow | 100 Mbps connection |
 | On | Link | Green | 1 Gbps connection |
 
-### 1GbE LAN port LED indications: LAN3 and LAN4
+#### 1G LAN Port (LAN3, LAN4) LED Indications
 
-| Activity/Link LED status | Description | Speed LED status | Description |
+| Activity/Link Status | Activity/Link Description | Speed Status | Speed Description |
 |---|---|---|---|
 | Off | No link | Off | 10 Mbps connection or no link |
 | Blinking green | Data activity | Yellow | 100 Mbps connection |
 | On | Link | Green | 1 Gbps connection |
 
-### 10GbE LAN port LED indications: LAN1 and LAN2
+#### 10G LAN Port (LAN1, LAN2) LED Indications
 
-| Activity/Link LED status | Description | Speed LED status | Description |
+| Activity/Link Status | Activity/Link Description | Speed Status | Speed Description |
 |---|---|---|---|
 | Off | No link | Off | 100 Mbps connection or no link |
 | Blinking yellow | Data activity | Yellow | 1 Gbps connection |
 | On | Link | Green | 10 Gbps connection |
 
-\* The dedicated IPMI LAN port has two LEDs.  
-\*\* Each LAN port has two LEDs.
+### 1.7 Block Diagram
 
-## 1.7 Block Diagram
+![ROMED6U-2L2T system block diagram](ROMED6U-2L2T_User_Manual.assets/block-diagram.png)
 
-The source manual contains a graphical block diagram. Its main signal and device relationships are summarized below.
+> **Text transcription:** The original block diagram uses routed lines and a landscape orientation that cannot be reproduced faithfully in plain Markdown. The tables below preserve its visible component names, CPU port labels, interface widths and generations, endpoint labels, and routing notes.
 
-| Area | Connections and devices |
+#### Processor and Memory
+
+| Block | Diagram labels and data |
 |---|---|
-| CPU and memory | AMD EPYC 7002-series processor with six DDR4 LRDIMM/RDIMM channels: A1, C1, D1, E1, G1, and H1 |
-| PCIe from CPU | PCIE4, PCIE5, PCIE6, and PCIE7: PCIe Gen4 ×16 |
-| Slimline | SLIM1 and SLIM2: PCIe Gen4 ×8 or SATA Gen3 ×8; SLIM3: PCIe Gen4 ×8 |
-| M.2 | M2_1 and M2_2: SATA or PCIe Gen4 ×4, subject to board routing and configuration |
-| SATA | SATA0 and SATA1: SATA Gen3; MSAS_HD0: SATA Gen3 ×8; MSAS_HD1: SATA Gen3 ×4 |
-| Networking | Intel X710-AT2 for 10GbE; two Intel I210-AT2 controllers for 1GbE; Realtek RTL8211E for dedicated management LAN |
-| Management | ASPEED AST2500 BMC with DDR4 DRAM, video, USB, LPC, and SPI flash interfaces |
-| Other interfaces | TPM 2.0, NCSI, USB 3.2 Gen1, USB 2.0, LPC, SPI, and SGPIO |
+| Processor | `AMD Family 17h Processor`; `CPU`; `AMD EPYC 700x` |
+| Memory | `6 DIMM Slots`; six instances of `1 x DDR4 LRDIMM/RDIMM`; six `R/LRDIMM` links; six CPU-side `DDR4` interfaces, with three shown on each side of the processor |
 
-The source diagram also shows the following SGPIO associations:
+#### CPU Port and Endpoint Map
 
-- SATA0–SATA7 use SATA_SGPIO3.
-- SATA8–SATA11, SATA12, and SATA13 use SATA_SGPIO2.
-- SLIM2 uses SATA_SGPIO1.
-- SLIM1 uses SATA_SGPIO0.
+| CPU port or group | Endpoint | Link and endpoint labels |
+|---|---|---|
+| Port G0 | PCIE5 | PCIe Gen4 x16; `PCI Express x16 Riser Slot` |
+| Port G1 | PCIE4 | PCIe Gen4 x16; `PCI Express x16 Riser Slot` |
+| Port G2.0~3 | MSAS_HD1 | Mini-SAS HD; SATA Gen3 x4 |
+| Port G2.4~7 | SATA 7-pin block | SATA Gen3 x2 |
+| Port G2.8~15 | M2_1 and M2_2 | M.2 sockets; PCIe Gen4 x4; `support: 1. SATA 2. PCIE` |
+| Port G3.0~7 | MSAS_HD0 | Mini-SAS HD; SATA Gen3 x8 |
+| Port G3.8~15 | SLIM3 | Slimline connector; PCIe Gen4 x8 |
+| Port P0.0~7 and Port P0.8~15 | SLIM1 | Two PCIe x8 groups; SATA Gen3 x8 or PCIe Gen4 x4 x2; `Support: 1. SATA*8 2. NVMe*2` |
+| Port P2 | PCIE6 | PCIe x16; PCIe Gen4 x16; `PCI Express x16 Riser Slot` |
+| Port P3 | PCIE7 | PCIe x16; PCIe Gen4 x16; `PCI Express x16 Riser Slot` |
+| Port P1.0~7 | SLIM2 | PCIe x8; SATA Gen3 x8 or PCIe Gen4 x4 x2; `Support: 1. SATA*8 2. NVMe*2` |
+| Port P1.8~11 | Intel X710-AT2 | PCIe x4; PCIe Gen3 x4 |
+| Port P1.12 | ASPEED AST2500 | PCIe Gen3 x1 to the BMC's PCI-Express interface |
+| Port P1.13 | First Intel I210-AT2 | PCIe x1; PCIe Gen3 x1 |
+| Port P1.14 | Second Intel I210-AT2 | PCIe x1; PCIe Gen3 x1 |
+
+#### SATA SGPIO Configuration
+
+- SLIM1 uses `SGPIO_0`.
+- SLIM2 uses `SGPIO_1`.
+- `SATA_8_11`, `SATA12`, and `SATA13` use `SGPIO_2`.
+- `SATA_0_7` uses `SGPIO_3`.
+
+#### Network Paths
+
+| Controller or PHY | Diagram routing and labels |
+|---|---|
+| Intel X710-AT2 | `10G`; two RJ-45 ports; PCIe Gen3 x4; red `NCSI` path to the AST2500 MAC2 path |
+| Intel I210-AT2 x2 | `1G`; two RJ-45 ports; two PCIe Gen3 x1 links; red `Resistance Option` path to the AST2500 MAC2 path |
+| Realtek RTL8211E | `10/100/1G PHY`; connected to the AST2500 `MAC1` / `Ethernet 10/100/1000` block and to the dedicated LAN-port drawing |
+
+#### BMC and Peripheral Paths
+
+| Source or block | Destination and visible labels |
+|---|---|
+| CPU USB 3.2 | `USB 3.2 GEN1` to `F_USB1` and the rear USB 3.2 port drawing |
+| CPU PCIe | `PCIE Gen3 x1`, `P1.12`, to the AST2500 `PCI-Express` interface |
+| CPU USB/LPC | `USB2.0 x2`; `LPC`; `TPM 2.0`; `SIO NCT6779`; AST2500 `LPC` and `USB 1.1 & 2.0` interfaces |
+| ASPEED AST2500 MAC1 | `Ethernet 10/100/1000` to Realtek RTL8211E `10/100/1G PHY` and the dedicated LAN-port drawing |
+| ASPEED AST2500 Video DAC | VGA connector |
+| ASPEED AST2500 BMC & VRAM | DDR4 DRAM (512 MB) |
+| ASPEED AST2500 BMC SPI | SPI flash (512 Mb) |
+| ASPEED AST2500 MAC2 | `Ethernet 10/100/1000`; receives the diagram's red `NCSI` / `Resistance Option` routing from the Intel LAN controllers |
+
+> **Source clarification:** The specifications table lists 256 MB of VRAM, while the block diagram labels a 512 MB DDR4 DRAM device connected to the combined `BMC & VRAM` block. The PDF does not explain whether 256 MB is a graphics allocation within that physical BMC memory, so both source values are retained.
 
 ---
 
-# Chapter 2: Installation
+## Chapter 2: Installation
 
-This motherboard uses a microATX form factor measuring 9.6 in × 9.6 in (24.4 cm × 24.4 cm). Before installation, confirm that the chassis supports the motherboard.
+The ROMED6U-2L2T is a microATX motherboard measuring 9.6 x 9.6 in
+(24.4 x 24.4 cm). Before installing it, study the chassis configuration and
+confirm that the motherboard will fit.
 
-## 2.1 Screw Holes
+> **Warning:**
+> Unplug the power cord before installing or removing the motherboard. Failure
+> to do so may cause physical injury and damage motherboard components.
 
-Place screws in the holes marked by circles to secure the motherboard to the chassis.
 
-## 2.2 Pre-installation Precautions
+### 2.1 Screw Holes
 
-Follow these precautions before installing motherboard components or changing motherboard settings:
+Place screws into the holes indicated by circles to secure the motherboard to
+the chassis.
 
-1. Unplug the power cord from the wall socket before touching any component.
-2. To prevent static-electricity damage, never place the motherboard directly on carpet or a similar surface. Use a grounded wrist strap or touch a safety-grounded object before handling components.
-3. Hold components by their edges. Do not touch the ICs.
-4. When removing a component, place it on a grounded anti-static pad or in its supplied anti-static bag.
-5. Place screws in the mounting holes without over-tightening them. Over-tightening can damage the motherboard.
+> **Caution:**
+> Do not overtighten the screws. Doing so may damage the motherboard.
 
-> **Safety warning**
-> Switch off the power or detach the power cord before installing or removing any component. Failure to do so can cause serious injury or damage to the motherboard, peripherals, or components.
+### 2.2 Pre-installation Precautions
 
-## 2.3 Installing the CPU
+Before installing motherboard components or changing motherboard settings:
 
-1. Before inserting the CPU, check that:
-   - The PnP cap is installed on the socket.
-   - The CPU surface is clean.
-   - The socket has no bent pins.
-2. Do not force the CPU into the socket if any problem is found. Otherwise, the CPU can be seriously damaged.
-3. Unplug all power cables before installing the CPU.
-4. Follow the numbered installation illustrations in the manual.
-5. Install the carrier frame with the CPU. Do not separate them.
-6. While inserting the carrier frame with the CPU, keep it closely attached to the rail frame.
+1. Unplug the power cord from the wall socket before touching any components.
+2. To avoid static-electricity damage, never place the motherboard directly on
+   carpet or a similar surface. Wear a grounded wrist strap or touch a safely
+   grounded object before handling components.
+3. Hold components by their edges. Do not touch the integrated circuits (ICs).
+4. When removing a component, place it on a grounded anti-static pad or in the
+   anti-static bag supplied with the component.
+5. Do not overtighten the screws used to secure the motherboard to the chassis.
+   Doing so may damage the motherboard.
 
-**Terminology in the installation illustration:**
+> **Warning:**
+> Before installing or removing any component, make sure that the power is
+> switched off or that the power cord is disconnected from the power supply.
+> Failure to do so may severely damage the motherboard, peripherals, and/or
+> components.
 
-- **Carrier Frame with CPU**
-- **Rail Frame**
+### 2.3 Installing the CPU
 
-## 2.4 Installation of Memory Modules (DIMM)
+![CPU installation steps, figure 1 of 4](ROMED6U-2L2T_User_Manual.assets/cpu-installation-1.png)
 
-This motherboard provides six 288-pin DDR4 DIMM slots in two groups and supports six-channel memory technology.
+![CPU installation steps, figure 2 of 4](ROMED6U-2L2T_User_Manual.assets/cpu-installation-2.png)
 
-### DIMM population guide
+![CPU installation steps, figure 3 of 4](ROMED6U-2L2T_User_Manual.assets/cpu-installation-3.png)
 
-| Number of DIMMs | Slots shown in the source table |
-|---:|---|
-| 1 | A1 |
-| 2 | A1, C1 |
-| 4 | A1, C1, D1, E1 |
-| 6 | A1, C1, D1, E1, G1, H1 |
+![CPU installation steps, figure 4 of 4](ROMED6U-2L2T_User_Manual.assets/cpu-installation-4.png)
 
-### Memory precautions
+> **Caution:**
+> 1. Before inserting the CPU, check whether the PnP cap is still on the socket,
+>    the CPU surface is unclean, or any socket pins are bent. If any of these
+>    conditions exists, do not force the CPU into the socket. Otherwise, the CPU
+>    may be seriously damaged.
+> 2. Unplug all power cables before installing the CPU.
 
-1. Do not install DDR, DDR2, or DDR3 memory in a DDR4 slot. This can damage the motherboard and DIMM.
-2. For dual-channel configuration, install identical DDR4 DIMM pairs. Use the same brand, speed, size, and chip type.
-3. Dual-channel memory technology cannot be activated with only one or three memory modules installed.
-4. Some 1 GB, double-sided DDR4 DIMMs with 16 chips may not work. ASRock Rack does not recommend installing them.
+**Figure sequence: CPU installation (steps 1-8)**
 
-The DIMM fits in only one orientation. Forcing a DIMM into a slot in the wrong orientation can permanently damage the motherboard and DIMM.
+1. Loosen the three socket screws with a screwdriver in the illustrated order:
+   **A**, **B**, then **C**.
+2. Lift the first hinged socket frame upward, as shown.
+3. Lift the second hinged frame upward, as shown.
+4. Slide the illustrated carrier assembly upward and away from the socket.
+5. Insert the **carrier frame with CPU** into the **rail frame**. Make sure that
+   the carrier frame with CPU stays closely attached to the rail frame while it
+   is inserted.
 
-## 2.5 Expansion Slots (PCI Express Slots)
+   > **Caution:**
+   > Install the carrier frame with the CPU. Do not separate them.
 
-The motherboard provides four PCI Express slots. PCIE7, PCIE6, PCIE5, and PCIE4 are PCIe 4.0 ×16 slots connected to the CPU.
+6. Lower the carrier and rail-frame assembly toward the socket.
+7. Lower the remaining hinged socket frame.
+8. Tighten the three socket screws in the illustrated order:
+   **A**, **B**, then **C**.
 
-| Slot | Generation | Mechanical width | Electrical width | Source |
-|---|---:|---:|---:|---|
-| PCIE7 | 4.0 | ×16 | ×16 | CPU |
-| PCIE6 | 4.0 | ×16 | ×16 | CPU |
-| PCIE5 | 4.0 | ×16 | ×16 | CPU |
-| PCIE4 | 4.0 | ×16 | ×16 | CPU |
+### 2.4 Installation of Memory Modules (DIMM)
 
-### Installing an expansion card
+![DDR4 DIMM installation sequence](ROMED6U-2L2T_User_Manual.assets/dimm-installation.png)
 
-1. Switch off the power supply or unplug the power cord.
-2. Read the expansion-card documentation and set the required hardware options.
-3. Remove the system-unit cover if the motherboard is installed in a chassis.
-4. Remove the bracket for the slot you intend to use. Keep the screw.
-5. Align the card connector with the slot and press firmly until the card is fully seated.
-6. Secure the card to the chassis with the screw.
-7. Replace the system cover.
+The motherboard provides six 288-pin DDR4 (Double Data Rate 4) DIMM slots in
+two groups and supports Six Channel Memory Technology.
 
-## 2.6 Onboard Headers and Connectors
+#### DIMM population order
 
-> **Important:** Onboard headers and connectors are not jumpers. Do not place jumper caps over them. Doing so can permanently damage the motherboard.
+| Installed DIMMs | A1 | C1 | D1 | E1 | G1 | H1 |
+|---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| 1 |  | ✓ |  |  |  |  |
+| 2 |  | ✓ | ✓ |  |  |  |
+| 4 |  | ✓ | ✓ |  | ✓ | ✓ |
+| 6 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
-### System Panel Header: 9-pin PANEL1
+> **Caution:**
+> 1. Do not install a DDR, DDR2, or DDR3 memory module in a DDR4 slot. Doing so
+>    may damage both the motherboard and the DIMM.
+> 2. For a dual-channel configuration, install identical DDR4 DIMM pairs. The
+>    paired modules must have the same brand, speed, size, and chip type.
+> 3. Dual Channel Memory Technology cannot be activated with only one or three
+>    memory modules installed.
+> 4. Some double-sided 1 GB DDR4 DIMMs with 16 chips may not work on this
+>    motherboard and are not recommended.
 
-**Board reference:** Layout item 23.
+**Figure sequence: DIMM installation (steps 1-3)**
 
-| Signal | Signal | Signal |
-|---|---|---|
-| GND | RESET# | PWRBTN# |
-| PLED− | PLED+ | GND |
-| HDLED− | HDLED+ | GND |
+1. Open both retaining clips outward.
+2. Align the DIMM notch with the keyed slot, then insert the DIMM straight down.
+3. Close both retaining clips around the installed DIMM.
 
-Connect the chassis power switch, reset switch, and system-status indicators according to the pin assignments. Check positive and negative pins before connecting cables.
+> **Warning:**
+> A DIMM fits in only one orientation. Forcing it into the slot in the wrong
+> orientation will permanently damage both the motherboard and the DIMM.
 
-- **PWRBTN:** Connect to the chassis power switch. The power-switch behavior can be configured in the firmware.
-- **RESET:** Connect to the chassis reset switch. Press it to restart a system that has frozen.
-- **PLED:** Connect to the chassis power LED. The LED is on when the system operates and off in S4 or S5.
-- **HDLED:** Connect to the chassis storage-activity LED. The LED is on during drive read or write activity.
+### 2.5 Expansion Slots (PCI Express Slots)
 
-Chassis front-panel layouts vary. Match the wire assignments to the header pin assignments.
+The motherboard has four PCI Express slots. PCIE7, PCIE6, PCIE5, and PCIE4 are
+PCIe 4.0 x16 slots connected to the CPU and support PCI Express cards with an
+x16 lane width.
 
-### Auxiliary Panel Header: 18-pin AUX_PANEL1
+| Slot | Generation | Mechanical | Electrical | Source |
+|---|:---:|:---:|:---:|:---:|
+| PCIE7 | 4.0 | x16 | x16 | CPU |
+| PCIE6 | 4.0 | x16 | x16 | CPU |
+| PCIE5 | 4.0 | x16 | x16 | CPU |
+| PCIE4 | 4.0 | x16 | x16 | CPU |
 
-**Board reference:** Layout item 35.
+#### Installing an expansion card
 
-This header supports multiple front-panel functions, including front-panel SMBus, Internet-status indicators, chassis intrusion, and locator controls.
+1. Make sure that the power supply is switched off or the power cord is
+   unplugged. Read the expansion card's documentation and make any necessary
+   hardware settings before starting the installation.
+2. Remove the system-unit cover if the motherboard is already installed in a
+   chassis.
+3. Remove the bracket facing the slot you intend to use. Keep the screws for
+   later use.
+4. Align the card connector with the slot and press firmly until the card is
+   fully seated.
+5. Fasten the card to the chassis with screws.
+6. Replace the system cover.
 
-| Function | Description |
+### 2.6 Onboard Headers and Connectors
+
+> **Warning:**
+> Onboard headers and connectors are **not jumpers**. Do not place jumper caps
+> over them. Doing so will permanently damage the motherboard.
+
+#### Connector index
+
+- [System Panel Header](#system-panel-header-panel1)
+- [Auxiliary Panel Header](#auxiliary-panel-header-aux_panel1)
+- [Serial ATA3 Connectors](#serial-ata3-connectors-sata0-and-sata1)
+- [USB 3.2 Gen1 Header](#usb-32-gen1-header-usb3_3_4)
+- [Chassis Speaker Header](#chassis-speaker-header-speaker1)
+- [System Fan Connectors](#system-fan-connectors-fan1-fan6)
+- [Mini-SAS HD Connectors](#mini-sas-hd-connectors-msas_hd0-and-msas_hd1)
+- [Slimline NVMe Connectors](#slimline-nvme-connectors-slim1-slim3)
+- [Serial Port Header](#serial-port-header-com1)
+- [ATX 4-pin Power Connector](#atx-4-pin-power-connector-atx4pin1)
+- [SATA Power Connector](#sata-power-connector-sata_pwr1)
+- [ATX 12V Power Connectors](#atx-12v-power-connectors-atx12v1-and-atx12v2)
+- [Clear CMOS Pads](#clear-cmos-pads-clrmos1)
+- [Front LAN LED Header](#front-lan-led-header-led_lan3_4)
+- [TPMS Header](#tpms-header-tpms1)
+- [PSU SMBus Header](#psu-smbus-header-psu_smb1)
+- [Intelligent Platform Management Bus Header](#intelligent-platform-management-bus-header-ipmb_1)
+- [Thermal Sensor Header](#thermal-sensor-header-tr1)
+- [Non-Maskable Interrupt Button Header](#non-maskable-interrupt-button-header-nmi_btn1)
+- [Serial General Purpose Input/Output Headers](#serial-general-purpose-inputoutput-headers-sata_sgpio1-sata_sgpio3)
+- [Baseboard Management Controller SMBus Header](#baseboard-management-controller-smbus-header-bmc_smb1)
+- [PWM Configuration Header](#pwm-configuration-header-pwm_cfg1)
+- [CPU HP-SMBus Connector](#cpu-hp-smbus-connector-cpu1_hsbp1)
+
+Unless otherwise noted, the pin tables below follow the pin-1 marker and
+orientation printed in the source diagrams. A dash (`-`) denotes an unpopulated
+position or key.
+
+#### System Panel Header (PANEL1)
+
+**Connector:** 9-pin `PANEL1`  
+**Board location:** [Chapter 1 component reference](#component-reference), item
+23.
+
+Connect the chassis power switch, reset switch, and system-status indicators to
+this header according to the pin assignments. Pay particular attention to
+positive and negative pins before connecting cables.
+
+| Pin | Signal | Pin | Signal |
+|---:|---|---:|---|
+| 1 | `HDLED+` | 2 | `PLED+` |
+| 3 | `HDLED-` | 4 | `PLED-` |
+| 5 | `GND` | 6 | `PWRBTN#` |
+| 7 | `RESET#` | 8 | `GND` |
+| 9 | `GND` |  |  |
+
+- **PWRBTN (Power Switch):** Connect to the power switch on the chassis front
+  panel. You may configure how the system turns off when the power switch is
+  used.
+- **RESET (Reset Switch):** Connect to the reset switch on the chassis front
+  panel. Press it to restart the computer if the computer freezes and cannot
+  perform a normal restart.
+- **PLED (System Power LED):** Connect to the power-status indicator on the
+  chassis front panel. The LED is on while the system is operating. It is off
+  when the system is in the S4 sleep state or powered off (S5).
+- **HDLED (Hard Drive Activity LED):** Connect to the hard-drive activity LED on
+  the chassis front panel. The LED is on while the hard drive is reading or
+  writing data.
+
+Front-panel designs differ by chassis. A front-panel module usually includes a
+power switch, reset switch, power LED, hard-drive activity LED, speaker, and
+other components. Make sure the module's wire assignments match the header's
+pin assignments.
+
+#### Auxiliary Panel Header (AUX_PANEL1)
+
+**Connector:** 18-pin `AUX_PANEL1`  
+**Board location:** [Chapter 1 component reference](#component-reference), item
+35.
+
+This header supports several front-panel functions, including the front-panel
+SMBus, internet-status indicators, and chassis-intrusion input.
+
+The source figure shows a two-row, ten-position footprint. Pin 1 is at the
+bottom-left; two positions are unpopulated. The contacts are arranged as
+follows:
+
+| Diagram row | Positions from left to right |
 |---|---|
-| A. Front-panel SMBus | 6-1 pin FPSMB connection for SMBus equipment and power-management equipment |
-| B. Internet-status indicators | 2-pin LAN1_LED and LAN2_LED headers for LAN status cables |
-| C. Chassis intrusion | 2-pin CHASSIS connection for a chassis intrusion sensor or microswitch; default is CASEOPEN and GND, which disables the function |
-| D. Locator LED | 4-pin LOCATOR connection for the front-panel locator switch and LED |
-| E. System fault LED | 2-pin LOCATOR connection for the system fault LED |
+| Top | `SMB_Alert`, `SMB_CLK`, -, `GND`, `SMB_DATA`, `+3VSB`, `LAN1_LINK`, `LED_PWR`, `LED_PWR`, `LAN2_LINK` |
+| Bottom | `+5VSB`, -, `CASEOPEN`, `GND`, `LOCATORLED1+`, `LOCATORLED1-`, `LOCATORBTN#`, `GND`, `LOCATORLED2-`, `LOCATORLED2+` |
 
-The source pin labels include `SMB_ALERT`, `SMB_CLK`, `SMB_DATA`, `CASEOPEN`, `+3VSB`, `LAN1_LINK`, `LAN2_LINK`, `LED_PWR`, `+5VSB`, `LOCATORLED1+`, `LOCATORLED1−`, `LOCATORBTN#`, `LOCATORLED2+`, and `LOCATORLED2−`.
+The figure divides the header into these functions:
 
-### Serial ATA3 Connectors: SATA0 and SATA1
+**A. Front-panel SMBus connecting pin (6-1 pin FPSMB)**
 
-**Board references:** SATA0 is layout item 28; SATA1 is layout item 19.
+Connect SMBus (System Management Bus) equipment here. The SMBus supports
+communication between slower peripheral equipment and power-management
+equipment in the system.
 
-These SATA3 connectors support SATA data cables for internal storage devices at up to 6.0 Gb/s.
+**B. Internet-status indicators (2-pin LAN1_LED and LAN2_LED)**
 
-### USB 3.2 Gen1 Header: 19-pin USB3_3_4
+These two 2-pin headers accept Gigabit internet-indicator cables for the LAN
+status indicators. A flickering indicator means that the internet connection is
+working properly.
 
-**Board reference:** Layout item 30. Right-angled connector.
+**C. Chassis-intrusion pin (2-pin CHASSIS)**
 
-In addition to the two rear-panel USB 3.2 Gen1 ports, this header supports two USB 3.2 Gen1 ports.
+This input is for a chassis with an intrusion-detection design. It must be used
+with external detection equipment, such as an intrusion sensor or microswitch.
+When enabled, movement of a chassis component causes the sensor to signal this
+header, and the system records a chassis-intrusion event. By default,
+`CASEOPEN` is connected to `GND`, so the function is off.
 
-### Chassis Speaker Header: 4-pin SPEAKER1
+**D. Locator LED (4-pin LOCATOR)**
 
-**Board reference:** Layout item 22.
+This connection is for the front-panel locator switch and LED.
+
+**E. System Fault LED (2-pin LOCATOR)**
+
+This connection is for the system fault LED.
+
+#### Serial ATA3 Connectors (SATA0 and SATA1)
+
+| Connector | Chapter 1 component reference |
+|---|---|
+| `SATA0` | [Item 28](#component-reference) |
+| `SATA1` | [Item 19](#component-reference) |
+
+These two SATA3 connectors accept SATA data cables for internal storage devices
+and support transfer rates up to 6.0 Gb/s.
+
+#### USB 3.2 Gen1 Header (USB3_3_4)
+
+**Connector:** Right-angled, 19-pin `USB3_3_4`  
+**Board location:** [Chapter 1 component reference](#component-reference), item
+30.
+
+In addition to the two USB 3.2 Gen1 ports on the I/O panel, the motherboard has
+one USB 3.2 Gen1 header. It supports two USB 3.2 Gen1 ports.
+
+| Pin | Signal | Pin | Signal |
+|---:|---|---:|---|
+| 1 | `Dummy` | 2 | `IntA_PA_D+` |
+| 3 | `IntA_PB_D+` | 4 | `IntA_PA_D-` |
+| 5 | `IntA_PB_D-` | 6 | `GND` |
+| 7 | `GND` | 8 | `IntA_PA_SSTX+` |
+| 9 | `IntA_PB_SSTX+` | 10 | `IntA_PA_SSTX-` |
+| 11 | `IntA_PB_SSTX-` | 12 | `GND` |
+| 13 | `GND` | 14 | `IntA_PA_SSRX+` |
+| 15 | `IntA_PB_SSRX+` | 16 | `IntA_PA_SSRX-` |
+| 17 | `IntA_PB_SSRX-` | 18 | `Vbus` |
+| 19 | `Vbus` |  |  |
+
+#### Chassis Speaker Header (SPEAKER1)
+
+**Connector:** 4-pin `SPEAKER1`  
+**Board location:** [Chapter 1 component reference](#component-reference), item
+22.
 
 Connect the chassis speaker to this header.
 
-| Pin signal | Pin signal |
+| Pin | Signal |
+|---:|---|
+| 1 | `+5V` |
+| 2 | `DUMMY` |
+| 3 | `DUMMY` |
+| 4 | `SPEAKER` |
+
+#### System Fan Connectors (FAN1-FAN6)
+
+| Connector | Chapter 1 component reference |
 |---|---|
-| +5 V | DUMMY |
-| DUMMY | SPEAKER |
+| 4-pin `FAN1` | [Item 6](#component-reference) |
+| 4-pin `FAN2` | [Item 7](#component-reference) |
+| 4-pin `FAN3` | [Item 8](#component-reference) |
+| 4-pin `FAN4` | [Item 9](#component-reference) |
+| 4-pin `FAN5` | [Item 10](#component-reference) |
+| 4-pin `FAN6` | [Item 11](#component-reference) |
 
-### System Fan Connectors: FAN1–FAN6
-
-**Board references:** FAN1–FAN6 are layout items 6–11.
-
-Connect fan cables with the black wire on the ground pin. All fan headers support fan control.
+Connect fan cables to these headers and match each cable's black wire to the
+ground pin. All fans support fan control.
 
 | Pin | Signal |
 |---:|---|
-| 1 | GND |
-| 2 | FAN_VOLTAGE |
-| 3 | FAN_SPEED_CONTROL |
-| 4 | FAN_SPEED |
+| 1 | `GND` |
+| 2 | `FAN_VOLTAGE` |
+| 3 | `FAN_SPEED` |
+| 4 | `FAN_SPEED_CONTROL` |
 
-### Mini-SAS HD Connectors: MSAS_HD0 and MSAS_HD1
+#### Mini-SAS HD Connectors (MSAS_HD0 and MSAS_HD1)
 
-**Board references:** MSAS_HD0 is layout item 20; MSAS_HD1 is layout item 21. Both are right-angled.
+| Connector | Orientation | Chapter 1 component reference |
+|---|---|---|
+| `MSAS_HD0` | Right-angled | [Item 20](#component-reference) |
+| `MSAS_HD1` | Right-angled | [Item 21](#component-reference) |
 
-These connectors support Mini-SAS-to-SATA data cables for internal storage devices at up to 6.0 Gb/s.
+These connectors accept Mini-SAS-to-SATA data cables for internal storage
+devices and support transfer rates up to 6.0 Gb/s.
 
-### Slimline NVMe Connectors: SLIM1–SLIM3
+#### Slimline NVMe Connectors (SLIM1-SLIM3)
 
-**Board references:** SLIM1 is layout item 18; SLIM2 is item 17; SLIM3 is item 16.
-
-- SLIM1: right-angled
-- SLIM2: vertical
-- SLIM3: vertical
+| Connector | Orientation | Chapter 1 component reference |
+|---|---|---|
+| `SLIM1` | Right-angled | [Item 18](#component-reference) |
+| `SLIM2` | Vertical | [Item 17](#component-reference) |
+| `SLIM3` | Vertical | [Item 16](#component-reference) |
 
 These connectors are used for NVMe PCIe devices.
 
-### Serial Port Header: 9-pin COM1
+#### Serial Port Header (COM1)
 
-**Board reference:** Layout item 32.
+**Connector:** 9-pin `COM1`  
+**Board location:** [Chapter 1 component reference](#component-reference), item
+32.
 
-This header supports a serial-port module.
+This COM header supports a serial-port module.
 
-| Signal | Signal |
-|---|---|
-| CCTS#1 | RRTS#1 |
-| DDSR#1 | DDTR#1 |
-| RRXD1 | GND |
-| TTXD1 | DDCD#1 |
-| RRI#1 | — |
+| Pin | Signal | Pin | Signal |
+|---:|---|---:|---|
+| 1 | `DDCD#1` | 2 | `RRXD1` |
+| 3 | `TTXD1` | 4 | `DDTR#1` |
+| 5 | `GND` | 6 | `DDSR#1` |
+| 7 | `RRTS#1` | 8 | `CCTS#1` |
+| 9 | `RRI#1` |  |  |
 
-### ATX 4-pin Power Connector: ATX4PIN1
+#### ATX 4-pin Power Connector (ATX4PIN1)
 
-**Board reference:** Layout item 3. ATX 24-pin-to-4-pin connection.
+**Connector:** 4-pin `ATX4PIN1` (ATX 24-pin-to-4-pin)  
+**Board location:** [Chapter 1 component reference](#component-reference), item
+3.
 
-The motherboard provides one 4-pin power/signal connector. It is required for an ATX power source.
+The motherboard provides one 4-pin power/signal connector. It is a required
+input when using an ATX power source. Use the bundled 24-pin-to-4-pin power
+cable between the PSU's 24-pin power connector and `ATX4PIN1` for power and
+signal communication.
 
-When using ATX power, use a 24-pin-to-4-pin power cable between the PSU 24-pin connector and **ATX4PIN1**. This provides power and signal communication.
-
-For a 12 V DC-IN application, do not use this ATX 4-pin connector.
-
-| Pin | Signal |
-|---:|---|
-| 1 | GND |
-| 2 | GND |
-| 3 | ATX_PWROK |
-| 4 | PSON# |
-
-> **Caution:** Misconnection between **ATX4PIN1** and **SATA_PWR1** may permanently damage the motherboard.
-
-### SATA Power Connector (DC-IN Mode): 4-pin SATA_PWR1
-
-**Board reference:** Layout item 14.
-
-When using DC-IN mode without a SATA power supply, connect a SATA power cable between this connector and the SATA hard drive.
+For a 12 V DC-IN application, this connector is not required.
 
 | Pin | Signal |
 |---:|---|
-| 1 | +5 V |
-| 2 | GND |
-| 3 | +12 V |
-| 4 | GND |
+| 1 | `ATX_PWROK` |
+| 2 | `GND` |
+| 3 | `ATX_+5VSB` |
+| 4 | `PSON#` |
 
-> **Caution:** Misconnection between **ATX4PIN1** and **SATA_PWR1** may permanently damage the motherboard.
+> **Caution:**
+> Connecting `ATX4PIN1` and `SATA_PWR1` incorrectly may permanently damage the
+> motherboard.
 
-### ATX 12 V Power Connectors: ATX12V1 and ATX12V2
+#### SATA Power Connector (SATA_PWR1)
 
-**Board references:** ATX12V1 is layout item 2; ATX12V2 is layout item 1.
+**Mode:** DC-IN  
+**Connector:** 4-pin `SATA_PWR1`  
+**Board location:** [Chapter 1 component reference](#component-reference), item
+14.
 
-The motherboard provides two 8-pin 12 V power connectors. They are required for either a 12 V DC-IN source or an ATX +12 V source.
+When using DC-IN mode without a SATA power supply, use a SATA power cable to
+connect this motherboard connector to the SATA hard drive. This supplies drive
+power from the motherboard.
 
-When using ATX power, use a 24-pin-to-4-pin cable between the PSU 24-pin connector and **ATX4PIN1** for power and signal communication.
+| Pin | Signal |
+|---:|---|
+| 1 | `GND` |
+| 2 | `GND` |
+| 3 | `+12V` |
+| 4 | `+5V` |
 
-| Pin signal | Pin signal |
+> **Caution:**
+> Connecting `ATX4PIN1` and `SATA_PWR1` incorrectly may permanently damage the
+> motherboard.
+
+#### ATX 12V Power Connectors (ATX12V1 and ATX12V2)
+
+| Connector | Chapter 1 component reference |
 |---|---|
-| 12 V | GND |
-| 12 V | GND |
-| 12 V | GND |
-| 12 V | GND |
+| 8-pin `ATX12V1` | [Item 2](#component-reference) |
+| 8-pin `ATX12V2` | [Item 1](#component-reference) |
 
-### Clear CMOS Pads: CLRMOS1
+The motherboard provides two required 8-pin, 12 V power inputs for either a
+12 V DC-IN source or an ATX +12 V source.
 
-**Board reference:** Layout item 31.
+| Pins | Signal |
+|---:|---|
+| 1-4 | `GND` |
+| 5-8 | `12V` |
 
-To clear CMOS data, remove the CMOS battery and short the Clear CMOS pad.
+When using ATX power, also connect the PSU's 24-pin connector to `ATX4PIN1`
+with the bundled 24-pin-to-4-pin cable for power and signal communication.
 
-### Front LAN LED Header: 4-pin LED_LAN3_4
+#### Clear CMOS Pads (CLRMOS1)
 
-**Board reference:** Layout item 29.
+**Board location:** [Chapter 1 component reference](#component-reference), item
+31.
+
+These pads allow you to clear the data in CMOS. To clear CMOS, remove the CMOS
+battery and short the Clear CMOS Pad.
+
+#### Front LAN LED Header (LED_LAN3_4)
+
+**Connector:** 4-pin `LED_LAN3_4`  
+**Board location:** [Chapter 1 component reference](#component-reference), item
+29.
 
 This connector is used for the front LAN status indicator.
 
-| Pin signal | Pin signal |
+| Pin | Signal |
+|---:|---|
+| 1 | `LAN3_LINK` |
+| 2 | `LED_PWR` |
+| 3 | `LED_PWR` |
+| 4 | `LAN4_LINK` |
+
+#### TPMS Header (TPMS1)
+
+**Connector:** 17-pin `TPMS1`  
+**Board location:** [Chapter 1 component reference](#component-reference), item
+33.
+
+This connector supports a Trusted Platform Module (TPM), which can securely
+store keys, digital certificates, passwords, and data. A TPM also helps enhance
+network security, protect digital identities, and ensure platform integrity.
+
+The source diagram is a two-row, nine-position footprint with one key position.
+Pin 1 is at the far right of the top row.
+
+| Diagram row | Positions from left to right |
 |---|---|
-| LAN4_LINK | LED_PWR |
-| LED_PWR | LAN3_LINK |
+| Top | `GND`, `+3VSB`, -, `LAD0`, `+3V`, `LAD3`, `PCIRST#`, `LFRAME#`, `PCICLK` (pin 1) |
+| Bottom | `GND`, `SERIRQ#`, `S_PWRDWN#`, `GND`, `LAD1`, `LAD2`, `SMB_DATA_MAIN`, `SMB_CLK_MAIN`, `GND` |
 
-### TPMS Header: 17-pin TPMS1
+#### PSU SMBus Header (PSU_SMB1)
 
-**Board reference:** Layout item 33.
+**Connector:** 5-pin `PSU_SMB1`  
+**Board location:** [Chapter 1 component reference](#component-reference), item
+4.
 
-This connector supports a Trusted Platform Module (TPM), which can securely store keys, digital certificates, passwords, and data. A TPM can also enhance network security, protect digital identities, and help ensure platform integrity.
+The PSU SMBus monitors the status of the power supply, fan, and system
+temperature.
 
-The source pin labels include `GND`, `SMB_DATA_MAIN`, `LAD0`–`LAD3`, `SERIRQ#`, `PCICLK`, `PCIRST#`, `+3V`, `+3VSB`, `S_PWRDWN#`, and `LFRAME#`.
+| Pin | Signal |
+|---:|---|
+| 1 | `SMBCLK` |
+| 2 | `SMBDATA` |
+| 3 | `ALERT` |
+| 4 | `GND` |
+| 5 | `+3V` |
 
-### PSU SMBus Header: 5-pin PSU_SMB1
+#### Intelligent Platform Management Bus Header (IPMB_1)
 
-**Board reference:** Layout item 4.
+**Connector:** 4-pin `IPMB_1`  
+**Board location:** [Chapter 1 component reference](#component-reference), item
+37.
 
-PSU SMBus monitors the power supply, fan, and system temperature.
+This connector provides a cabled baseboard or front-panel connection for
+value-added features and third-party add-in cards, such as Emergency Management
+cards, that provide management features through the IPMB.
 
-| Pin signal | Pin signal |
-|---|---|
-| +3 V | GND |
-| ALERT | SMBCLK |
-| SMBDATA | — |
+| Diagram position, left to right | Signal |
+|---:|---|
+| 1 | `IPMB_SDA` |
+| 2 | `GND` |
+| 3 | `IPMB_SCL` |
+| 4 | No Connect |
 
-### Intelligent Platform Management Bus Header: 4-pin IPMB_1
+#### Thermal Sensor Header (TR1)
 
-**Board reference:** Layout item 37.
+**Connector:** 3-pin `TR1`  
+**Board location:** [Chapter 1 component reference](#component-reference), item
+34.
 
-This connector provides a cabled baseboard or front-panel connection for value-added features and third-party add-in cards, such as emergency-management cards that use IPMB.
+Connect the thermal-sensor cable to either pins 1-2 or pins 2-3, then connect
+the other end to the device whose temperature you want to monitor.
 
-| Pin signal |
-|---|
-| IPMB_SDA |
-| IPMB_SCL |
-| No connect |
-| GND |
+| Pin | Signal |
+|---:|---|
+| 1 | `TR1` |
+| 2 | `GND` |
+| 3 | `TR1` |
 
-### Thermal Sensor Header: 3-pin TR1
+#### Non-Maskable Interrupt Button Header (NMI_BTN1)
 
-**Board reference:** Layout item 34.
-
-Connect the thermal-sensor cable to pins 1–2 or 2–3. Connect the other end to the device whose temperature you want to monitor.
-
-### Non-Maskable Interrupt Button Header: NMI_BTN1
-
-**Board reference:** Layout item 38.
+**Connector:** `NMI_BTN1`  
+**Board location:** [Chapter 1 component reference](#component-reference), item
+38.
 
 Connect an NMI device to this header.
 
-| Pin signal | Pin signal |
+| Pin | Signal |
+|---:|---|
+| 1 | `CONTROL` |
+| 2 | `GND` |
+
+#### Serial General Purpose Input/Output Headers (SATA_SGPIO1-SATA_SGPIO3)
+
+| Connector | Chapter 1 component reference |
 |---|---|
-| CONTROL | GND |
+| 7-pin `SATA_SGPIO1` | [Item 27](#component-reference) |
+| 7-pin `SATA_SGPIO2` | [Item 26](#component-reference) |
+| 7-pin `SATA_SGPIO3` | [Item 25](#component-reference) |
 
-### Serial General Purpose Input/Output Headers: SATA_SGPIO1–3
+These headers support the Serial Link interface for onboard SATA connections.
 
-**Board references:** SATA_SGPIO1 is layout item 27; SATA_SGPIO2 is item 26; SATA_SGPIO3 is item 25.
+The source diagram is a two-row, four-position footprint with pin 1 at the
+bottom-left and no contact at the bottom-right. Two contacts are not labeled in
+the source figure.
 
-These headers support the serial link interface for onboard SATA connections.
+| Diagram row | Positions from left to right |
+|---|---|
+| Top | Unlabeled, `GND`, `SLOAD`, `SCLOCK` |
+| Bottom | Unlabeled (pin 1), `SDATAOUT`, `GND`, - |
 
-| Pin signal |
-|---|
-| SLOAD |
-| SCLOCK |
-| GND |
-| GND |
-| SDATAOUT |
+#### Baseboard Management Controller SMBus Header (BMC_SMB1)
 
-### Baseboard Management Controller SMBus Header: 5-pin BMC_SMB1
-
-**Board reference:** Layout item 36.
+**Connector:** 5-pin `BMC_SMB1`  
+**Board location:** [Chapter 1 component reference](#component-reference), item
+36.
 
 This header is used for SMBus devices.
 
-| Pin signal |
-|---|
-| BMC_SMB_PRESENT_1_N |
-| Power |
-| BMC_SMBCLK |
-| GND |
-| BMC_SMBDATA |
+| Pin | Signal |
+|---:|---|
+| 1 | `BMC_SMBDATA` |
+| 2 | `GND` |
+| 3 | `BMC_SMBCLK` |
+| 4 | `Power` |
+| 5 | `BMC_SMB_PRESENT_1_N` |
 
-### PWM Configuration Header: 3-pin PWM_CFG1
+#### PWM Configuration Header (PWM_CFG1)
 
-**Board reference:** Layout item 5.
+**Connector:** 3-pin `PWM_CFG1`  
+**Board location:** [Chapter 1 component reference](#component-reference), item
+5.
 
 This header is used for PWM configuration.
 
-| Pin signal |
-|---|
-| GND |
-| SMB_DATA_VSB |
-| SMB_CLK_VSB |
+| Pin | Signal |
+|---:|---|
+| 1 | `GND` |
+| 2 | `SMB_DATA_VSB` |
+| 3 | `SMB_CLK_VSB` |
 
-### CPU HP-SMBus Connector: 5-pin CPU1_HSBP1
+#### CPU HP-SMBus Connector (CPU1_HSBP1)
 
-**Board reference:** Layout item 24.
+**Connector:** 5-pin `CPU1_HSBP1`  
+**Board location:** [Chapter 1 component reference](#component-reference), item
+24.
 
 This header supports the hot-plug feature for hard drives on the backplane.
 
-| Pin signal |
-|---|
-| +3 V |
-| GND |
-| P0_HP_ALERT_L |
-| CPU_HP_SDA |
-| CPU_HP_SCL |
+| Pin | Signal |
+|---:|---|
+| 1 | `+3V` |
+| 2 | `CPU_HP_SCL` |
+| 3 | `CPU_HP_SDA` |
+| 4 | `P0_HP_ALERT_L` |
+| 5 | `GND` |
 
-## 2.7 ATX PSU / DC-IN Power Connections
+#### Original Connector Diagrams
 
-The motherboard supports both +12 V DC and ATX power input.
+![Onboard header and connector diagrams, sheet 1 of 7](ROMED6U-2L2T_User_Manual.assets/connector-diagrams-1.png)
+
+![Onboard header and connector diagrams, sheet 2 of 7](ROMED6U-2L2T_User_Manual.assets/connector-diagrams-2.png)
+
+![Onboard header and connector diagrams, sheet 3 of 7](ROMED6U-2L2T_User_Manual.assets/connector-diagrams-3.png)
+
+![Onboard header and connector diagrams, sheet 4 of 7](ROMED6U-2L2T_User_Manual.assets/connector-diagrams-4.png)
+
+![Onboard header and connector diagrams, sheet 5 of 7](ROMED6U-2L2T_User_Manual.assets/connector-diagrams-5.png)
+
+![Onboard header and connector diagrams, sheet 6 of 7](ROMED6U-2L2T_User_Manual.assets/connector-diagrams-6.png)
+
+![Onboard header and connector diagrams, sheet 7 of 7](ROMED6U-2L2T_User_Manual.assets/connector-diagrams-7.png)
+
+### 2.7 ATX PSU / DC-IN Power Connections
+
+![DC-IN and ATX PSU connection diagrams](ROMED6U-2L2T_User_Manual.assets/power-connections.png)
+
+The motherboard supports both +12 V DC and ATX power input. Use the following
+connections between the motherboard and the power supply.
 
 | Connector | DC-IN | ATX PSU |
 |---|:---:|:---:|
-| 12 V 8-pin | Yes | Yes |
-| ATX 4-pin | No | Yes, using the bundled ATX 24-pin-to-4-pin converter cable |
+| `ATX12V1` and `ATX12V2` (8-pin) | Connect both | Connect both |
+| ATX 4-pin | Do not connect | Connect with the bundled ATX 24-pin-to-4-pin converter cable |
 
-The connection diagrams in the source manual show these configurations:
+**Figure transcription: power-source connections**
 
-- **DC-IN:** 12 V 8-pin connected; ATX 4-pin not used.
-- **ATX PSU:** 12 V 8-pin connected; ATX 4-pin connected through the 24-pin-to-4-pin converter cable.
+- **DC-IN:** Connect the PSU to both motherboard 12 V 8-pin inputs (`ATX12V1`
+  and `ATX12V2`).
+- **ATX PSU:** Connect the PSU to both motherboard 12 V 8-pin inputs. Also use
+  the bundled 24-pin-to-4-pin converter cable to connect the PSU's 24-pin output
+  to the motherboard's ATX 4-pin input.
 
-To connect the bundled converter cable, make sure that the latch and socket are aligned in the correct direction.
+**Figure transcription: bundled ATX converter cable**
 
-## 2.8 Unit Identification Purpose LED/Switch
+1. Connect the PSU's 24-pin plug to the 24-pin socket on the bundled converter
+   cable.
+2. Connect the converter cable's 4-pin plug to the motherboard's ATX 4-pin
+   socket.
 
-The UID button helps locate a server in a rack.
+> **Caution:**
+> Make sure that the latch and socket are aligned in the correct direction.
 
-When the UID button on the front or rear panel is pressed, the front and rear blue UID LEDs turn on. Press the UID button again to turn them off.
+### 2.8 Unit Identification Purpose LED/Switch
 
-## 2.9 Driver Installation Guide
+The Unit Identification (UID) button helps you locate the server you are working
+on from behind a rack of servers.
+
+**Control:** Unit Identification purpose LED/Switch (`UID1`)
+
+Press the UID button on the front or rear panel to turn on the blue front/rear
+UID LED. Press the button again to turn off the indicator.
+
+### 2.9 Driver Installation Guide
 
 1. Insert the support CD into the optical drive.
-2. The support CD detects the system and lists compatible drivers.
-3. Install required drivers from top to bottom in the listed order.
+2. Open the support CD's driver page. Drivers compatible with the system are
+   detected and listed automatically.
+3. Install the required drivers in the displayed order, from top to bottom, so
+   that they work properly.
 
-Installing the drivers in order helps them work correctly.
+### 2.10 M.2 SSD (NGFF) Module Installation Guide
 
-## 2.10 M.2 SSD (NGFF) Module Installation Guide
+![M.2 SSD module installation sequence](ROMED6U-2L2T_User_Manual.assets/m2-installation.png)
 
-M.2, also called Next Generation Form Factor (NGFF), is a compact card-edge connector intended to replace mPCIe and mSATA. The M.2 Socket 3 supports either:
+M.2, also known as Next Generation Form Factor (NGFF), is a compact and
+versatile card-edge connector intended to replace mPCIe and mSATA. This M.2 SSD
+(NGFF) Socket 3 supports either a SATA3 6.0 Gb/s module or a PCI Express module
+up to Gen4 x4 (64 Gb/s).
 
-- A SATA3 6.0 Gb/s module.
-- A PCI Express module up to Gen4 ×4, or 64 Gb/s.
+#### Installing the M.2 SSD (NGFF) module
 
-### Installing an M.2 SSD module
+1. Prepare an M.2 SSD (NGFF) module and the screw.
+2. Gently insert the M.2 SSD into the M.2 slot at the illustrated 20-degree
+   angle. The module fits in only one orientation. Lower it toward the mounting
+   point after it is fully inserted.
+3. Tighten the screw with a screwdriver to secure the module.
 
-1. Prepare an M.2 SSD module and the screw.
-2. Gently insert the module into the M.2 slot. It fits in only one orientation.
-3. Align the module with the selected nut position, such as **NUT1** or **NUT2**.
-4. Tighten the screw with a screwdriver to secure the module.
-5. Do not over-tighten the screw. This may damage the module.
+> **Caution:**
+> Do not overtighten the screw. Doing so may damage the module.
 
-The source illustration specifies a 20° insertion angle.
+**Figure sequence:** Step 1 shows the module and retaining screw. Step 2 shows
+the module entering the keyed socket at 20 degrees and then lowering toward the
+standoff. Step 3 shows the retaining screw being installed.
 
-### M.2 SSD module support list
+#### M.2 SSD (NGFF) module support list
 
-For the latest M.2 SSD module support list, visit <http://www.asrockrack.com>.
+For the latest M.2 SSD (NGFF) module support list, visit
+[ASRock Rack](http://www.asrockrack.com).
 
 ---
 
-# Chapter 3: UEFI Setup Utility
+## Chapter 3: UEFI Setup Utility
 
-## 3.1 Introduction
+### 3.1 Introduction
 
-The UEFI chip stores the UEFI SETUP UTILITY. Press **F2** or **Del** during the Power-On Self-Test (POST) to enter it. If you do not enter setup, POST continues its test routines.
+This section explains how to use the UEFI Setup Utility to configure your system. The UEFI chip on the motherboard stores the UEFI Setup Utility. You may run the utility when you start the computer. Press `F2` or `Delete` during the Power-On Self-Test (POST) to enter the UEFI Setup Utility; otherwise, POST will continue with its test routines.
 
-To enter the utility after POST, restart the system with **Ctrl + Alt + Delete**, the chassis reset button, or a complete power cycle.
+To enter the UEFI Setup Utility after POST, restart the system by pressing `Ctrl` + `Alt` + `Delete`, or press the reset button on the system chassis. You may also restart by turning the system off and then back on.
 
-### 3.1.1 UEFI Menu Bar
+> **Note:** Because the UEFI software is constantly being updated, the following UEFI setup screens and descriptions are for reference only. They may not exactly match what you see on your screen.
 
-| Menu item | Purpose |
+#### 3.1.1 UEFI Menu Bar
+
+The top of the screen has a menu bar with the following selections:
+
+| Item | Description |
 |---|---|
-| Main | Set system time and date |
-| Advanced | Configure advanced UEFI features |
-| Server Mgmt | Manage the server |
-| Security | Configure security features |
-| Boot | Set the default device used to locate and load the operating system |
-| Event Logs | Configure event logs |
-| Exit | Exit the current screen or the UEFI SETUP UTILITY |
+| Main | Set the system time and date. |
+| Advanced | Set the advanced UEFI features. |
+| Server Mgmt | Manage the server. |
+| Security | Set the security features. |
+| Boot | Set the default system device used to locate and load the operating system. |
+| Event Logs | Configure event logging. |
+| Exit | Exit the current screen or the UEFI Setup Utility. |
 
-Use the left and right arrow keys to select a menu item. Press **Enter** to open its sub-screen.
+Use the left or right arrow key to move among the menu-bar selections, then press `Enter` to open the selected subscreen.
 
-UEFI software is updated regularly. The screens and descriptions in this manual are for reference and may not exactly match the system display.
+#### 3.1.2 Navigation Keys
 
-### 3.1.2 Navigation Keys
-
-| Key | Function |
+| Navigation key(s) | Function |
 |---|---|
-| Left Arrow / Right Arrow | Move the cursor left or right to select screens |
-| Up Arrow / Down Arrow | Move the cursor up or down to select items |
-| `+` / `−` | Change the selected option |
-| **Tab** | Switch to the next function |
-| **Enter** | Open the selected screen |
-| **Page Up** | Go to the previous page |
-| **Page Down** | Go to the next page |
-| **Home** | Go to the top of the screen |
-| **End** | Go to the bottom of the screen |
-| **F1** | Display the General Help screen |
-| **F7** | Discard changes and exit the UEFI SETUP UTILITY |
-| **F9** | Load optimal default values |
-| **F10** | Save changes and exit the UEFI SETUP UTILITY |
-| **F12** | Print screen |
-| **Esc** | Jump to the Exit screen or exit the current screen |
+| Left arrow / Right arrow | Move the cursor left or right to select screens. |
+| Up arrow / Down arrow | Move the cursor up or down to select items. |
+| `+` / `-` | Change the option for the selected item. |
+| `Tab` | Switch to the next function. |
+| `Enter` | Open the selected screen. |
+| `Page Up` | Go to the previous page. |
+| `Page Down` | Go to the next page. |
+| `Home` | Go to the top of the screen. |
+| `End` | Go to the bottom of the screen. |
+| `F1` | Display the General Help screen. |
+| `F7` | Discard changes and exit the UEFI Setup Utility. |
+| `F9` | Load optimal default values for all settings. |
+| `F10` | Save changes and exit the UEFI Setup Utility. |
+| `F12` | Print the screen. |
+| `Esc` | Jump to the Exit screen or exit the current screen. |
 
-## 3.2 Main Screen
+### 3.2 Main Screen
 
-The Main screen appears after entering the UEFI SETUP UTILITY. It displays a system overview and allows you to set the system time and date.
+![UEFI Main screen](ROMED6U-2L2T_User_Manual.assets/uefi-main-screen.png)
 
-## 3.3 Advanced Screen
+Once you enter the UEFI Setup Utility, the Main screen appears and displays a system overview. The Main screen also allows you to set the system time and date.
 
-> **Warning:** Incorrect values in this section may cause the system to malfunction.
+### 3.3 Advanced Screen
 
-The Advanced screen includes:
+![UEFI Advanced screen](ROMED6U-2L2T_User_Manual.assets/uefi-advanced-screen.png)
+
+> **Warning:** Setting incorrect values in this section may cause the system to malfunction.
+
+In this section, you may configure the following items:
 
 - CPU Configuration
 - Chipset Configuration
@@ -830,429 +1246,409 @@ The Advanced screen includes:
 - PSP Firmware Versions
 - Instant Flash
 
-### 3.3.1 CPU Configuration
+#### 3.3.1 CPU Configuration
 
-| Setting | Description |
-|---|---|
-| SVM Mode | Enable or disable CPU virtualization |
-| Node 0 Information | View memory information for Node 0 |
+![UEFI CPU Configuration screen](ROMED6U-2L2T_User_Manual.assets/uefi-cpu-configuration.png)
 
-### 3.3.2 Chipset Configuration
+- **SVM Mode:** Enable or disable CPU virtualization.
+- **Node 0 Information:** View memory information related to Node 0.
 
-| Setting | Description |
-|---|---|
-| OnBrd/Ext VGA Select | Select onboard or external VGA support |
-| Onboard LAN1 | Enable or disable onboard LAN1 |
-| Onboard LAN2 | Enable or disable onboard LAN2 |
-| Onboard LAN3 | Enable or disable onboard LAN3 |
-| Onboard LAN4 | Enable or disable onboard LAN4 |
-| SLIM1 Mode | Configure SLIM1 mode |
-| SLIM2 Mode | Configure SLIM2 mode |
-| SLIM1 Link Width | Select SLIM1 link width; default is `x16` |
-| SLIM2 Link Width | Select SLIM2 link width; default is `x16` |
-| SLIM3 Link Width | Select SLIM3 link width; default is `x16` |
-| PCIE4 Link Width | Select PCIE4 link width; default is `x16` |
-| PCIE5 Link Width | Select PCIE5 link width; default is `x16` |
-| PCIE6 Link Width | Select PCIE6 link width; default is `x16` |
-| PCIE7 Link Width | Select PCIE7 link width; default is `x16` |
-| SLIM1 Link Speed | Select SLIM1 link speed; default is `Auto` |
-| SLIM2 Link Speed | Select SLIM2 link speed; default is `Auto` |
-| SLIM3 Link Speed | Select SLIM3 link speed; default is `Auto` |
-| PCIE4 Link Speed | Select PCIE4 link speed; default is `Auto` |
-| PCIE5 Link Speed | Select PCIE5 link speed; default is `Auto` |
-| PCIE6 Link Speed | Select PCIE6 link speed; default is `Auto` |
-| PCIE7 Link Speed | Select PCIE7 link speed; default is `Auto` |
-| Onboard Debug Port LED | Enable or disable the onboard Dr. Debug LED |
-| Restore AC Power Loss | Set the power state after a power failure. `Power Off` keeps the system off; `Power On` starts boot when power returns |
-| Restore AC Power Current State | Restore the current AC power state |
+#### 3.3.2 Chipset Configuration
 
-### 3.3.3 Storage Configuration
+![UEFI Chipset Configuration screen](ROMED6U-2L2T_User_Manual.assets/uefi-chipset-configuration.png)
 
-| Setting | Description |
-|---|---|
-| SATA Hot Plug | Enable or disable the SATA hot-plug function |
+- **OnBrd/Ext VGA Select:** Select onboard or external VGA support.
+- **Onboard LAN1:** Enable or disable the Onboard LAN1 feature.
+- **Onboard LAN2:** Enable or disable the Onboard LAN2 feature.
+- **Onboard LAN3:** Enable or disable the Onboard LAN3 feature.
+- **Onboard LAN4:** Enable or disable the Onboard LAN4 feature.
+- **SLIM1 Mode:** Configure SLIM1 mode settings.
+- **SLIM2 Mode:** Configure SLIM2 mode settings.
+- **SLIM1 Link Width:** Select the SLIM1 link width. The default value is `x16`.
+- **SLIM2 Link Width:** Select the SLIM2 link width. The default value is `x16`.
+- **SLIM3 Link Width:** Select the SLIM3 link width. The default value is `x16`.
+- **PCIE4 Link Width:** Select the PCIE4 link width. The default value is `x16`.
+- **PCIE5 Link Width:** Select the PCIE5 link width. The default value is `x16`.
+- **PCIE6 Link Width:** Select the PCIE6 link width. The default value is `x16`.
+- **PCIE7 Link Width:** Select the PCIE7 link width. The default value is `x16`.
+- **SLIM1 Link Speed:** Select the SLIM1 link speed. The default value is `Auto`.
+- **SLIM2 Link Speed:** Select the SLIM2 link speed. The default value is `Auto`.
+- **SLIM3 Link Speed:** Select the SLIM3 link speed. The default value is `Auto`.
+- **PCIE4 Link Speed:** Select the PCIE4 link speed. The default value is `Auto`.
+- **PCIE5 Link Speed:** Select the PCIE5 link speed. The default value is `Auto`.
+- **PCIE6 Link Speed:** Select the PCIE6 link speed. The default value is `Auto`.
+- **PCIE7 Link Speed:** Select the PCIE7 link speed. The default value is `Auto`.
+- **Onboard Debug Port LED:** Enable or disable the onboard Dr. Debug LED.
+- **Restore AC Power Loss:** Set the power state after a power failure. If `Power Off` is selected, the power remains off when power is restored. If `Power On` is selected, the system starts to boot when power is restored.
+- **Restore AC Power Current State:** Restore the current AC power state.
 
-### 3.3.4 ACPI Configuration
+#### 3.3.3 Storage Configuration
 
-| Setting | Description |
-|---|---|
-| PCIE Devices Power On | Allow a PCIe device to wake the system and enable Wake-on-LAN |
-| RTC Alarm Power On | Enable or disable powering on the system by the real-time clock alarm |
+![UEFI Storage Configuration screen](ROMED6U-2L2T_User_Manual.assets/uefi-storage-configuration.png)
 
-### 3.3.5 USB Configuration
+- **SATA Hot Plug:** Enable or disable the SATA Hot Plug function.
 
-| Setting | Description |
-|---|---|
-| Legacy USB Support | Enable or disable legacy USB-device support; default is `Enabled` |
+#### 3.3.4 ACPI Configuration
 
-### 3.3.6 Super IO Configuration
+![UEFI ACPI Configuration screen](ROMED6U-2L2T_User_Manual.assets/uefi-acpi-configuration.png)
 
-| Setting | Description |
-|---|---|
-| Serial Port 1 Configuration | Set parameters for Serial Port 1 (COM1) |
-| Serial Port | Enable or disable the serial port |
-| Serial Port Address | Select an optimal setting for the Super I/O device |
-| SOL Configuration | Set parameters for SOL |
-| SOL Port | Set SOL port parameters |
+- **PCIE Devices Power On:** Allow a PCIe device to wake the system, and enable Wake-on-LAN.
+- **RTC Alarm Power On:** Enable or disable the Real-Time Clock (RTC) alarm used to power on the system.
 
-### 3.3.7 Serial Port Console Redirection
+#### 3.3.5 USB Configuration
 
-#### COM1 / SOL
+![UEFI USB Configuration screen](ROMED6U-2L2T_User_Manual.assets/uefi-usb-configuration.png)
 
-| Setting | Description |
-|---|---|
-| Console Redirection | Enable or disable console redirection. When enabled, select the COM port used for redirection. |
-| Console Redirection Settings | Configure how the system and connected host exchange information. Use compatible settings on both systems. |
-| Terminal Type | Select the terminal emulation type. The manual recommends `VT-UTF8`. |
+- **Legacy USB Support:** Enable or disable legacy support for USB devices. The default value is `Enabled`.
+
+#### 3.3.6 Super IO Configuration
+
+![UEFI Super IO Configuration screen](ROMED6U-2L2T_User_Manual.assets/uefi-super-io-configuration.png)
+
+**Serial Port 1 Configuration**
+
+- **Serial Port:** Enable or disable the serial port.
+- **Serial Port Address:** Select an optimal setting for the Super IO device.
+
+**SOL Configuration**
+
+- **SOL Port:** Set the parameters for Serial over LAN (SOL).
+- **Serial Port Address:** Select an optimal setting for the Super IO device.
+
+#### 3.3.7 Serial Port Console Redirection
+
+![UEFI Serial Port Console Redirection screen](ROMED6U-2L2T_User_Manual.assets/uefi-serial-console-redirection.png)
+
+The screen provides equivalent **Console Redirection** and **Console Redirection Settings** entries for both COM1 and SOL.
+
+- **Console Redirection:** Enable or disable console redirection. When enabled, you can select a COM port to use for console redirection.
+- **Console Redirection Settings:** Configure how your computer and the connected host computer exchange information. Both computers should use the same or compatible settings.
+
+**Terminal Type**
+
+Select the preferred terminal-emulation type for out-of-band management. `VT-UTF8` is recommended.
 
 | Option | Description |
 |---|---|
-| VT100 | ASCII character set |
-| VT100+ | Extended VT100 with color and function-key support |
-| VT-UTF8 | Uses UTF-8 encoding to map Unicode characters to one or more bytes |
-| ANSI | Extended ASCII character set |
+| `VT100` | ASCII character set. |
+| `VT100+` | Extended VT100 with color and function-key support. |
+| `VT-UTF8` | UTF-8 encoding maps Unicode characters onto one or more bytes. |
+| `ANSI` | Extended ASCII character set. |
 
-| Setting | Description |
-|---|---|
-| Bits Per Second | Select 9600, 19200, 38400, 57600, or 115200. Use the same speed on the host and client. Lower speeds may help on long or noisy lines. |
-| Data Bits | Select 7 or 8 bits |
-| Parity | Select None, Even, Odd, Mark, or Space |
-| Stop Bits | Select 1 or 2 stop bits. Use 2 for slower devices. |
-| Flow Control | Select None or Hardware RTS/CTS |
-| VT-UTF8 Combo Key Support | Enable or disable VT-UTF8 combo-key support for ANSI/VT100 terminals |
-| Recorder Mode | Enable or disable capture of terminal data and transmission as text messages |
-| Resolution 100×31 | Enable or disable extended terminal-resolution support |
-| Putty Keypad | Select function-key and keypad behavior for PuTTY |
+Other COM1/SOL console-redirection settings are:
 
-#### Legacy Console Redirection
+- **Bits Per Second:** Select the serial-port transmission speed. The host and client computers must use the same speed. Long or noisy lines may require a lower speed. Options are `9600`, `19200`, `38400`, `57600`, and `115200`.
+- **Data Bits:** Set the data-transmission size. Options are `7` and `8` bits.
+- **Parity:** Select the parity bit. Options are `None`, `Even`, `Odd`, `Mark`, and `Space`.
+- **Stop Bits:** Indicate the end of a serial-data packet. The standard setting is `1` stop bit. Select `2` stop bits for slower devices.
+- **Flow Control:** Prevent data loss from buffer overflow. When receiving buffers are full, a stop signal can pause the data flow; when the buffers are empty, a start signal can resume it. Hardware flow control uses two wires for the start/stop signals. Options are `None` and `Hardware RTS/CTS`.
+- **VT-UTF8 Combo Key Support:** Enable or disable VT-UTF8 combo-key support for ANSI/VT100 terminals.
+- **Recorder Mode:** Enable or disable Recorder Mode to capture terminal data and send it as text messages.
+- **Resolution 100x31:** Enable or disable extended terminal-resolution support.
+- **PuTTY Keypad:** Select the function-key and keypad behavior in PuTTY.
 
-| Setting | Description |
-|---|---|
-| Legacy Console Redirection Settings | Configure the exchange of information between the system and connected host |
-| Redirection COM Port | Select the COM port used to display legacy OS and legacy OPROM messages |
-| Resolution | Set the number of rows and columns supported by the legacy OS redirection |
-| Redirect After POST | `Bootloader` disables legacy console redirection before booting a legacy OS. `Always Enable` keeps it enabled. The default is `Always Enable`. |
+**Legacy Console Redirection**
 
-#### Serial Port for Out-of-Band Management / Windows EMS
+- **Legacy Console Redirection Settings:** Configure how your computer and the connected host computer exchange legacy console-redirection information.
+- **Redirection COM Port:** Select a COM port on which to display redirection of legacy OS and legacy OPROM messages.
+- **Resolution:** Set the number of rows and columns supported for redirection in a legacy OS.
+- **Redirect After POST:** When `Bootloader` is selected, Legacy Console Redirection is disabled before booting to a legacy OS. When `Always Enable` is selected, Legacy Console Redirection remains enabled for a legacy OS. The default setting is `Always Enable`.
 
-| Setting | Description |
-|---|---|
-| Console Redirection | Enable or disable console redirection and select the COM port |
-| Console Redirection Settings | Configure information exchange between the system and connected host |
-| Out-of-Band Mgmt Port | Microsoft Windows Emergency Management Services (EMS) supports remote management of Windows Server through a serial port |
-| Terminal Type | Select terminal emulation; the manual recommends `VT-UTF8` |
-| Bits Per Second | Select 9600, 19200, 57600, or 115200 |
-| Flow Control | Select None, Hardware RTS/CTS, or Software Xon/Xoff |
-| Data Bits | Configure data bits |
-| Parity | Configure parity |
-| Stop Bits | Configure stop bits |
+**Serial Port for Out-of-Band Management / Windows Emergency Management Services (EMS)**
 
-### 3.3.8 H/W Monitor
+- **Console Redirection:** Enable or disable console redirection. When enabled, you can select a COM port to use for console redirection.
+- **Console Redirection Settings:** Configure how your computer and the connected host computer exchange information.
+- **Out-of-Band Mgmt Port:** Microsoft Windows Emergency Management Services (EMS) allows remote management of a Windows Server operating system through a serial port.
+- **Terminal Type:** Select the preferred terminal-emulation type for out-of-band management. `VT-UTF8` is recommended. The available terminal types are `VT100`, `VT100+`, `VT-UTF8`, and `ANSI`, as described in the table above.
+- **Bits Per Second:** Select the serial-port transmission speed. The host and client computers must use the same speed. Long or noisy lines may require a lower speed. Options are `9600`, `19200`, `57600`, and `115200`.
+- **Flow Control:** Prevent data loss from buffer overflow. When receiving buffers are full, a stop signal can pause the data flow; when the buffers are empty, a start signal can resume it. Hardware flow control uses two wires for the start/stop signals. Options are `None`, `Hardware RTS/CTS`, and `Software Xon/Xoff`.
+- **Additional settings shown:** Data Bits, Parity, and Stop Bits.
 
-This screen monitors CPU temperature, motherboard temperature, CPU fan speed, chassis fan speed, and critical voltages.
+#### 3.3.8 H/W Monitor
 
-| Setting | Description |
-|---|---|
-| Watch Dog Timer | Enable or disable the watchdog timer; default is `Disabled` |
+![UEFI hardware monitor screen](ROMED6U-2L2T_User_Manual.assets/uefi-hardware-monitor.png)
 
-### 3.3.9 PCI Subsystem Settings
+This section monitors system hardware status, including CPU temperature, motherboard temperature, CPU fan speed, chassis fan speed, and critical voltages.
 
-| Setting | Description |
-|---|---|
-| Above 4G Decoding | Enable or disable decoding of 64-bit-capable PCIe devices in the address space above 4 GB, if supported |
-| SR-IOV Support | Enable or disable Single Root I/O Virtualization for SR-IOV-capable PCIe devices |
+- **Watch Dog Timer:** Enable or disable the Watch Dog Timer. The default value is `Disabled`.
 
-### 3.3.10 AMD CBS
+#### 3.3.9 PCI Subsystem Settings
 
-| Setting | Description |
-|---|---|
-| CPU Common Options | Configure CPU common options |
-| DF Common Options | Configure Data Fabric common options |
-| UMC Common Options | Configure UMC common options |
-| NBIO Common Options | Configure NBIO common options |
-| FCH Common Options | Configure FCH common options |
-| SoC Miscellaneous Control | Configure SoC miscellaneous-control options |
+![UEFI PCI Subsystem Settings screen](ROMED6U-2L2T_User_Manual.assets/uefi-pci-subsystem-settings.png)
 
-### 3.3.11 AMD PBS
+- **Above 4G Decoding:** Enable or disable decoding of 64-bit-capable devices in the address space above 4 GB. This option applies only if the system supports 64-bit PCI decoding.
+- **SR-IOV Support:** If the system has SR-IOV-capable PCIe devices, enable or disable Single Root I/O Virtualization support.
 
-| Setting | Description |
-|---|---|
-| RAS | Configure AMD CPM RAS-related settings |
+#### 3.3.10 AMD CBS
 
-### 3.3.12 PSP Firmware Versions
+![UEFI AMD CBS screen](ROMED6U-2L2T_User_Manual.assets/uefi-amd-cbs.png)
 
-The PSP Firmware Versions screen displays version information for:
+- **CPU Common Options:** Configure CPU Common options.
+- **DF Common Options:** Configure DF Common options.
+- **UMC Common Options:** Configure UMC Common options.
+- **NBIO Common Options:** Configure NBIO Common options.
+- **FCH Common Options:** Configure FCH Common options.
+- **SoC Miscellaneous Control:** Configure SoC Miscellaneous Control options.
 
-- PSP Recovery BL
-- PSP BootLoader
-- SMU FW
-- ABL
-- APCB
-- APDB
-- APPB
+#### 3.3.11 AMD PBS
 
-### 3.3.13 Instant Flash
+![UEFI AMD PBS screen](ROMED6U-2L2T_User_Manual.assets/uefi-amd-pbs.png)
 
-Instant Flash is a UEFI flash utility embedded in the flash ROM. It updates the system UEFI without first entering MS-DOS or Windows®.
+- **RAS:** Configure settings related to AMD CPM RAS.
 
-1. Save the new UEFI file to a FAT32, FAT16, or FAT12 USB flash drive, floppy disk, or hard drive.
-2. Launch Instant Flash.
-3. Select the correct UEFI file and review its information.
-4. Start the update.
-5. Reboot after the update completes.
+#### 3.3.12 PSP Firmware Versions
 
-## 3.4 Server Mgmt
+![UEFI PSP Firmware Versions screen](ROMED6U-2L2T_User_Manual.assets/uefi-psp-firmware-versions.png)
 
-| Setting | Description |
-|---|---|
-| Wait For BMC | Wait for a BMC response for a specified timeout. The BMC starts with BIOS during AC power-on and takes about 90 seconds to initialize the host-to-BMC interfaces. |
-| Inventory Support | Run the system inventory function. Enabling this option adds time to system boot. |
+This screen displays version information for the PSP Recovery BL, PSP BootLoader, SMU firmware, ABL, APCB, APDB, and APPB.
 
-### 3.4.1 System Event Log
+#### 3.3.13 Instant Flash
 
-| Setting | Description |
-|---|---|
-| SEL Components | Enable or disable event logging for error and progress codes during boot |
-| Erase SEL | Select options for erasing the SEL |
-| When SEL is Full | Select the response when the SEL is full |
-| Log EFI Status Codes | Disable EFI status-code logging, log only error codes, log only progress codes, or log both |
+Instant Flash is a UEFI flash utility embedded in flash ROM. It allows you to update the system UEFI without first entering an operating system such as MS-DOS or Windows. Save the new UEFI file to a USB flash drive, floppy disk, or hard drive, then launch this tool to update the UEFI without preparing an additional floppy diskette or other complicated flash utility.
 
-### 3.4.2 BMC Network Configuration
+The USB flash drive or hard drive must use the FAT32, FAT16, or FAT12 file system. When you run Instant Flash, the utility displays the available UEFI files and their information. Select the correct UEFI file, complete the update, and reboot the system.
 
-> **Warning:** When `DHCP` or `Static` is selected, do not modify BMC network settings on the IPMI web page.
+### 3.4 Server Management
 
-| Setting | Description |
-|---|---|
-| LAN Channel (Failover) | Configure the LAN channel failover setting |
-| Manual Setting IPMI LAN | If `No`, DHCP assigns the address. If `Yes`, enter a static address; changes take effect after reboot. Default is `No`. |
-| Configuration Address Source | Select `Static` or `DHCP` for BMC network parameters |
-| Static | Enter the IP address, subnet mask, and gateway address in BIOS |
-| DHCP | The network DHCP server assigns the IP address, subnet mask, and gateway address |
-| IPv6 Support | Enable or disable LAN1 IPv6 support |
-| Manual Setting IPMI LAN (IPv6) | Configure IPv6 parameters statically or dynamically. `Unspecified` leaves BMC network parameters unchanged during BIOS initialization. |
-| IPv6 Index | Set the selector for a static IP; range is 0–15 |
+![UEFI Server Management screen](ROMED6U-2L2T_User_Manual.assets/uefi-server-management.png)
 
-The default IPMI web-interface login information in the source manual is:
+- **Wait For BMC:** Wait for the BMC to respond for the specified timeout. The BMC starts at the same time as the BIOS during AC power-on. Initializing the host-to-BMC interfaces takes approximately 90 seconds.
+- **Inventory Support:** Run the system inventory function. Enabling this item increases system boot time.
+
+#### 3.4.1 System Event Log
+
+![UEFI System Event Log screen](ROMED6U-2L2T_User_Manual.assets/uefi-system-event-log.png)
+
+- **SEL Components:** Enable or disable event logging for error and progress codes during boot.
+- **Erase SEL:** Choose when to erase the System Event Log (SEL).
+- **When SEL is Full:** Choose what the system does when the SEL is full.
+- **Log EFI Status Codes:** Disable EFI status-code logging, or log only error codes, only progress codes, or both.
+
+#### 3.4.2 BMC Network Configuration
+
+![UEFI BMC Network Configuration screen](ROMED6U-2L2T_User_Manual.assets/uefi-bmc-network-configuration.png)
+
+**LAN Channel (Failover)**
+
+- **Manual Setting IPMI LAN:** If `No` is selected, DHCP assigns the IP address. To use a static IP address, select `Yes`; the changes take effect after the system reboots. The default value is `No`.
+- **Configuration Address Source:** Configure BMC network parameters statically or dynamically through the BIOS or BMC. Options are `Static` and `DHCP`.
+  - **Static:** Manually enter the IP address, subnet mask, and gateway address in the BIOS for the BMC LAN channel.
+  - **DHCP:** The network's DHCP server automatically assigns the IP address, subnet mask, and gateway address.
+
+> **Warning:** When `DHCP` or `Static` is selected, do not modify the BMC network settings on the IPMI web page.
+
+The default login information for the IPMI web interface is:
 
 - **Username:** `admin`
 - **Password:** `admin`
 
-For remote-control setup and IPMI management instructions, see the IPMI Configuration User Guide or visit <http://www.asrockrack.com/support/ipmi.asp>.
+For instructions on setting up a remote-control environment and using the IPMI management platform, see the *IPMI Configuration User Guide* or visit [ASRock Rack IPMI Support](http://www.asrockrack.com/support/ipmi.asp).
 
-### 3.4.3 BMC Tools
+- **IPV6 Support:** Enable or disable LAN1 IPv6 support.
+- **Manual Setting IPMI LAN (IPV6):** Configure LAN-channel parameters statically or dynamically through the BIOS or BMC. The `Unspecified` option does not modify any BMC network parameters during the BIOS phase.
+- **IPV6 Index:** Set the selector for a static IP address. The range is `0` to `15`.
 
-> The source contents list labels this section as `3.4.2 BMC Tools`. It duplicates the preceding section number. This Markdown edition uses `3.4.3` so each section has a unique heading.
+#### 3.4.3 BMC Tools
 
-| Setting | Description |
-|---|---|
-| Load BMC Default Settings | Load the BMC default settings |
-| KCS control | Select the KCS interface state after POST. `Enabled` keeps the KCS interface active; `Disabled` disables it after POST. |
+![UEFI BMC Tools screen](ROMED6U-2L2T_User_Manual.assets/uefi-bmc-tools.png)
 
-## 3.5 Security
+- **Load BMC Default Settings:** Load the BMC default settings.
+- **KCS Control:** Select the KCS interface state after POST ends. If `Enabled` is selected, the BMC keeps the KCS interface active after POST. If `Disabled` is selected, the BMC disables the KCS interface after POST.
 
-This screen sets or changes the supervisor and user passwords. A user password can also be cleared.
+### 3.5 Security
 
-| Setting | Description |
-|---|---|
-| Supervisor Password | Set or change the administrator password. Only the administrator can change UEFI settings. Leave blank and press **Enter** to remove it. |
-| User Password | Set or change the user password. Users cannot change UEFI settings. Leave blank and press **Enter** to remove it. |
-| Secure Boot | Enable or disable Secure Boot Control; default is `Disabled`. Secure Boot supports Windows Server 2012 R2 and later. |
-| Secure Boot Mode | Select `Standard` or `Custom`. Custom mode permits Secure Boot variables to be configured without authentication. |
+![UEFI Security screen](ROMED6U-2L2T_User_Manual.assets/uefi-security.png)
 
-### 3.5.1 Key Management
+In this section, you may set or change the system's supervisor and user passwords. You may also clear the user password.
 
-This screen allows expert users to modify Secure Boot policy variables without full authentication.
+- **Supervisor Password:** Set or change the password for the administrator account. Only the administrator can change settings in the UEFI Setup Utility. To remove the password, leave the field blank and press `Enter`.
+- **User Password:** Set or change the password for the user account. Users cannot change settings in the UEFI Setup Utility. To remove the password, leave the field blank and press `Enter`.
+- **Secure Boot:** Enable or disable Secure Boot Control. The default value is `Disabled`. Enable this option to support Secure Boot in Windows Server 2012 R2 or later.
+- **Secure Boot Mode:** Select `Standard` or `Custom`. In Custom mode, Secure Boot variables can be configured without authentication.
 
-| Setting | Description |
-|---|---|
-| Factory Key Provision | Install factory-default Secure Boot keys after platform reset while the system is in Setup mode |
-| Install Default Secure Boot Keys | Install default Secure Boot keys when using Secure Boot for the first time |
-| Enroll EFI Image | Allow an image to run in Secure Boot mode by enrolling its SHA-256 hash in the Authorized Signature Database (`db`) |
-| Restore DB defaults | Restore the `db` variable to factory defaults |
+#### 3.5.1 Key Management
 
-The following key databases support enrolling factory defaults or loading certificates from a file:
+![UEFI Key Management screen](ROMED6U-2L2T_User_Manual.assets/uefi-key-management.png)
 
-- **Platform Key (PK)**
-- **Key Exchange Keys (KEK)**
-- **Authorized Signatures (`db`)**
-- **Forbidden Signatures (`dbx`)**
-- **Authorized TimeStamps (`dbt`)**
-- **OS Recovery Signatures**
+In this section, expert users can modify Secure Boot policy variables without full authentication.
 
-Supported enrollment sources include:
+- **Factory Key Provision:** Install the factory-default Secure Boot keys after the platform resets and while the system is in Setup mode.
+- **Install Default Secure Boot Keys:** Install the default Secure Boot keys the first time you use Secure Boot.
+- **Enroll EFI Image:** Allow an image to run in Secure Boot mode by enrolling the SHA-256 hash of the binary in the Authorized Signature Database (`db`).
+- **Restore DB Defaults:** Restore the `db` variable to its factory defaults.
+
+For each Secure Boot variable below, you can enroll the factory defaults or load certificates from a file using one of these inputs:
 
 1. Public Key Certificate in:
    - `EFI_SIGNATURE_LIST`
    - `EFI_CERT_X509` (DER)
    - `EFI_CERT_RSA2048` (binary)
    - `EFI_CERT_SHAXXX`
-2. Authenticated UEFI variable
-3. EFI PE/COFF image using SHA-256
+2. Authenticated UEFI Variable
+3. EFI PE/COFF Image (SHA-256)
 
-Key-source options shown in the source manual include `Default`, `External`, `Mixed`, and, for the relevant key database, `Test`.
+The variables and key sources shown are:
 
-## 3.6 Boot Screen
+- **Platform Key (PK):** Key Source: `Default`, `External`, `Mixed`.
+- **Key Exchange Keys:** Key Source: `Default`, `External`, `Mixed`.
+- **Authorized Signatures:** Key Source: `Default`, `External`, `Mixed`.
+- **Forbidden Signatures:** Key Source: `Default`, `External`, `Mixed`.
+- **Authorized TimeStamps:** Key Source: `Default`, `External`, `Mixed`.
+- **OsRecovery Signatures:** Key Source: `Default`, `External`, `Mixed`.
 
-This screen displays available devices and configures boot settings and priority.
+> **Manual display note:** The manual also shows a separate `Key Source: Default, External, Mixed, Test` line between the Key Exchange Keys and Authorized Signatures blocks.
 
-| Setting | Description |
-|---|---|
-| Boot Option #1 | Set the system boot order |
-| Boot Option Filter | Control Legacy/UEFI ROM priority |
-| Boot From Onboard LAN | Enable or disable boot from onboard LAN |
-| Setup Prompt Timeout | Set the number of seconds to wait for the UEFI setup utility |
-| Bootup Num-Lock | Enable or disable Numeric Lock after boot |
-| Boot Beep | Enable or disable the boot beep; a buzzer is required |
-| Full Screen Logo | Enable or disable the OEM logo; default is `Enabled` |
-| AddOn ROM Display | Show or hide AddOn ROM information during boot. Options are `Enabled` and `Disabled`; default is `Enabled`. |
+### 3.6 Boot Screen
 
-### 3.6.1 CSM Parameters
+![UEFI Boot screen](ROMED6U-2L2T_User_Manual.assets/uefi-boot-screen.png)
 
-| Setting | Description |
-|---|---|
-| CSM | Enable the Compatibility Support Module. Do not disable it unless running a WHCK test. With Windows Server 2012 R2 or later in 64-bit UEFI mode, and with all devices supporting UEFI, disabling CSM may improve boot speed. |
-| Launch Video OpROM Policy | Select `UEFI only`, `Legacy only`, or `Do not launch` |
-| SLIM1-1 Slot OpROM | Select the storage or network Option ROM policy. In `Auto`, the default is disabled with an NVMe device and Legacy with other devices. Video Option ROM policy is unavailable. |
-| SLIM2-1 Slot OpROM | Same policy behavior as SLIM1-1 |
-| SLIM2-2 Slot OpROM | Same policy behavior as SLIM1-1 |
-| SLIM3-1 OpROM | Same policy behavior as SLIM1-1 |
-| SLIM3-2 Slot OpROM | Same policy behavior as SLIM1-1 |
-| M2_1 Slot OpROM | Same policy behavior as SLIM1-1 |
-| M2_2 Slot OpROM | Same policy behavior as SLIM1-1 |
-| PCIE4 Slot OpROM | Same policy behavior as SLIM1-1 |
-| PCIE5 Slot OpROM | Same policy behavior as SLIM1-1 |
-| PCIE6 Slot OpROM | Same policy behavior as SLIM1-1 |
-| PCIE7 Slot OpROM | Same policy behavior as SLIM1-1 |
+This section displays the available system devices and lets you configure boot settings and boot priority.
 
-## 3.7 Event Logs
+- **Boot Option #1:** Set the system boot order.
+- **Boot Option Filter:** Control the priority of legacy and UEFI ROMs.
+- **Boot From Onboard LAN:** Enable or disable booting from the onboard LAN.
+- **Setup Prompt Timeout:** Set the number of seconds to wait for the UEFI Setup Utility prompt.
+- **Bootup Num-Lock:** When set to `On`, automatically activate Num Lock after boot-up.
+- **Boot Beep:** Turn the boot beep on or off. A buzzer is required.
+- **Full Screen Logo:** Enable or disable the OEM logo. The default value is `Enabled`.
+- **AddOn ROM Display:** Control the display of AddOn ROM information. If **Full Screen Logo** is enabled but you want to see AddOn ROM information during boot, select `Enabled`. Options are `Enabled` and `Disabled`; the default is `Enabled`.
 
-### Change SMBIOS Event Log Settings
+#### 3.6.1 CSM Parameters
 
-This screen configures SMBIOS event logging.
+![UEFI CSM Parameters screen](ROMED6U-2L2T_User_Manual.assets/uefi-csm-parameters.png)
 
-| Setting | Description |
-|---|---|
-| SMBIOS Event Log | Enable or disable all SMBIOS event-logging features during boot |
-| Erase Event Log | Options are `No`, `Yes, Next reset`, and `Yes, Every reset`. Selecting `Yes` erases all logged events. |
-| When Log is Full | Select `Do Nothing` or `Erase Immediately` |
-| Log System Boot Event | Enable or disable logging of system boot events |
-| MECI (Multiple Event Count Increment) | Set the increment value for the multiple-event counter; valid range is 1–255 |
-| METW (Multiple Event Time Window) | Set the minutes between duplicate entries that use a multiple-event counter; range is 0–99 minutes |
-| Log EFI Status Code | Enable or disable logging of EFI status codes as OEM-reserved type E0, if not already converted to legacy |
-| Convert EFI Status Codes to Standard SMBIOS Type | Enable or disable conversion of EFI status codes to standard SMBIOS types. Not all codes may translate. |
-| View SMBIOS Event Log | Press **Enter** to view SMBIOS event-log records |
+- **CSM:** Enable the Compatibility Support Module. Do not disable CSM unless you are running a WHCK test. If you use 64-bit UEFI with Windows Server 2012 R2 or later and all devices support UEFI, you may disable CSM for faster booting.
+- **Launch Video OpROM Policy:** Select `UEFI Only` to run only option ROMs that support UEFI. Select `Legacy Only` to run only option ROMs that support legacy mode. Select `Do Not Launch` to run neither legacy nor UEFI option ROMs.
 
-Changed values do not take effect until the computer restarts.
+The following slot settings select the storage and network Option ROM policy:
 
-## 3.8 Exit Screen
+- SLIM1-1 Slot OpROM
+- SLIM2-1 Slot OpROM
+- SLIM2-2 Slot OpROM
+- SLIM3-1 OpROM
+- SLIM3-2 Slot OpROM
+- M2_1 Slot OpROM
+- M2_2 Slot OpROM
+- PCIE4 Slot OpROM
+- PCIE5 Slot OpROM
+- PCIE6 Slot OpROM
+- PCIE7 Slot OpROM
 
-| Option | Description |
-|---|---|
-| Save Changes and Exit | Save configuration changes and exit. Press **F10** or select `Yes`. |
-| Discard Changes and Exit | Exit without saving changes. Press **Esc** or select `Yes`. |
-| Discard Changes | Discard all changes. Press **F7** or select `Yes`. |
-| Load UEFI Defaults | Load default values for all setup questions. Press **F9**. |
-| Boot Override | Select an available device and boot from it. |
+For each setting, the `Auto` option defaults to `Disabled` with an NVMe device and `Legacy` with other devices. These settings cannot select the Video Option ROM policy.
 
----
+### 3.7 Event Logs
 
-# Chapter 4: Software Support
+![UEFI Event Logs screen](ROMED6U-2L2T_User_Manual.assets/uefi-event-logs.png)
 
-## 4.1 Install Operating System
+**Change SMBIOS Event Log Settings** allows you to configure the SMBIOS Event Log. Opening it displays the following settings:
 
-The motherboard supports various Microsoft® Windows® Server and Linux operating systems. Motherboard settings and hardware options vary, so use this chapter as a general reference. See the operating-system documentation for details.
+- **SMBIOS Event Log:** Enable or disable all SMBIOS event-logging features during system boot.
+- **Erase Event Log:** Choose whether to erase logged events. Options are `No`, `Yes, Next reset`, and `Yes, Every reset`.
+- **When Log is Full:** Choose what happens when the SMBIOS Event Log is full. Options are `Do Nothing` and `Erase Immediately`.
+- **Log System Boot Event:** Enable or disable logging of system boot events.
+- **MECI (Multiple Event Count Increment):** Enter the increment value for the multiple-event counter. The valid range is `1` to `255`.
+- **METW (Multiple Event Time Window):** Specify the number of minutes that must pass between duplicate log entries that use a multiple-event counter. The valid range is `0` to `99` minutes.
+- **Log EFI Status Code:** Enable or disable logging EFI status codes as OEM-reserved type E0 if they have not already been converted to legacy codes.
+- **Convert EFI Status Codes to Standard SMBIOS Type:** Enable or disable conversion of EFI status codes to standard SMBIOS types. Not all codes can be translated.
+- **View SMBIOS Event Log:** Press `Enter` to view the SMBIOS Event Log records.
 
-## 4.2 Support CD Information
+> **Note:** Changes made in this section do not take effect until the computer restarts.
 
-The supplied support CD contains drivers and utilities that enhance the motherboard's features.
+### 3.8 Exit Screen
 
-### 4.2.1 Running the Support CD
+![UEFI Exit screen](ROMED6U-2L2T_User_Manual.assets/uefi-exit-screen.png)
 
-1. Insert the CD into the CD-ROM drive.
-2. If `AUTORUN` is enabled, the main menu opens automatically.
-3. If the menu does not open, locate and double-click `ASRSetup.exe` in the support CD root folder.
+- **Save Changes and Exit:** Displays the message, `Save configuration changes and exit setup?` Press `F10` or select `Yes` to save changes and exit the UEFI Setup Utility.
+- **Discard Changes and Exit:** Displays the message, `Discard changes and exit setup?` Press `Esc` or select `Yes` to exit the UEFI Setup Utility without saving changes.
+- **Discard Changes:** Displays the message, `Discard changes?` Press `F7` or select `Yes` to discard all changes.
+- **Load UEFI Defaults:** Load the default UEFI values for all setup questions. You can also press `F9`.
+- **Boot Override:** Displays the available devices. Select a device to begin booting from it.
 
-### 4.2.2 Drivers Menu
+## Chapter 4: Software Support
 
-The Drivers Menu lists available device drivers when the system detects installed devices. Install the required drivers to activate the devices.
+### 4.1 Install Operating System
 
-### 4.2.3 Utilities Menu
+This motherboard supports various Microsoft Windows Server and Linux-compliant operating systems. Because motherboard settings and hardware options vary, use the setup procedures in this chapter as general reference only. Refer to your operating-system documentation for more information.
 
-The Utilities Menu lists supported motherboard applications. Select an application and follow the installation wizard.
+### 4.2 Support CD Information
 
-### 4.2.4 Contact Information
+The Support CD supplied with the motherboard contains the necessary drivers and useful utilities that enhance the motherboard's features.
 
-Visit <http://www.asrockrack.com> for more information. You can also contact your dealer.
+#### 4.2.1 Running the Support CD
 
----
+To use the Support CD, insert it into the CD-ROM drive. If `AUTORUN` is enabled, the CD automatically displays the Main Menu. If the Main Menu does not appear, locate and double-click `ASRSetup.exe` in the root folder of the Support CD.
 
-# Chapter 5: Troubleshooting
+#### 4.2.2 Drivers Menu
 
-## 5.1 Troubleshooting Procedures
+The Drivers Menu shows the available device drivers for hardware detected in the system. Install the necessary drivers to activate the devices.
 
-Follow these procedures to troubleshoot the system.
+#### 4.2.3 Utilities Menu
 
-### Initial checks
+The Utilities Menu shows the applications supported by the motherboard. Select an item and follow the installation wizard to install it.
 
-1. Disconnect the power cable. Confirm that the PWR LED is off.
-2. Unplug all cables and connectors. Remove all add-on cards.
-3. Confirm that jumpers use their default settings.
-4. Confirm that no short circuit exists between the motherboard and chassis.
-5. Install a CPU and fan on the motherboard.
-6. Connect the chassis speaker and power LED.
+#### 4.2.4 Contact Information
 
-### If there is no power
+For more information about ASRock Rack, visit the [ASRock Rack website](http://www.asrockrack.com) or contact your dealer.
 
-1. Confirm that no short circuit exists between the motherboard and chassis.
-2. Confirm that jumpers use their default settings.
-3. Check the power-supply 115 V/230 V switch.
-4. Check that the motherboard battery provides approximately 3 VDC. Replace it if necessary.
+## Chapter 5: Troubleshooting
 
-### If there is no video
+### 5.1 Troubleshooting Procedures
+
+Follow the procedures below to troubleshoot your system.
+
+> **Warning:** Always unplug the power cord before adding, removing, or changing hardware components. Failure to do so may cause physical injury and damage to motherboard components.
+
+1. Disconnect the power cable and confirm that the PWR LED is off.
+2. Unplug all cables and connectors, and remove all add-on cards from the motherboard. Make sure the jumpers are set to their default settings.
+3. Confirm that there are no short circuits between the motherboard and the chassis.
+4. Install a CPU and fan on the motherboard, then connect the chassis speaker and power LED.
+
+#### If There Is No Power
+
+1. Confirm that there are no short circuits between the motherboard and the chassis.
+2. Make sure the jumpers are set to their default settings.
+3. Check the setting of the 115 V/230 V switch on the power supply.
+4. Verify that the motherboard battery supplies approximately 3 VDC. Install a new battery if it does not.
+
+#### If There Is No Video
 
 1. Reconnect the monitor cables and power cord.
 2. Check for memory errors.
 
-### If there are memory errors
+#### If There Are Memory Errors
 
-1. Confirm that the DIMM modules are fully seated.
-2. Use recommended DDR4 RDIMMs, LRDIMMs, or NVDIMMs.
-3. If more than one DIMM is installed, use identical modules with the same brand, speed, size, and chip type.
-4. Test different DIMMs in different slots to identify faulty modules or slots.
-5. Check the power-supply 115 V/230 V switch.
+1. Verify that the DIMM modules are properly seated in their slots.
+2. Use recommended DDR4 RDIMMs, LRDIMMs, and NVDIMMs.
+3. If more than one DIMM module is installed, the modules should use the same brand, speed, size, and chip type.
+4. Insert different DIMM modules into different slots to identify faulty modules.
+5. Check the setting of the 115 V/230 V switch on the power supply.
 
-### If system setup configurations cannot be saved
+#### Unable to Save System Setup Configurations
 
-1. Check that the motherboard battery provides approximately 3 VDC. Replace it if necessary.
+1. Verify that the motherboard battery supplies approximately 3 VDC. Install a new battery if it does not.
 2. Confirm that the power supply provides adequate and stable power.
 
-### Other problems
+#### Other Problems
 
-Search for relevant keywords on the ASRock Rack FAQ page: <http://www.asrockrack.com/support>.
+Search for keywords related to your problem on the [ASRock Rack FAQ and support page](http://www.asrockrack.com/support).
 
-> **Safety warning**
-> Always unplug the power cord before adding, removing, or changing hardware. Failure to do so can cause injury or damage to motherboard components.
+### 5.2 Technical Support Procedures
 
-## 5.2 Technical Support Procedures
+If you have tried the troubleshooting procedures above and the problem remains unresolved, contact ASRock Rack technical support with the following information:
 
-If the troubleshooting procedures do not solve the problem, contact ASRock Rack technical support with:
+1. Your contact information.
+2. The model name, BIOS version, and problem type.
+3. The system configuration.
+4. A description of the problem.
 
-1. Contact information.
-2. Model name, BIOS version, and problem type.
-3. System configuration.
-4. Problem description.
+Contact [ASRock Rack Technical Support](http://www.asrockrack.com/support/tsd.asp).
 
-Technical support: <http://www.asrockrack.com/support/tsd.asp>
+### 5.3 Returning Merchandise for Service
 
-## 5.3 Returning Merchandise for Service
+For warranty service, a receipt or copy of your invoice showing the purchase date is required. Contact your vendor or visit the [ASRock Rack RMA website](http://event.asrockrack.com/tsd.asp) to obtain a Returned Merchandise Authorization (RMA) number.
 
-For warranty service, provide the receipt or a copy of the invoice showing the purchase date.
+Display the RMA number on the outside of the shipping carton. Return the motherboard prepaid by mail or hand-carry it to the manufacturer. Shipping and handling charges apply to all orders that must be mailed when service is complete.
 
-1. Contact your vendor or visit the RMA website at <http://event.asrockrack.com/tsd.asp> to obtain a Returned Merchandise Authorization (RMA) number.
-2. Display the RMA number on the outside of the shipping carton.
-3. Ship or hand-carry the motherboard to the manufacturer. Prepay shipping when required.
-4. Shipping and handling charges apply to orders mailed after service is complete.
+This warranty does not cover damage incurred during shipping or failures caused by alteration, misuse, abuse, or improper maintenance.
 
-The warranty does not cover damage caused during shipping or by alteration, misuse, abuse, or improper maintenance.
-
-Contact your distributor first for product-related problems during the warranty period.
+Contact your distributor first for any product-related problems during the warranty period.

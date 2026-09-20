@@ -1,5 +1,7 @@
 .git
 .env
+.fleet-ssh/
+hosts.csv
 data/
 venv/
 .venv/

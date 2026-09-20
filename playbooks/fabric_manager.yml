@@ -2,9 +2,18 @@
 - name: Manage Fabric Manager
   hosts: fabric_manager
   become: true
+  serial: "{{ maintenance_batch_size | default(1) }}"
+  gather_facts: true
+  force_handlers: true
   vars:
     fabric_action: status
   tasks:
+    - name: Validate Fabric Manager action
+      ansible.builtin.assert:
+        that:
+          - fabric_action in ['status', 'started', 'stopped', 'restarted']
+        fail_msg: "fabric_action must be status, started, stopped, or restarted"
+
     - name: Check if fabric manager is installed
       command: systemctl list-unit-files nvidia-fabricmanager.service
       register: fm_installed
@@ -28,6 +37,34 @@
         msg: "Fabric Manager on {{ inventory_hostname }}: {{ fm_status.stdout_lines | default([]) }}"
       when: fm_installed.rc == 0 and fabric_action == "status"
 
+    - name: Check active GPU processes before a Fabric Manager change
+      ansible.builtin.command:
+        argv:
+          - nvidia-smi
+          - --query-compute-apps=pid,process_name,used_memory
+          - --format=csv,noheader
+      register: fabric_gpu_processes
+      failed_when: false
+      changed_when: false
+      when:
+        - fm_installed.rc == 0
+        - fabric_action != 'status'
+
+    - name: Refuse Fabric Manager changes while GPU processes are active
+      ansible.builtin.fail:
+        msg: "Active GPU processes detected on {{ inventory_hostname }}: {{ fabric_gpu_processes.stdout }}"
+      when:
+        - fm_installed.rc == 0
+        - fabric_action != 'status'
+        - fabric_gpu_processes.stdout | default('') | length > 0
+        - not (force | default(false) | bool)
+
+    - name: Prepare Kubernetes member for Fabric Manager change
+      ansible.builtin.include_tasks: tasks/kubernetes_prepare.yml
+      when:
+        - fm_installed.rc == 0
+        - fabric_action != "status"
+
     - name: Manage fabric manager service
       systemd:
         name: nvidia-fabricmanager
@@ -46,3 +83,7 @@
     - name: Report NIC status
       debug:
         msg: "{{ nic_info.stdout_lines | default(['ibstat not available']) }}"
+
+  handlers:
+    - name: Restore Kubernetes node scheduling
+      ansible.builtin.include_tasks: tasks/kubernetes_restore.yml

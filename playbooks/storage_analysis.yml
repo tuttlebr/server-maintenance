@@ -9,9 +9,17 @@
       vars:
         storage_scan_entries: true
 
+    - name: Require successful storage discovery
+      ansible.builtin.assert:
+        that:
+          - storage_discovery_raw.rc | default(1) == 0
+        fail_msg: "Storage discovery failed on {{ inventory_hostname }}"
+
     - name: Compile storage report
       ansible.builtin.set_fact:
         storage_report:
+          schema_version: 1
+          report_type: storage
           hostname: "{{ inventory_hostname }}"
           timestamp: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
           mounts: "{{ storage_mounts }}"
@@ -24,10 +32,21 @@
       ansible.builtin.copy:
         content: "{{ storage_report | to_json }}"
         dest: "/tmp/fleet_storage_report.json"
-        mode: "0644"
+        mode: "0600"
 
     - name: Fetch storage report to controller
       ansible.builtin.fetch:
         src: "/tmp/fleet_storage_report.json"
-        dest: "/app/data/scans/storage_{{ inventory_hostname }}.json"
+        dest: "{{ __fleet_scan_dir | default(playbook_dir ~ '/../data/scans') }}/storage_{{ inventory_hostname }}.json"
         flat: true
+
+    - name: Fetch storage result for this job
+      ansible.builtin.fetch:
+        src: "/tmp/fleet_storage_report.json"
+        dest: "{{ __fleet_results_dir | default('/tmp/fleet-job-results') }}/{{ __fleet_job_id | default('manual') }}/storage_{{ inventory_hostname }}.json"
+        flat: true
+
+    - name: Remove temporary storage report
+      ansible.builtin.file:
+        path: "/tmp/fleet_storage_report.json"
+        state: absent

@@ -9,7 +9,7 @@ A capability-driven fleet operations platform for Linux compute, edge devices, a
 - **Adaptive operations** that appear only when at least one device supports them
 - **Access management** for Linux accounts on devices that advertise `users.manage`
 - **Integration operations** for NVIDIA drivers, Fabric Manager, MIG, and Kubernetes when discovery finds them
-- **Safe Reachy Mini support** for health, logs, daemon restart, and stable software updates, without motion, torque, camera, audio, or app controls
+- **Safe Reachy Mini support** for health, logs, daemon restart, stable software updates, and an explicitly enabled app-environment reset, without motion, torque, camera, or audio controls
 - **Activity tracking**: full history with output logs for every operation, indexed for Fleet Help after success, failure, or cancellation
 - **Neutral UI** with NVIDIA, Kubernetes, and Reachy features presented as labeled integrations
 - **CLI compatible**: all Ansible playbooks still work directly from the command line
@@ -20,6 +20,30 @@ A capability-driven fleet operations platform for Linux compute, edge devices, a
 - SSH access from the management host to all managed Linux machines
 - A dedicated SSH key loaded into an SSH agent
 - An existing Linux SSH account on each managed machine
+
+## Startup
+
+Use the idempotent startup target for both first-time setup and normal restarts:
+
+```bash
+make start
+```
+
+It creates or reuses `~/.ssh/fleet-management-key`, creates or reconnects the project-local agent at `.fleet-ssh/agent.sock`, loads exactly that one key, creates the `known_hosts` seed file, starts the Compose stack, waits for it to become healthy, and then syncs `hosts.csv` when that ignored local file exists.
+
+The first key creation prompts for a passphrase. After a host reboot, the first startup prompts once to unlock that key into the new agent. If `.env` is missing, the command copies `.env.example` and stops so you can fill in the required secrets before rerunning it.
+
+Useful narrower targets are:
+
+```bash
+make prepare       # Prepare only the key, agent socket, and known_hosts seed
+make enroll-hosts  # Sync hosts.csv into an already-running stack
+make status        # Show the dedicated agent's loaded identity
+```
+
+Host sync is idempotent: matching existing devices are skipped. A new SSH device is enrolled only when its discovered Ed25519 fingerprint is already trusted by Fleet Manager, matches the verified `.fleet-ssh/known_hosts` seed, or matches an optional `ssh_fingerprint` column in `hosts.csv`. Verify fingerprints through an independent channel before adding them. Startup never accepts an unverified `ssh-keyscan` result on first sight. Fingerprint pins are checked when creating missing devices; existing devices continue to use Fleet Manager's persistent strict host-key trust.
+
+Set `FLEET_SSH_KEY_PATH`, `FLEET_SSH_DIR`, or `FLEET_HOSTS_CSV` to override their defaults. Set `FLEET_HOSTS_CSV=` to start without syncing a CSV.
 
 ## Dedicated SSH Key and Agent Setup
 
@@ -117,13 +141,13 @@ The agent process doesn't survive a host restart. First check whether the dedica
 SSH_AUTH_SOCK="$PWD/.fleet-ssh/agent.sock" ssh-add -l
 ```
 
-If that command prints the key fingerprint, reuse the running agent. If it reports that it can't connect to the agent, remove only the stale project socket, repeat step 3, and recreate the web container so Docker remounts the socket:
+If that command prints the key fingerprint, reuse the running agent. If it reports that it can't connect to the agent, remove only the stale project socket, repeat step 3, and recreate the proxy container so Docker remounts the host socket:
 
 ```bash
 rm -f "$PWD/.fleet-ssh/agent.sock"
 # Repeat step 3 to start the agent and load the key.
 export SSH_AUTH_SOCK_PATH="$PWD/.fleet-ssh/agent.sock"
-docker compose up -d --build --force-recreate web
+docker compose up -d --build --force-recreate ssh-agent-proxy
 ```
 
 ## Quick Start
@@ -133,14 +157,8 @@ docker compose up -d --build --force-recreate web
 cp .env.example .env
 # Edit .env and set every required secret
 
-# Create the seed file expected by Compose. The UI manages verified host keys
-# in the persistent fleet-data volume after fingerprint approval.
-mkdir -p .fleet-ssh
-chmod 700 .fleet-ssh
-touch .fleet-ssh/known_hosts
-
-# Build and run
-docker compose up -d --build
+# Prepare SSH, build, run, wait for health, and sync hosts.csv if present
+make start
 
 # Open the web UI
 open http://localhost:8080
@@ -191,11 +209,23 @@ edge-01,192.168.1.235,ssh,brandon,,,true,,
 reachy-lab,reachy-mini.local,reachy_daemon,,,,true,,8000
 ```
 
+For unattended `make start` enrollment, copy `hosts.csv.example` to the ignored `hosts.csv` file and add the independently verified fingerprint for each new SSH device:
+
+```csv
+name,endpoint,transport,ssh_user,ssh_password,become_password,passwordless_ssh,bootstrap_password,daemon_port,ssh_fingerprint
+compute-01,192.0.2.10,ssh,fleetadmin,,,true,,,SHA256:REPLACE_WITH_VERIFIED_ED25519_FINGERPRINT
+reachy-lab,reachy-mini.local,reachy_daemon,,,,true,,8000,
+```
+
+Protect a credential-bearing manifest with `chmod 600 hosts.csv`. Remove any one-time `bootstrap_password` after successful enrollment; matching existing password-authenticated devices can be synced later without putting their stored password back in the CSV.
+
 For password authentication, set `passwordless_ssh=false` and put the persistent SSH password in `ssh_password`. One-time bootstrap passwords are never stored; persistent SSH and sudo passwords are encrypted before database storage. Treat CSV files containing passwords as temporary secrets and delete them securely after import.
+
+Use **Download CSV** on the Devices page to export every device with the same columns used by the importer. The export includes inventory names and connection settings, but never stored SSH, sudo, or one-time bootstrap passwords. Add the password back to any password-authenticated SSH row before importing it.
 
 ### Generated Ansible Inventory
 
-The database is the source of truth. Fleet Manager regenerates `data/inventory/hosts.json` after enrollment and whenever a scan changes capabilities. It provides `managed_hosts`, `compute`, `gpu`, `nvidia_gpu`, `cpu`, `fabric_manager`, and `mig` groups. Reachy daemon devices are intentionally excluded because they are not SSH playbook targets.
+The database is the source of truth. Fleet Manager regenerates `data/inventory/hosts.json` after enrollment and whenever a scan changes capabilities. It provides `managed_hosts`, `compute`, `gpu`, `nvidia_gpu`, `cpu`, `fabric_manager`, `mig`, and `reachy_ssh` groups. Reachy daemon devices stay out of general SSH groups. A Reachy enters only `reachy_ssh` after its dedicated maintenance access is verified.
 
 ## Integration Setup Notes
 
@@ -227,6 +257,9 @@ Key specs: Ubuntu 24.04 LTS, Blackwell Ultra GPU, 252 GB HBM3e, 496 GB LPDDR5X, 
 2. Confirm its daemon is available on port `8000`, or enter the configured port.
 3. Add it with **Reachy Mini Wireless** as the connection type.
 4. Discovery reads `/api/state/full` and never sends movement, torque, camera, audio, or app-control commands.
+5. To enable app reset, open the device and select **Enable app reset**. Verify the robot's ED25519 SSH fingerprint through a trusted channel and configure the `pollen` SSH account or another authorized account.
+
+**Reset Reachy apps** is a destructive, typed-confirmation operation. It verifies `/venvs/mini_daemon` exists, removes only `/venvs/apps_venv`, and reports whether the environment was removed or already absent. Apps must be reinstalled afterward.
 
 ## Common Operations
 
@@ -246,12 +279,11 @@ source .venv/bin/activate
 ansible-galaxy collection install -r requirements.yml
 
 # System maintenance
-ansible-playbook playbooks/system_maintenance.yml
+ansible-playbook playbooks/system_update.yml
 ansible-playbook playbooks/docker_cleanup.yml
-ansible-playbook playbooks/preflight_check.yml
-ansible-playbook playbooks/health_diagnostics.yml
+ansible-playbook playbooks/maintenance_assessment.yml
 
-# Add users (edit group_vars/workstations.yml first)
+# Add users (safe groups/shell defaults are built in; override explicitly if needed)
 ansible-playbook playbooks/user_management.yml
 
 # Change a user's password
@@ -269,6 +301,9 @@ ansible-playbook playbooks/fabric_manager.yml
 # Gather host facts
 ansible-playbook playbooks/host_facts.yml
 
+# Reset the app environment on a verified Reachy SSH target
+ansible-playbook playbooks/reachy_app_reset.yml --limit reachy-mini
+
 # Manage sudoers
 ansible-playbook playbooks/manage_sudoers.yml
 ansible-playbook playbooks/host_bootstrap.yml --limit ast-spark-01
@@ -276,8 +311,58 @@ ansible-playbook playbooks/host_drain.yml -e '{"drain_action":"status"}'
 ansible-playbook playbooks/mig_management.yml -e '{"mig_action":"status"}'
 
 # Target specific hosts
-ansible-playbook playbooks/system_maintenance.yml --limit ast-spark-01
+ansible-playbook playbooks/system_update.yml --limit ast-spark-01
 ```
+
+### Kubernetes-aware maintenance
+
+Kubernetes API work runs on the Ansible controller. Managed nodes do not need `kubectl` or a kubeconfig. Set the controller kubeconfig before running Ansible directly:
+
+```bash
+export KUBECONFIG="$HOME/.kube/config"
+ansible-playbook playbooks/host_drain.yml -e drain_action=status
+```
+
+For Fleet Manager in Docker, set an absolute host path in `.env`, then recreate the web container:
+
+```dotenv
+FLEET_KUBECONFIG_PATH=/absolute/path/to/.kube/config
+```
+
+```bash
+docker compose up -d --build --force-recreate web
+```
+
+The controller identity needs enough RBAC to list nodes and pods, patch node schedulability, and create pod evictions. A host matches a Kubernetes node by the optional `kubernetes_node_name` host variable, then by inventory name, `ansible_host`, discovered hostname/FQDN, or primary IP. Set `kubernetes_context` per host or group when one controller kubeconfig contains multiple clusters. If local kubelet, K3s, RKE2, or MicroK8s files indicate membership but the selected context has no matching node, disruptive work stops instead of treating the host as standalone.
+
+Disruptive playbooks run one host at a time by default. A matching node is drained before maintenance and returned to its original scheduling state afterward. A node that was already cordoned stays cordoned. Hosts that do not match a node continue normally. If the Kubernetes API cannot be checked, disruptive work fails closed.
+
+Normal drains use the Eviction API, respect PodDisruptionBudgets, ignore DaemonSets, and refuse to delete `emptyDir` data. Allow `emptyDir` eviction for a planned operation explicitly:
+
+```bash
+ansible-playbook playbooks/reboot.yml \
+  -e force_reboot=true \
+  -e kubernetes_delete_emptydir_data=true
+```
+
+`force_reboot=true` only reboots a host without `/var/run/reboot-required`; it does not bypass Kubernetes safety. The emergency `force=true` option is intentionally destructive: it permits unmanaged pods and `emptyDir` deletion, bypasses PodDisruptionBudgets by deleting instead of evicting, and continues even if membership or drain cannot be verified.
+
+```bash
+ansible-playbook playbooks/reboot.yml \
+  --limit ast-spark-01 \
+  -e force_reboot=true \
+  -e force=true
+```
+
+Use manual drain control when needed:
+
+```bash
+ansible-playbook playbooks/host_drain.yml -e drain_action=status
+ansible-playbook playbooks/host_drain.yml -e drain_action=drain
+ansible-playbook playbooks/host_drain.yml -e drain_action=resume
+```
+
+The main controls are `maintenance_batch_size` (default `1`), `kubernetes_drain_timeout` (default `900` seconds), `kubernetes_delete_emptydir_data` (default `false`), `kubernetes_node_name`, `kubernetes_context`, and `kubernetes_kubeconfig`. Set `kubernetes_membership_required=false` only to dismiss stale local membership files on a confirmed standalone host. Direct CLI runs can pass `-e force=true` as an emergency bypass.
 
 ## Fleet Documentation Ingestion
 
@@ -308,6 +393,10 @@ The tool reads `EMBED_MODEL`, optional `EMBED_DIM`, `EMBED_API_KEY`/`AI_HELPER_A
 
 Completed operations are indexed separately in `fleet_job_logs`. Every terminal outcome adds redacted metadata, recap, error context, and bounded log chunks. Each ingestion also refreshes a latest-completed-job-per-device snapshot so Fleet Help can answer questions about recent fleet evidence. SQL activity and full on-disk logs remain the source of truth; Milvus is a derived search index.
 
+Both Fleet Help chat modes also read fresh job evidence directly from the activity database for every question, independently of embeddings or Milvus. Expand a run in Activity and choose **Ask Fleet Help** to discuss that exact job. Chat on a device page scopes recent runs to that device; explicit job IDs or device names in a question take precedence. Follow-ups refresh the evidence. The supplied context includes job metadata, per-host recaps, structured results, and bounded log excerpts that prioritize failed tasks, matching output and the log tail. Running logs are marked partial, and omitted output is identified. These records describe observed operation results, not live device health.
+
+NAT uses `tool_calling_agent` to preserve conversation history, the system prompt and streamed tool calls. Optional Kubernetes and UniFi MCP definitions are omitted at startup unless both their server URL and token are configured; missing optional settings no longer prevent Fleet Help from starting. Embedding failures can still limit historical semantic search, but do not prevent fresh job evidence from reaching either chat mode.
+
 ## Project Structure
 
 ```
@@ -329,7 +418,8 @@ server-maintenance/
 │   ├── manage_groups.yml       # Create system groups
 │   ├── admin_setup.yml         # Single admin sudo setup
 │   ├── host_bootstrap.yml      # Groups, admin, Docker/toolkit, scan
-│   ├── system_maintenance.yml  # Advanced full-system maintenance workflow
+│   ├── system_update.yml       # Focused rolling package updates
+│   ├── maintenance_assessment.yml # Preflight and health assessment
 │   ├── docker_cleanup.yml      # Docker/containerd image and cache cleanup
 │   ├── preflight_check.yml     # Read-only maintenance readiness checks
 │   ├── health_diagnostics.yml  # Deep host health diagnostics
@@ -340,9 +430,8 @@ server-maintenance/
 │   ├── mig_management.yml      # MIG status/enable/disable
 │   ├── fabric_manager.yml      # Fabric manager service control
 │   └── host_facts.yml          # Gather host info for dashboard
-├── roles/                      # Ansible roles
 ├── templates/                  # User config templates
-├── scripts/                    # Shell scripts and design guide
+├── scripts/                    # Startup and enrollment helpers
 ├── backend/                    # FastAPI backend (API + Ansible runner)
 └── frontend/                   # Vue 3 capability-driven UI
 ```

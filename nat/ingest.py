@@ -273,6 +273,15 @@ def main():
     # first fleet job has completed.
     ensure_job_log_collection(embed_dim)
 
+    # Both retrievers need a collection even when embeddings are unavailable.
+    # Keep an empty searchable collection ready before the first API request.
+    collection = (
+        Collection(COLLECTION_NAME)
+        if utility.has_collection(COLLECTION_NAME)
+        else create_collection(embed_dim)
+    )
+    collection.load()
+
     if not os.path.exists(DOCS_DIR):
         print(
             f"WARNING: Docs directory {DOCS_DIR} not found, skipping documentation ingestion"
@@ -285,18 +294,12 @@ def main():
         )
         return
 
-    # Check if collection already has data
-    if utility.has_collection(COLLECTION_NAME):
-        collection = Collection(COLLECTION_NAME)
-        collection.load()
-        count = collection.num_entities
-        if count > 0:
-            print(
-                f"Collection '{COLLECTION_NAME}' already has {count} entities, skipping ingestion"
-            )
-            return
-        else:
-            utility.drop_collection(COLLECTION_NAME)
+    count = collection.num_entities
+    if count > 0:
+        print(
+            f"Collection '{COLLECTION_NAME}' already has {count} entities, skipping ingestion"
+        )
+        return
 
     sections = load_and_split_docs(DOCS_DIR)
     if not sections:
@@ -306,8 +309,6 @@ def main():
     print("Embedding sections...")
     texts = [s["text"] for s in sections]
     embeddings = embed_texts(texts)
-
-    collection = create_collection(embed_dim)
 
     # Insert data
     data = [

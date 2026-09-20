@@ -1,15 +1,27 @@
 ---
 - name: Configure Admin Privileges
-  hosts: all
+  hosts: managed_hosts
   become: true
   vars:
-    admin_user: "{{ admin_username | default('btuttle') }}"
+    admin_user: "{{ admin_username | default(ansible_user | default(''), true) }}"
   tasks:
     - name: Validate admin username
       assert:
         that:
           - admin_user is match('^[a-z_][a-z0-9_-]{0,31}$')
         fail_msg: "Unsafe admin username: {{ admin_user }}"
+
+    - name: Check that the administrator account exists
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ admin_user }}"
+        fail_key: false
+
+    - name: Require an existing administrator account
+      ansible.builtin.assert:
+        that:
+          - admin_user in ansible_facts['getent_passwd']
+        fail_msg: "Administrator {{ admin_user }} does not exist on {{ inventory_hostname }}"
 
     - name: Set up passwordless sudo for admin user
       lineinfile:

@@ -111,6 +111,10 @@ export const updateDevice = (deviceId, data) =>
   request(`/devices/${deviceId}`, { method: "PUT", body: data });
 export const updateDeviceAnnotations = (deviceId, annotations) =>
   request(`/devices/${deviceId}/annotations`, { method: "PUT", body: { annotations } });
+export const previewDeviceSsh = (deviceId) =>
+  request(`/devices/${deviceId}/ssh-preview`, { method: "POST", timeoutMs: 45_000 });
+export const configureDeviceSsh = (deviceId, data) =>
+  request(`/devices/${deviceId}/ssh`, { method: "POST", body: data, timeoutMs: 120_000 });
 export const deleteDevice = (deviceId) => request(`/devices/${deviceId}`, { method: "DELETE" });
 export const scanDevice = (deviceId) => request(`/devices/${deviceId}/scan`, { method: "POST" });
 export const scanAllDevices = () => request("/devices/scan-all", { method: "POST" });
@@ -126,9 +130,6 @@ export const runOperation = (operationId, deviceIds) =>
 // Users
 export const getUsers = () => request("/users");
 export const bulkAddUsers = (data) => request("/users/bulk-add", { method: "POST", body: data });
-export const bulkAddUsersCsv = (formData) =>
-  request("/users/bulk-add-csv", { method: "POST", body: formData });
-export const bulkUpdateUsers = (data) => request("/users/bulk-update", { method: "PUT", body: data });
 export const changePassword = (username, data) =>
   request(`/users/${username}/change-password`, { method: "POST", body: data });
 export const bulkPasswordReset = (data) =>
@@ -146,12 +147,9 @@ export const getJobs = (params = {}) => {
   return request(`/jobs${qs ? "?" + qs : ""}`);
 };
 export const getJob = (jobId) => request(`/jobs/${jobId}`);
-export const cancelJob = (jobId) => request(`/jobs/${jobId}/cancel`, { method: "POST" });
 
 // Chat
 export const getChatStatus = () => request("/chat/status");
-export const getDocsIndexStatus = () => request("/chat/index-status");
-export const reindexDocs = () => request("/chat/reindex-docs", { method: "POST" });
 
 // Context management
 export const getContextStatus = () => request("/context/status");
@@ -242,7 +240,7 @@ export async function streamChat(messages, handlersOrChunkFn, legacyOnDone, lega
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({ messages, job_id: handlers.jobId, device_id: handlers.deviceId }),
       signal: handlers.signal,
     });
 

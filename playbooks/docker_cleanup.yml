@@ -10,31 +10,40 @@
       failed_when: false
       changed_when: false
 
-    - name: Ensure Docker daemon is running
-      ansible.builtin.systemd:
-        state: started
-        name: docker
-        enabled: true
-        daemon_reload: true
+    - name: Check whether Docker is running
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - docker
+      register: docker_service
+      failed_when: false
+      changed_when: false
       when: docker_cli.rc == 0
 
     - name: Prune unused Docker images
       command: docker image prune -a -f
       register: docker_image_prune
-      changed_when: docker_image_prune.stdout | length > 0
-      when: docker_cli.rc == 0
+      changed_when: "'Total reclaimed space: 0B' not in docker_image_prune.stdout"
+      when:
+        - docker_cli.rc == 0
+        - docker_service.rc | default(1) == 0
 
     - name: Prune Docker build cache
       command: docker builder prune -f
       register: docker_builder_prune
-      changed_when: docker_builder_prune.stdout | length > 0
-      when: docker_cli.rc == 0
+      changed_when: "'Total reclaimed space: 0B' not in docker_builder_prune.stdout"
+      when:
+        - docker_cli.rc == 0
+        - docker_service.rc | default(1) == 0
 
     - name: Prune unused Docker networks
       command: docker network prune -f
       register: docker_network_prune
-      changed_when: docker_network_prune.stdout | length > 0
-      when: docker_cli.rc == 0
+      changed_when: "'Deleted Networks:' in docker_network_prune.stdout"
+      when:
+        - docker_cli.rc == 0
+        - docker_service.rc | default(1) == 0
 
     - name: Check if nerdctl is installed
       command: which nerdctl
@@ -43,12 +52,15 @@
       changed_when: false
       when: "'dgx_workstation' in group_names"
 
-    - name: Ensure containerd daemon is running
-      ansible.builtin.systemd:
-        state: started
-        name: containerd
-        enabled: true
-        daemon_reload: true
+    - name: Check whether containerd is running
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - containerd
+      register: containerd_service
+      failed_when: false
+      changed_when: false
       when:
         - "'dgx_workstation' in group_names"
         - nerdctl_cli.rc | default(1) == 0
@@ -56,15 +68,17 @@
     - name: Prune unused containerd images in k8s namespace
       command: nerdctl --namespace k8s.io image prune -f
       register: containerd_image_prune
-      changed_when: containerd_image_prune.stdout | length > 0
+      changed_when: "'Total reclaimed space: 0B' not in containerd_image_prune.stdout"
       when:
         - "'dgx_workstation' in group_names"
         - nerdctl_cli.rc | default(1) == 0
+        - containerd_service.rc | default(1) == 0
 
     - name: Report cleanup summary
       debug:
         msg:
           - "Docker installed: {{ docker_cli.rc == 0 }}"
+          - "Docker running: {{ docker_service.rc | default(1) == 0 }}"
           - "Docker images: {{ docker_image_prune.stdout_lines | default(['skipped']) }}"
           - "Docker build cache: {{ docker_builder_prune.stdout_lines | default(['skipped']) }}"
           - "Docker networks: {{ docker_network_prune.stdout_lines | default(['skipped']) }}"

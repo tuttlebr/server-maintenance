@@ -1,0 +1,31 @@
+---
+- name: Identify DGX Spark during the initial scan
+  ansible.builtin.set_fact:
+    detected_dgx_spark: >-
+      {{
+        (ansible_facts['architecture'] | default('') | lower) in ['aarch64', 'arm64']
+        and
+        (
+          (dgx_release.name | default('') | trim | lower | regex_replace('\\s+', ' ')) == 'dgx spark'
+          or (dgx_release.pretty_name | default('') | trim | lower | regex_replace('\\s+', ' ')) == 'nvidia dgx spark'
+          or (ansible_facts['product_name'] | default('') | trim | lower | regex_replace('\\s+', ' ')) in ['dgx spark', 'nvidia dgx spark']
+          or
+          (
+            (gpu_info.rc | default(1) | int) == 0
+            and (gpu_info.stdout | default('') | lower | regex_search('(^|[^a-z0-9])gb10([^a-z0-9]|$)')) is not none
+            and
+            (
+              [
+                dgx_release.platform | default(''),
+                ansible_facts['product_name'] | default(''),
+                ansible_facts['product_version'] | default(''),
+                ansible_facts['board_name'] | default('')
+              ]
+              | join(' ')
+              | lower
+              | regex_search('(^|[^a-z0-9])(gx10|gx10dgx)([^a-z0-9]|$)')
+            ) is not none
+          )
+        )
+      }}
+  changed_when: false

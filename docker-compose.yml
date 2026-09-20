@@ -8,11 +8,11 @@ services:
       - ./group_vars:/app/ansible/group_vars:ro
       - ./host_vars:/app/ansible/host_vars:ro
       - ./playbooks:/app/ansible/playbooks:ro
-      - ./roles:/app/ansible/roles:ro
-      - ./templates:/app/ansible/templates:ro
       - ./scripts:/app/ansible/scripts:ro
+      - ./templates:/app/ansible/templates:ro
       - fleet-ssh-agent:/run/fleet-agent:ro
       - ${SSH_KNOWN_HOSTS_PATH:-./.fleet-ssh/known_hosts}:/run/fleet-known-hosts-seed:ro
+      - ${FLEET_KUBECONFIG_PATH:-/dev/null}:/run/fleet-kubeconfig/config:ro
       - ./docs:/app/docs:ro
       - fleet-data:/app/data
     env_file:
@@ -21,11 +21,12 @@ services:
       SSH_AUTH_SOCK: /run/fleet-agent/agent.sock
       SSH_KNOWN_HOSTS_FILE: /app/data/ssh/known_hosts
       SSH_KNOWN_HOSTS_SEED_FILE: /run/fleet-known-hosts-seed
+      KUBECONFIG: /run/fleet-kubeconfig/config
       # This binary is built into the web image; don't inherit a stale host path.
       DOCS_INGESTER_BIN: /usr/local/bin/fleet-doc-ingester
       # The .env default is host-facing; containers reach Milvus by service name.
       MILVUS_URI: http://milvus:19530
-    restart: unless-stopped
+    restart: always
     read_only: false
     tmpfs:
       - /tmp
@@ -54,7 +55,7 @@ services:
     volumes:
       - ${SSH_AUTH_SOCK_PATH:?SSH_AUTH_SOCK_PATH must point to a dedicated SSH agent socket}:/run/host-agent:ro
       - fleet-ssh-agent:/run/fleet-agent
-    restart: unless-stopped
+    restart: always
     read_only: true
     cap_drop:
       - ALL
@@ -83,7 +84,7 @@ services:
       interval: 30s
       timeout: 20s
       retries: 5
-    restart: unless-stopped
+    restart: always
 
   minio:
     image: minio/minio:RELEASE.2023-03-20T20-16-18Z
@@ -98,7 +99,7 @@ services:
       interval: 30s
       timeout: 20s
       retries: 5
-    restart: unless-stopped
+    restart: always
 
   milvus:
     image: milvusdb/milvus:v2.4.21
@@ -124,7 +125,7 @@ services:
       timeout: 20s
       retries: 10
       start_period: 90s
-    restart: unless-stopped
+    restart: always
   nat:
     build: ./nat
     volumes:
@@ -138,10 +139,14 @@ services:
       - EMBED_MODEL=${EMBED_MODEL:-nvidia/qwen/qwen3-embedding-0.6b}
       - EMBED_DIM=${EMBED_DIM:-}
       - MILVUS_URI=http://milvus:19530
+      - KUBERNETES_MCP_SERVER=${KUBERNETES_MCP_SERVER:-}
+      - KUBERNETES_MCP_TOKEN=${KUBERNETES_MCP_TOKEN:-}
+      - UNIFI_MCP_SERVER=${UNIFI_MCP_SERVER:-}
+      - UNIFI_MCP_TOKEN=${UNIFI_MCP_TOKEN:-}
     depends_on:
       milvus:
         condition: service_healthy
-    restart: unless-stopped
+    restart: always
     cap_drop:
       - ALL
     security_opt:

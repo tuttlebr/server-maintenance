@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.auth import get_current_user
-from backend.capabilities import OPERATION_BY_ID, OPERATIONS, has_capability
+from backend.capabilities import OPERATION_BY_ID, OPERATIONS, REACHY_APP_RESET, has_capability
 from backend.database import SessionLocal, get_db
 from backend.models import Device, Job
 from backend.schemas import OperationResponse, OperationRunRequest
@@ -79,7 +79,12 @@ async def run_operation(
     if operation.id in {"reachy.daemon.restart", "reachy.software.update"}:
         return _start_reachy_remote_jobs(db, devices, user, operation.id, operation.label)
 
-    non_ssh = [device.name for device in devices if (device.transport or "ssh") != "ssh"]
+    non_ssh = [
+        device.name
+        for device in devices
+        if (device.transport or "ssh") != "ssh"
+        and not (operation.id == REACHY_APP_RESET and device.ansible_user)
+    ]
     if non_ssh:
         raise HTTPException(
             status_code=400,
@@ -89,6 +94,10 @@ async def run_operation(
     extra_vars = None
     if operation.id == "nvidia.driver.manage":
         extra_vars = {"upgrade_mode": "standard"}
+    elif operation.id == "firmware.update":
+        extra_vars = {"firmware_mode": "update"}
+    elif operation.id == "system.reboot":
+        extra_vars = {"force_reboot": True}
     elif operation.id == "nvidia.fabric_manager.manage":
         extra_vars = {"fabric_action": "status"}
     elif operation.id == "nvidia.mig.manage":

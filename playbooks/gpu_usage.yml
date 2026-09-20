@@ -182,6 +182,9 @@
                         "utilization_pct": parse_int(parts[-1]) or 0,
                     })
 
+        if not gpus:
+            raise SystemExit("nvidia-smi did not return any GPU records")
+
         # Collect GPU processes and resolve each to a user
         proc_raw = run([
             "nvidia-smi",
@@ -258,6 +261,8 @@
                     seen.add(u)
 
         report = {
+            "schema_version": 1,
+            "report_type": "gpu",
             "hostname": hostname,
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "platform": platform,
@@ -279,17 +284,27 @@
         print(json.dumps(report, indent=2))
         PYEOF
       register: gpu_report_json
-      ignore_errors: true
       changed_when: false
 
     - name: Write GPU usage report as JSON
       copy:
         content: "{{ gpu_report_json.stdout }}"
         dest: "/tmp/fleet_gpu_usage_report.json"
-        mode: "0644"
+        mode: "0600"
 
     - name: Fetch GPU usage report to controller
       fetch:
         src: "/tmp/fleet_gpu_usage_report.json"
-        dest: "/app/data/scans/gpu_usage_{{ inventory_hostname }}.json"
+        dest: "{{ __fleet_scan_dir | default(playbook_dir ~ '/../data/scans') }}/gpu_usage_{{ inventory_hostname }}.json"
         flat: true
+
+    - name: Fetch GPU result for this job
+      ansible.builtin.fetch:
+        src: "/tmp/fleet_gpu_usage_report.json"
+        dest: "{{ __fleet_results_dir | default('/tmp/fleet-job-results') }}/{{ __fleet_job_id | default('manual') }}/gpu_{{ inventory_hostname }}.json"
+        flat: true
+
+    - name: Remove temporary GPU usage report
+      ansible.builtin.file:
+        path: "/tmp/fleet_gpu_usage_report.json"
+        state: absent

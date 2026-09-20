@@ -1,11 +1,8 @@
 import importlib.util
-import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-
-from backend.routers import maintenance
 
 
 SCRIPT_PATH = Path(__file__).parents[1] / "playbooks" / "files" / "storage_discovery.py"
@@ -106,47 +103,6 @@ class StorageDiscoveryTests(unittest.TestCase):
         )
 
         self.assertEqual(storage_discovery._filesystem_id(normalized), "device:8:2")
-
-
-class StorageReportDeduplicationTests(unittest.TestCase):
-    def test_mount_deduplication_merges_aliases(self):
-        mounts = maintenance._dedupe_storage_mounts(
-            [
-                {
-                    "filesystem_id": "device:8:2",
-                    "mountpoint": "/",
-                    "mountpoints": ["/"],
-                },
-                {
-                    "filesystem_id": "device:8:2",
-                    "mountpoint": "/srv/root-bind",
-                },
-                {
-                    "filesystem_id": "nfs:nfs4:nas:/team",
-                    "mountpoint": "/shared",
-                },
-            ]
-        )
-
-        self.assertEqual(len(mounts), 2)
-        self.assertEqual(mounts[0]["mountpoints"], ["/", "/srv/root-bind"])
-
-    def test_cached_reports_keep_only_newest_report_per_host(self):
-        with tempfile.TemporaryDirectory() as temporary_dir:
-            scan_dir = Path(temporary_dir) / "scans"
-            scan_dir.mkdir()
-            (scan_dir / "storage_old-name.json").write_text(
-                json.dumps({"hostname": "node-01", "timestamp": "2026-08-01T00:00:00Z"})
-            )
-            (scan_dir / "storage_node-01.json").write_text(
-                json.dumps({"hostname": "node-01", "timestamp": "2026-08-02T00:00:00Z"})
-            )
-
-            with patch.object(maintenance.settings, "data_dir", Path(temporary_dir)):
-                reports = maintenance._read_cached_reports("storage")
-
-        self.assertEqual(len(reports), 1)
-        self.assertEqual(reports[0][1]["timestamp"], "2026-08-02T00:00:00Z")
 
 
 if __name__ == "__main__":

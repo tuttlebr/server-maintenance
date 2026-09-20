@@ -31,3 +31,4 @@ password_reset_*.txt
 vault_password
 docs/crawled/
 tools/**/target/
+ignore*

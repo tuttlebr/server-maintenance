@@ -10,6 +10,7 @@ from backend.capabilities import (
     NVIDIA_DRIVER_MANAGE,
     NVIDIA_FABRIC_MANAGER,
     NVIDIA_MIG_MANAGE,
+    REACHY_APP_RESET,
     has_capability,
 )
 from backend.config import settings
@@ -58,7 +59,7 @@ def _validated_device_vars(device: Device) -> dict[str, str]:
 
 
 def regenerate_inventory(db: Session) -> None:
-    """Generate capability groups for SSH-managed devices."""
+    """Generate capability groups for SSH and verified Reachy maintenance access."""
     devices = sorted(db.query(Device).all(), key=lambda device: device.hostname)
     groups: dict[str, dict] = {kind: {"hosts": {}} for kind in DEVICE_KINDS}
     groups.update({
@@ -68,6 +69,7 @@ def regenerate_inventory(db: Session) -> None:
         "nvidia_gpu": {"hosts": {}},
         "fabric_manager": {"hosts": {}},
         "mig": {"hosts": {}},
+        "reachy_ssh": {"hosts": {}},
         "cpu": {"hosts": {}},
     })
 
@@ -77,7 +79,14 @@ def regenerate_inventory(db: Session) -> None:
         groups[legacy] = {"hosts": {}}
 
     for device in devices:
-        if (getattr(device, "transport", None) or "ssh") != "ssh":
+        transport = getattr(device, "transport", None) or "ssh"
+        if transport == "reachy_daemon":
+            if device.ansible_user and has_capability(device, REACHY_APP_RESET):
+                hostvars = _validated_device_vars(device)
+                groups["robot"]["hosts"][device.hostname] = hostvars
+                groups["reachy_ssh"]["hosts"][device.hostname] = hostvars
+            continue
+        if transport != "ssh":
             continue
         hostvars = _validated_device_vars(device)
         name = device.hostname
@@ -98,6 +107,8 @@ def regenerate_inventory(db: Session) -> None:
             groups["fabric_manager"]["hosts"][name] = hostvars
         if has_capability(device, NVIDIA_MIG_MANAGE):
             groups["mig"]["hosts"][name] = hostvars
+        if has_capability(device, REACHY_APP_RESET):
+            groups["reachy_ssh"]["hosts"][name] = hostvars
 
     inventory = {
         "all": {

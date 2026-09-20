@@ -1,0 +1,79 @@
+---
+# Kubernetes API operations intentionally run on the Ansible controller. Managed
+# nodes do not need kubectl, a kubeconfig, or cluster-admin credentials.
+- name: Build Kubernetes node identity candidates
+  ansible.builtin.set_fact:
+    kubernetes_effective_kubeconfig: >-
+      {{
+        kubernetes_kubeconfig
+        | default(lookup('ansible.builtin.env', 'KUBECONFIG'), true)
+      }}
+    kubernetes_node_candidates: >-
+      {{
+        (
+          [kubernetes_node_name]
+          if kubernetes_node_name | default('', true) | length > 0
+          else
+          [
+            inventory_hostname,
+            ansible_host | default(''),
+            ansible_facts.get('hostname', ''),
+            ansible_facts.get('fqdn', ''),
+            ansible_facts.get('default_ipv4', {}).get('address', '')
+          ]
+        )
+        | map('string')
+        | reject('equalto', '')
+        | unique
+        | list
+      }}
+    kubernetes_api_accessible: false
+    kubernetes_api_error: ""
+    kubernetes_node_found: false
+    kubernetes_resolved_node_name: ""
+    kubernetes_node_was_unschedulable: false
+  changed_when: false
+
+- name: Query Kubernetes nodes from the controller
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Node
+    kubeconfig: "{{ kubernetes_effective_kubeconfig | default(omit, true) }}"
+    context: "{{ kubernetes_context | default(omit, true) }}"
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  register: kubernetes_nodes_query
+  changed_when: false
+  failed_when: false
+
+- name: Record Kubernetes API availability
+  ansible.builtin.set_fact:
+    kubernetes_api_accessible: "{{ kubernetes_nodes_query.resources is defined }}"
+    kubernetes_api_error: "{{ kubernetes_nodes_query.msg | default('') }}"
+  changed_when: false
+
+- name: Match the managed host to a Kubernetes node
+  ansible.builtin.set_fact:
+    kubernetes_node_found: true
+    kubernetes_resolved_node_name: "{{ item.metadata.name }}"
+    kubernetes_node_was_unschedulable: >-
+      {{ item.spec.unschedulable | default(false) | bool }}
+  loop: "{{ kubernetes_nodes_query.resources | default([]) }}"
+  loop_control:
+    label: "{{ item.metadata.name | default('unknown') }}"
+  when: >-
+    item.metadata.name in kubernetes_node_candidates
+    or
+    (item.metadata.name | lower) in
+      (kubernetes_node_candidates | map('lower') | list)
+    or
+    (
+      item.status.addresses | default([])
+      | map(attribute='address')
+      | list
+      | intersect(kubernetes_node_candidates)
+      | length
+    ) > 0
+  changed_when: false

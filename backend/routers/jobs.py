@@ -10,6 +10,7 @@ from backend.database import SessionLocal, get_db
 from backend.models import Job
 from backend.schemas import JobResponse
 from backend.services.ansible_runner import cancel_job, get_log_path
+from backend.services.job_results import get_job_results
 from backend.services.tokens import TokenError, decode_token
 
 router = APIRouter(prefix="/api/v2/jobs", tags=["activity"])
@@ -41,7 +42,8 @@ def get_job(
     job = db.query(Job).filter(Job.job_id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
-    return job
+    response = JobResponse.model_validate(job)
+    return response.model_copy(update={"result_artifacts": get_job_results(job.job_id)})
 
 
 @router.post("/{job_id}/cancel")

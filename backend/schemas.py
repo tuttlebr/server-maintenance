@@ -2,7 +2,7 @@ import re
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 HOSTNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$")
@@ -11,9 +11,6 @@ LINUX_NAME_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 GROUPS_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}(,[a-z_][a-z0-9_-]{0,31})*$")
 SAFE_TEXT_RE = re.compile(r"^[^{}<>\r\n$`|;]{1,120}$")
-MACHINE_TYPE_VALUES = {"unknown", "dgx_spark", "dgx_workstation", "cpu_node", "gpu_node"}
-MachineType = Literal["unknown", "dgx_spark", "dgx_workstation", "cpu_node", "gpu_node"]
-DeviceKind = Literal["server", "workstation", "edge", "robot", "generic"]
 DeviceTransport = Literal["ssh", "reachy_daemon"]
 ALLOWED_SHELLS = {"/bin/bash", "/bin/sh", "/bin/zsh", "/usr/bin/bash", "/usr/bin/zsh", "/usr/sbin/nologin", "/bin/false"}
 JINJA_MARKERS = ("{{", "}}", "{%", "%}", "{#", "#}")
@@ -30,19 +27,6 @@ def _validate_hostname(value: str) -> str:
     if not HOSTNAME_RE.fullmatch(value) or "," in value:
         raise ValueError("hostnames may only contain letters, numbers, dots, underscores, and hyphens")
     return value
-
-
-def _validate_hosts(value: list[str] | None) -> list[str] | None:
-    if value is None:
-        return None
-    deduped = []
-    seen = set()
-    for host in value:
-        validated = _validate_hostname(host)
-        if validated not in seen:
-            deduped.append(validated)
-            seen.add(validated)
-    return deduped
 
 
 def _validate_linux_name(value: str) -> str:
@@ -78,13 +62,6 @@ def _validate_account_password(value: str | None, field_name: str) -> str | None
     if value and len(value) < 12:
         raise ValueError(f"{field_name} must be at least 12 characters")
     return value
-
-
-def _validate_targeting(hosts: list[str] | None, all_hosts: bool) -> None:
-    if all_hosts and hosts:
-        raise ValueError("provide either hosts or all_hosts, not both")
-    if not all_hosts and not hosts:
-        raise ValueError("select at least one host or set all_hosts=true")
 
 
 def _validate_device_targeting(device_ids: list[int] | None, all_devices: bool) -> None:
@@ -207,6 +184,9 @@ class DeviceResponse(BaseModel):
     inventory_name: str
     endpoint: str
     transport: str
+    ssh_user: str | None = None
+    passwordless_ssh: bool = True
+    daemon_port: int | None = None
     kind: str
     vendor: str | None = None
     model: str | None = None
@@ -281,6 +261,31 @@ class DeviceEnrollmentRequest(BaseModel):
     approval: DeviceKeyApproval | None = None
 
 
+class DeviceSshEnrollmentRequest(BaseModel):
+    ssh_user: str
+    ssh_password: str | None = None
+    become_password: str | None = None
+    bootstrap_password: str | None = None
+    passwordless_ssh: bool = True
+    approval: DeviceKeyApproval
+
+    @field_validator("ssh_user")
+    @classmethod
+    def validate_ssh_user(cls, value: str) -> str:
+        return _validate_linux_name(value)
+
+    @field_validator("ssh_password", "become_password", "bootstrap_password")
+    @classmethod
+    def validate_connection_secrets(cls, value: str | None, info) -> str | None:
+        return _validate_ansible_string(value, info.field_name)
+
+    @model_validator(mode="after")
+    def validate_authentication(self):
+        if not self.passwordless_ssh and not self.ssh_password:
+            raise ValueError("ssh_password is required when passwordless_ssh is false")
+        return self
+
+
 class OperationResponse(BaseModel):
     id: str
     label: str
@@ -300,137 +305,6 @@ class OperationRunRequest(BaseModel):
     @classmethod
     def validate_device_ids(cls, value: list[int]) -> list[int]:
         return list(dict.fromkeys(value))
-
-
-# Hosts
-class HostCreate(BaseModel):
-    hostname: str
-    ip_address: str | None = None
-    machine_type: MachineType = "unknown"
-    ansible_user: str
-    ansible_password: str | None = None
-    ansible_become_password: str | None = None
-    bootstrap_password: str | None = None
-    passwordless_ssh: bool = True
-
-    @field_validator("hostname")
-    @classmethod
-    def validate_hostname(cls, value: str) -> str:
-        return _validate_hostname(value)
-
-    @field_validator("ip_address")
-    @classmethod
-    def validate_ip_address(cls, value: str | None) -> str | None:
-        value = _strip(value)
-        if not value:
-            return None
-        if not ADDRESS_RE.fullmatch(value):
-            raise ValueError("ansible host address contains unsupported characters")
-        return value
-
-    @field_validator("ansible_user")
-    @classmethod
-    def validate_ansible_user(cls, value: str) -> str:
-        return _validate_linux_name(value)
-
-    @field_validator("ansible_password", "ansible_become_password", "bootstrap_password")
-    @classmethod
-    def validate_host_passwords(cls, value: str | None, info) -> str | None:
-        return _validate_ansible_string(value, info.field_name)
-
-    @model_validator(mode="after")
-    def validate_authentication(self):
-        if not self.passwordless_ssh and not self.ansible_password:
-            raise ValueError("ansible_password is required when passwordless_ssh is false")
-        return self
-
-
-class HostResponse(BaseModel):
-    id: int
-    hostname: str
-    ip_address: str | None
-    machine_type: str | None
-    ansible_user: str | None
-    passwordless_ssh: bool
-    os_version: str | None
-    gpu_model: str | None
-    driver_version: str | None
-    cuda_version: str | None
-    memory_gb: int | None
-    nic_type: str | None
-    nic_speed: str | None
-    fabric_manager_status: str | None
-    disk_root_percent: int | None
-    disk_raid_percent: int | None
-    status: str
-    reboot_required: bool
-    last_seen: datetime | None
-    created_at: datetime | None
-
-    class Config:
-        from_attributes = True
-
-
-class HostUpdate(BaseModel):
-    ip_address: str | None = None
-    machine_type: MachineType | None = None
-    ansible_user: str | None = None
-    ansible_password: str | None = None
-    ansible_become_password: str | None = None
-    passwordless_ssh: bool | None = None
-
-    @field_validator("ip_address")
-    @classmethod
-    def validate_ip_address(cls, value: str | None) -> str | None:
-        value = _strip(value)
-        if not value:
-            return None
-        if not ADDRESS_RE.fullmatch(value):
-            raise ValueError("ansible host address contains unsupported characters")
-        return value
-
-    @field_validator("ansible_user")
-    @classmethod
-    def validate_ansible_user(cls, value: str | None) -> str | None:
-        return _validate_optional_linux_name(value)
-
-    @field_validator("ansible_password", "ansible_become_password")
-    @classmethod
-    def validate_host_passwords(cls, value: str | None, info) -> str | None:
-        return _validate_ansible_string(value, info.field_name)
-
-    @model_validator(mode="after")
-    def validate_authentication_change(self):
-        if self.passwordless_ssh is False and self.ansible_password == "":
-            raise ValueError("ansible_password must not be empty when passwordless_ssh is false")
-        return self
-
-
-class HostKeyApproval(BaseModel):
-    hostname: str
-    fingerprint: str = Field(pattern=r"^SHA256:[A-Za-z0-9+/]{43}$")
-
-    @field_validator("hostname")
-    @classmethod
-    def validate_hostname(cls, value: str) -> str:
-        return _validate_hostname(value)
-
-
-class HostEnrollmentRequest(BaseModel):
-    hosts: list[HostCreate] = Field(min_length=1, max_length=200)
-    approvals: list[HostKeyApproval] = Field(min_length=1, max_length=200)
-
-    @model_validator(mode="after")
-    def validate_approvals(self):
-        hostnames = [host.hostname for host in self.hosts]
-        approved_hostnames = [approval.hostname for approval in self.approvals]
-        if len(hostnames) != len(set(hostnames)):
-            raise ValueError("hostnames must be unique within an enrollment request")
-        if len(approved_hostnames) != len(set(approved_hostnames)):
-            raise ValueError("host-key approvals must be unique by hostname")
-        if set(hostnames) != set(approved_hostnames):
-            raise ValueError("every enrolled host must have one matching host-key approval")
-        return self
 
 
 # Users
@@ -611,22 +485,10 @@ class RemoveUserRequest(BaseModel):
         return self
 
 
-class UserResponse(BaseModel):
-    id: int
-    username: str
-    full_name: str | None
-    email: str | None
-    is_sudoer: bool
-    groups: str | None
-    device_ids: list[int] = Field(default_factory=list)
-    created_at: datetime | None
-
-    class Config:
-        from_attributes = True
-
-
 # Jobs
 class JobResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     job_id: str
     playbook: str
@@ -641,119 +503,7 @@ class JobResponse(BaseModel):
     error_summary: str | None
     recap: str | None
     created_at: datetime | None
-
-    class Config:
-        from_attributes = True
-
-
-# Drivers
-class DriverUpgradeRequest(BaseModel):
-    hosts: list[str] = Field(min_length=1)
-    upgrade_mode: Literal["standard", "major"] = "standard"
-    target_driver_version: str | None = None  # e.g. "570", "580"
-
-    @field_validator("hosts")
-    @classmethod
-    def validate_hosts(cls, value: list[str]) -> list[str]:
-        return _validate_hosts(value) or []
-
-
-class DriverStatusResponse(BaseModel):
-    hostname: str
-    driver_version: str | None
-    cuda_version: str | None
-    machine_type: str | None
-    reboot_required: bool
-
-
-# Networking
-class FabricManagerActionRequest(BaseModel):
-    hosts: list[str] | None = None
-    all_hosts: bool = False
-
-    @field_validator("hosts")
-    @classmethod
-    def validate_hosts(cls, value: list[str] | None) -> list[str] | None:
-        return _validate_hosts(value)
-
-    @model_validator(mode="after")
-    def validate_targeting(self):
-        _validate_targeting(self.hosts, self.all_hosts)
-        return self
-
-
-# Maintenance
-class MaintenanceRequest(BaseModel):
-    hosts: list[str] | None = None
-    all_hosts: bool = False
-
-    @field_validator("hosts")
-    @classmethod
-    def validate_hosts(cls, value: list[str] | None) -> list[str] | None:
-        return _validate_hosts(value)
-
-    @model_validator(mode="after")
-    def validate_targeting(self):
-        _validate_targeting(self.hosts, self.all_hosts)
-        return self
-
-
-class DiskUsageResponse(BaseModel):
-    hostname: str
-    disk_root_percent: int | None
-    disk_raid_percent: int | None
-
-
-class ReportFreshness(BaseModel):
-    last_scanned_at: datetime | None = None
-    age_seconds: int | None = None
-    stale: bool = False
-
-
-class GpuUserSummary(BaseModel):
-    user: str
-    gpu_count: int = 0
-    total_memory_mb: int = 0
-    hosts: list[str] = []
-
-
-class GpuHostSummary(BaseModel):
-    hostname: str
-    total_gpus: int = 0
-    free_gpus: int = 0
-    idle_gpus: int = 0
-    active_gpus: int = 0
-    unknown_processes: int = 0
-
-
-class StorageOwnerEntry(BaseModel):
-    hostname: str
-    owner_user: str | None = None
-    owner_uid: int | None = None
-    owner_group: str | None = None
-    path: str
-    size_mb: int
-    mountpoint: str
-    mount_type: str | None = None
-    use_pct: int | None = None
-    kind: str | None = None
-
-
-class StoragePressureHost(BaseModel):
-    hostname: str
-    mountpoint: str
-    mount_type: str | None = None
-    use_pct: int
-    used_mb: int | None = None
-    total_mb: int | None = None
-
-
-class MaintenanceOverviewResponse(BaseModel):
-    generated_at: datetime
-    fleet: dict
-    gpu: dict
-    storage: dict
-
+    result_artifacts: list[dict] = Field(default_factory=list)
 
 # Chat
 class ChatMessage(BaseModel):
@@ -763,6 +513,8 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1, max_length=100)
+    job_id: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    device_id: int | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def validate_last_message(self):

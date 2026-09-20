@@ -1,0 +1,15 @@
+---
+- name: Run production DGX detection for {{ dgx_case.name }}
+  ansible.builtin.include_tasks: ../../../playbooks/tasks/detect_dgx_spark.yml
+  vars:
+    ansible_facts: "{{ dgx_case.ansible_facts }}"
+    dgx_release: "{{ dgx_case.dgx_release }}"
+    gpu_info: "{{ dgx_case.gpu_info }}"
+
+- name: Check DGX detection result for {{ dgx_case.name }}
+  ansible.builtin.assert:
+    that:
+      - (detected_dgx_spark | bool) == (dgx_case.expected | bool)
+    fail_msg: >-
+      {{ dgx_case.name }} expected {{ dgx_case.expected }} but got
+      {{ detected_dgx_spark }}

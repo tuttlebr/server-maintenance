@@ -7,13 +7,83 @@
     - name: Get GPU information
       command: nvidia-smi --query-gpu=gpu_name,driver_version,memory.total --format=csv,noheader
       register: gpu_info
-      ignore_errors: true
+      failed_when: false
       changed_when: false
+      when: inventory_hostname in groups['nvidia_gpu']
+
+    - name: Initialize DGX release facts
+      ansible.builtin.set_fact:
+        dgx_release: {}
+      changed_when: false
+
+    - name: Check DGX release metadata
+      ansible.builtin.stat:
+        path: /etc/dgx-release
+        follow: false
+        get_checksum: false
+        get_attributes: false
+        get_mime: false
+      register: dgx_release_file
+      changed_when: false
+
+    - name: Read allowlisted DGX release values
+      ansible.builtin.command:
+        argv:
+          - awk
+          - -v
+          - "wanted={{ item.key }}"
+          - |
+            BEGIN { FS = "=" }
+            $1 == wanted {
+              value = substr($0, index($0, "=") + 1)
+              sub(/\r$/, "", value)
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+              if (length(value) >= 2 &&
+                  ((substr(value,1,1) == "\"" && substr(value,length(value),1) == "\"") ||
+                   (substr(value,1,1) == "'"  && substr(value,length(value),1) == "'"))) {
+                value = substr(value, 2, length(value) - 2)
+              }
+              if (length(value) <= 160 && value !~ /[[:cntrl:]]/) print value
+              exit
+            }
+          - /etc/dgx-release
+      loop:
+        - { key: DGX_NAME, field: name }
+        - { key: DGX_PRETTY_NAME, field: pretty_name }
+        - { key: DGX_PLATFORM, field: platform }
+        - { key: DGX_SWBUILD_VERSION, field: swbuild_version }
+      when:
+        - dgx_release_file.stat.exists | default(false)
+        - dgx_release_file.stat.isreg | default(false)
+        - (dgx_release_file.stat.size | default(0) | int) <= 16384
+      environment:
+        LC_ALL: C
+      register: dgx_release_values
+      changed_when: false
+      failed_when: false
+      no_log: true
+
+    - name: Assemble sanitized DGX release facts
+      ansible.builtin.set_fact:
+        dgx_release: >-
+          {{
+            dgx_release
+            | combine({item.item.field: item.stdout | trim})
+          }}
+      loop: "{{ dgx_release_values.results | default([]) }}"
+      when:
+        - (item.rc | default(1) | int) == 0
+        - (item.stdout | default('') | length) > 0
+      changed_when: false
+      no_log: true
+
+    - name: Detect DGX Spark for first-scan platform tasks
+      ansible.builtin.include_tasks: tasks/detect_dgx_spark.yml
 
     - name: Get CUDA version
       shell: nvcc --version 2>/dev/null | grep "release" | sed 's/.*release //' | sed 's/,.*//'
       register: cuda_info
-      ignore_errors: true
+      failed_when: false
       changed_when: false
 
     - name: Discover mounted storage
@@ -37,7 +107,7 @@
     - name: Check NIC type
       shell: "lspci | grep -i 'mellanox\\|connectx' | head -1"
       register: nic_info
-      ignore_errors: true
+      failed_when: false
       changed_when: false
 
     - name: Check fabric manager status
@@ -58,11 +128,38 @@
       failed_when: false
       changed_when: false
 
-    - name: Check whether kubectl is available
-      shell: command -v kubectl
-      register: kubectl_available
+    - name: Check whether fwupd tooling is installed
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/env
+          - which
+          - fwupdmgr
+      register: fwupd_available
       failed_when: false
       changed_when: false
+
+    - name: Check whether NVIDIA firmware tooling is installed
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/env
+          - which
+          - nvfwupd
+      register: nvfwupd_available
+      failed_when: false
+      changed_when: false
+
+    - name: Check for the Reachy Mini daemon environment
+      ansible.builtin.stat:
+        path: /venvs/mini_daemon
+        follow: false
+        get_checksum: false
+        get_attributes: false
+        get_mime: false
+      register: reachy_mini_environment
+      changed_when: false
+
+    - name: Discover Kubernetes membership from the controller
+      ansible.builtin.include_tasks: tasks/kubernetes_discover.yml
 
     - name: Check if reboot is required
       stat:
@@ -72,21 +169,21 @@
     - name: "Spark: Check Secure Boot status"
       command: mokutil --sb-state
       register: secure_boot_info
-      ignore_errors: true
+      failed_when: false
       changed_when: false
-      when: "'dgx_spark' in group_names"
+      when: "'dgx_spark' in group_names or (detected_dgx_spark | bool)"
 
     - name: "Spark: Get firmware version info"
       command: fwupdmgr get-devices --json
       register: firmware_info
-      ignore_errors: true
+      failed_when: false
       changed_when: false
-      when: "'dgx_spark' in group_names"
+      when: "'dgx_spark' in group_names or (detected_dgx_spark | bool)"
 
-    - name: "A100: Get NVSM health summary"
+    - name: "DGX_WS: Get NVSM health summary"
       command: nvsm show health
       register: nvsm_health
-      ignore_errors: true
+      failed_when: false
       changed_when: false
       when: "'dgx_workstation' in group_names"
 
@@ -101,6 +198,10 @@
           system_vendor: "{{ ansible_facts['system_vendor'] | default('unknown') }}"
           product_name: "{{ ansible_facts['product_name'] | default('unknown') }}"
           product_version: "{{ ansible_facts['product_version'] | default('unknown') }}"
+          dgx_name: "{{ dgx_release.name | default('unknown') }}"
+          dgx_pretty_name: "{{ dgx_release.pretty_name | default('unknown') }}"
+          dgx_platform: "{{ dgx_release.platform | default('unknown') }}"
+          dgx_swbuild_version: "{{ dgx_release.swbuild_version | default('unknown') }}"
           motherboard_vendor: "{{ ansible_facts['board_vendor'] | default('unknown') }}"
           motherboard_model: "{{ ansible_facts['board_name'] | default('unknown') }}"
           motherboard_version: "{{ ansible_facts['board_version'] | default('unknown') }}"
@@ -131,13 +232,21 @@
           fabric_manager: "{{ fm_status.stdout | default('N/A') }}"
           fabric_manager_available: "{{ (fm_available.rc | default(1)) == 0 }}"
           mig_available: "{{ (mig_available.rc | default(1)) == 0 }}"
-          kubernetes_available: "{{ (kubectl_available.rc | default(1)) == 0 }}"
+          kubernetes_available: "{{ kubernetes_node_found | bool }}"
+          kubernetes_api_accessible: "{{ kubernetes_api_accessible | bool }}"
+          kubernetes_node_name: "{{ kubernetes_resolved_node_name | default('') }}"
+          kubernetes_unschedulable: "{{ kubernetes_node_was_unschedulable | default(false) | bool }}"
           uptime_seconds: "{{ ansible_facts['uptime_seconds'] | default(0) }}"
           reboot_required: "{{ reboot_flag.stat.exists }}"
           machine_type: "{{ machine_type | default('unknown') }}"
           platform_group: "{{ machine_type | default('unknown') }}"
           secure_boot: "{{ secure_boot_info.stdout | default('N/A') }}"
           firmware_info: "{{ firmware_info.stdout | default('N/A') }}"
+          firmware_tool_available: "{{ (fwupd_available.rc | default(1)) == 0 or (nvfwupd_available.rc | default(1)) == 0 }}"
+          firmware_update_available: "{{ (fwupd_available.rc | default(1)) == 0 }}"
+          reachy_mini_available: >-
+            {{ (reachy_mini_environment.stat.exists | default(false))
+               and (reachy_mini_environment.stat.isdir | default(false)) }}
           nvsm_health: "{{ nvsm_health.stdout | default('N/A') }}"
 
     - name: Output host report
@@ -148,10 +257,15 @@
       copy:
         content: "{{ host_report | to_json }}"
         dest: "/tmp/fleet_host_report.json"
-        mode: "0644"
+        mode: "0600"
 
     - name: Fetch host report to controller
       fetch:
         src: "/tmp/fleet_host_report.json"
-        dest: "/app/data/scans/{{ inventory_hostname }}.json"
+        dest: "{{ __fleet_scan_dir | default(playbook_dir ~ '/../data/scans') }}/{{ inventory_hostname }}.json"
         flat: true
+
+    - name: Remove temporary host report
+      ansible.builtin.file:
+        path: /tmp/fleet_host_report.json
+        state: absent

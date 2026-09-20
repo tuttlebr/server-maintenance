@@ -1,0 +1,3 @@
+name,endpoint,transport,ssh_user,ssh_password,become_password,passwordless_ssh,bootstrap_password,daemon_port,ssh_fingerprint
+compute-01,192.0.2.10,ssh,fleetadmin,,,true,,,SHA256:REPLACE_WITH_VERIFIED_ED25519_FINGERPRINT
+reachy-lab,reachy-mini.local,reachy_daemon,,,,true,,8000,

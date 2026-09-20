@@ -2,8 +2,9 @@
 - name: MIG Management
   hosts: mig
   become: true
-  serial: 4
-  gather_facts: false
+  serial: "{{ maintenance_batch_size | default(1) }}"
+  gather_facts: true
+  force_handlers: true
   vars:
     mig_action: status
   tasks:
@@ -31,18 +32,27 @@
       when:
         - mig_action in ['enable', 'disable']
         - gpu_processes.stdout | default('') | length > 0
+        - not (force | default(false) | bool)
+
+    - name: Prepare Kubernetes member for MIG reconfiguration
+      ansible.builtin.include_tasks: tasks/kubernetes_prepare.yml
+      when: mig_action in ['enable', 'disable']
 
     - name: Enable MIG mode
       command: nvidia-smi -mig 1
       register: mig_enable
-      changed_when: "'Enabled' in mig_enable.stdout or mig_enable.rc == 0"
-      when: mig_action == 'enable'
+      changed_when: true
+      when:
+        - mig_action == 'enable'
+        - "'Enabled' not in mig_status.stdout"
 
     - name: Disable MIG mode
       command: nvidia-smi -mig 0
       register: mig_disable
-      changed_when: "'Disabled' in mig_disable.stdout or mig_disable.rc == 0"
-      when: mig_action == 'disable'
+      changed_when: true
+      when:
+        - mig_action == 'disable'
+        - "'Disabled' not in mig_status.stdout"
 
     - name: Report MIG status
       debug:
@@ -53,3 +63,7 @@
           - "Active GPU processes: {{ gpu_processes.stdout_lines | default([]) }}"
           - "Enable result: {{ mig_enable.stdout_lines | default(['skipped']) }}"
           - "Disable result: {{ mig_disable.stdout_lines | default(['skipped']) }}"
+
+  handlers:
+    - name: Restore Kubernetes node scheduling
+      ansible.builtin.include_tasks: tasks/kubernetes_restore.yml

@@ -2,61 +2,83 @@
 - name: Drain or Resume Host
   hosts: managed_hosts
   become: true
-  gather_facts: false
+  gather_facts: true
+  serial: "{{ maintenance_batch_size | default(1) }}"
   vars:
     drain_action: status
   tasks:
     - name: Validate drain action
-      assert:
+      ansible.builtin.assert:
         that:
           - drain_action in ['status', 'drain', 'resume']
         fail_msg: "drain_action must be status, drain, or resume"
 
     - name: Check active GPU processes
-      command: nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader
+      ansible.builtin.command:
+        argv:
+          - nvidia-smi
+          - --query-compute-apps=pid,process_name,used_memory
+          - --format=csv,noheader
       register: gpu_processes
       failed_when: false
       changed_when: false
       when: "'nvidia_gpu' in group_names"
 
-    - name: Check Kubernetes access
-      command: kubectl get node "{{ inventory_hostname }}"
-      register: kubectl_node
-      failed_when: false
-      changed_when: false
+    - name: Discover Kubernetes membership from the controller
+      ansible.builtin.include_tasks: tasks/kubernetes_discover.yml
 
-    - name: Cordon Kubernetes node
-      command: kubectl cordon "{{ inventory_hostname }}"
-      register: cordon_result
-      changed_when: "'cordoned' in cordon_result.stdout"
+    - name: Require controller access for a drain state change
+      ansible.builtin.fail:
+        msg: >-
+          Kubernetes could not be reached from the Ansible controller.
+          Verify kubeconfig, context, API connectivity, and RBAC. Use
+          -e force=true only for emergency maintenance. {{ kubernetes_api_error }}
       when:
-        - drain_action == 'drain'
-        - kubectl_node.rc == 0
+        - drain_action != 'status'
+        - not kubernetes_api_accessible | bool
+        - not (force | default(false) | bool)
 
     - name: Drain Kubernetes node
-      command: kubectl drain "{{ inventory_hostname }}" --ignore-daemonsets --delete-emptydir-data --timeout=10m
-      register: drain_result
-      failed_when: false
-      changed_when: "'drained' in drain_result.stdout or 'cordoned' in drain_result.stdout"
+      ansible.builtin.include_tasks: tasks/kubernetes_drain.yml
       when:
         - drain_action == 'drain'
-        - kubectl_node.rc == 0
+        - kubernetes_node_found | bool
 
     - name: Uncordon Kubernetes node
-      command: kubectl uncordon "{{ inventory_hostname }}"
-      register: uncordon_result
-      changed_when: "'uncordoned' in uncordon_result.stdout"
+      kubernetes.core.k8s_drain:
+        state: uncordon
+        name: "{{ kubernetes_resolved_node_name }}"
+        kubeconfig: "{{ kubernetes_effective_kubeconfig | default(omit, true) }}"
+        context: "{{ kubernetes_context | default(omit, true) }}"
+      delegate_to: localhost
+      become: false
+      vars:
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
+      register: kubernetes_uncordon_result
+      failed_when: >-
+        kubernetes_uncordon_result.failed | default(false)
+        and not (force | default(false) | bool)
       when:
         - drain_action == 'resume'
-        - kubectl_node.rc == 0
+        - kubernetes_node_found | bool
 
     - name: Report drain status
-      debug:
+      ansible.builtin.debug:
         msg:
           - "Host: {{ inventory_hostname }}"
           - "Action: {{ drain_action }}"
-          - "Kubernetes node visible: {{ kubectl_node.rc == 0 }}"
+          - "Kubernetes API accessible: {{ kubernetes_api_accessible }}"
+          - "Kubernetes node visible: {{ kubernetes_node_found }}"
+          - "Kubernetes node name: {{ kubernetes_resolved_node_name | default('') }}"
+          - "Originally unschedulable: {{ kubernetes_node_was_unschedulable | default(false) }}"
           - "Active GPU processes: {{ gpu_processes.stdout_lines | default([]) }}"
-          - "Cordon: {{ cordon_result.stdout_lines | default(['skipped']) }}"
-          - "Drain: {{ drain_result.stdout_lines | default(['skipped']) }}"
-          - "Resume: {{ uncordon_result.stdout_lines | default(['skipped']) }}"
+          - >-
+            Drain: {{
+              (kubernetes_drain_result | default({})).result
+              | default(
+                  (kubernetes_emergency_drain_result | default({})).result
+                  | default('skipped')
+                )
+            }}
+          - "Resume: {{ kubernetes_uncordon_result.result | default('skipped') }}"
+          - "API error: {{ kubernetes_api_error if not kubernetes_api_accessible else '' }}"

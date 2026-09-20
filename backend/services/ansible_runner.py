@@ -12,9 +12,9 @@ from pathlib import Path
 
 from backend.config import settings
 from backend.database import SessionLocal
-from backend.models import Host, Job
+from backend.models import Host, Job, ManagedUser, UserHostAssociation
 from backend.services import job_log_indexer
-from backend.capabilities import NVIDIA_FABRIC_MANAGER, has_capability
+from backend.capabilities import NVIDIA_FABRIC_MANAGER, REACHY_APP_RESET, has_capability
 from backend.services.device_discovery import enrich_from_scan
 from backend.services.inventory_writer import regenerate_inventory
 from backend.services.secret_store import decrypt_secret
@@ -25,8 +25,14 @@ SENSITIVE_KEYS = {"password", "new_password", "temp_password", "default_password
 SENSITIVE_KEY_PARTS = ("password", "secret", "token", "api_key")
 JINJA_MARKERS = ("{{", "}}", "{%", "%}", "{#", "#}")
 FLEET_CREDENTIALS_VAR = "__fleet_host_credentials"
+FLEET_JOB_ID_VAR = "__fleet_job_id"
+FLEET_RESULTS_DIR_VAR = "__fleet_results_dir"
+FLEET_SCAN_DIR_VAR = "__fleet_scan_dir"
 RESERVED_EXTRA_VARS = {
     FLEET_CREDENTIALS_VAR,
+    FLEET_JOB_ID_VAR,
+    FLEET_RESULTS_DIR_VAR,
+    FLEET_SCAN_DIR_VAR,
     "ansible_password",
     "ansible_ssh_pass",
     "ansible_become_password",
@@ -49,14 +55,15 @@ ALLOWED_PLAYBOOKS = {
     "install_docker.yml",
     "manage_groups.yml",
     "manage_sudoers.yml",
+    "maintenance_assessment.yml",
     "mig_management.yml",
     "preflight_check.yml",
     "reboot.yml",
+    "reachy_app_reset.yml",
     "remove_sudoers.yml",
     "remove_user.yml",
-    "setup_kubeconfig.yml",
     "storage_analysis.yml",
-    "system_maintenance.yml",
+    "system_update.yml",
     "user_management.yml",
 }
 
@@ -198,7 +205,6 @@ def _run_playbook_streaming(
     env_vars = {
         "ANSIBLE_CONFIG": str(ansible_dir / "ansible.cfg"),
         "ANSIBLE_INVENTORY": str(settings.resolved_inventory_file),
-        "ANSIBLE_ROLES_PATH": str(ansible_dir / "roles"),
         "ANSIBLE_HOST_KEY_CHECKING": "True",
         "ANSIBLE_FORCE_COLOR": "0",
         "ANSIBLE_NOCOLOR": "1",
@@ -209,10 +215,15 @@ def _run_playbook_streaming(
     }
     if os.environ.get("SSH_AUTH_SOCK"):
         env_vars["SSH_AUTH_SOCK"] = os.environ["SSH_AUTH_SOCK"]
+    if os.environ.get("KUBECONFIG"):
+        env_vars["KUBECONFIG"] = os.environ["KUBECONFIG"]
 
     log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(log_fd, "w") as log_file:
         payload = dict(extra_vars or {})
+        payload[FLEET_JOB_ID_VAR] = job_id
+        payload[FLEET_RESULTS_DIR_VAR] = str(settings.data_dir / "job-results")
+        payload[FLEET_SCAN_DIR_VAR] = str(settings.data_dir / "scans")
         credentials = {
             target: host_credentials[target]
             for target in targets
@@ -319,6 +330,77 @@ def _update_job(job_id: str, **kwargs):
             for key, value in kwargs.items():
                 setattr(job, key, value)
             db.commit()
+    finally:
+        db.close()
+
+
+def _apply_completion_action(action: dict | None) -> None:
+    """Apply database state only after the corresponding remote job succeeds."""
+    if not action:
+        return
+    action_type = action.get("type")
+    hostnames = list(dict.fromkeys(action.get("hostnames") or []))
+    db = SessionLocal()
+    try:
+        hosts = db.query(Host).filter(Host.hostname.in_(hostnames)).all() if hostnames else []
+        host_ids = {host.id for host in hosts}
+        if len(host_ids) != len(hostnames):
+            raise RuntimeError("job completion targets no longer match registered devices")
+
+        if action_type == "provision_users":
+            for record in action.get("users") or []:
+                managed = db.query(ManagedUser).filter(ManagedUser.username == record["username"]).first()
+                if not managed:
+                    managed = ManagedUser(
+                        username=record["username"],
+                        full_name=record.get("full_name"),
+                        email=record.get("email"),
+                        groups="users",
+                    )
+                    db.add(managed)
+                    db.flush()
+                else:
+                    managed.full_name = record.get("full_name") or managed.full_name
+                    managed.email = record.get("email") or managed.email
+                for host_id in host_ids:
+                    association = db.query(UserHostAssociation).filter(
+                        UserHostAssociation.user_id == managed.id,
+                        UserHostAssociation.host_id == host_id,
+                    ).first()
+                    if not association:
+                        db.add(UserHostAssociation(user_id=managed.id, host_id=host_id))
+        elif action_type == "update_users":
+            groups = action.get("groups")
+            if groups:
+                db.query(ManagedUser).filter(
+                    ManagedUser.username.in_(action.get("usernames") or [])
+                ).update({ManagedUser.groups: groups}, synchronize_session=False)
+        elif action_type == "set_sudoer":
+            managed = db.query(ManagedUser).filter(
+                ManagedUser.username == action.get("username")
+            ).first()
+            if managed:
+                managed.is_sudoer = bool(action.get("enabled"))
+        elif action_type == "remove_user":
+            managed = db.query(ManagedUser).filter(
+                ManagedUser.username == action.get("username")
+            ).first()
+            if managed:
+                db.query(UserHostAssociation).filter(
+                    UserHostAssociation.user_id == managed.id,
+                    UserHostAssociation.host_id.in_(host_ids),
+                ).delete(synchronize_session=False)
+                remaining = db.query(UserHostAssociation).filter(
+                    UserHostAssociation.user_id == managed.id
+                ).first()
+                if not remaining:
+                    db.delete(managed)
+        else:
+            raise RuntimeError(f"unknown job completion action: {action_type}")
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
@@ -450,7 +532,12 @@ def _release_host_locks(locks: list[asyncio.Lock]) -> None:
             lock.release()
 
 
-def _resolve_targets(db, hosts: list[str] | None, all_hosts: bool) -> tuple[list[str] | None, list[str]]:
+def _resolve_targets(
+    db,
+    hosts: list[str] | None,
+    all_hosts: bool,
+    playbook: str,
+) -> tuple[list[str] | None, list[str]]:
     if all_hosts and hosts:
         raise PlaybookRequestError("Provide either hosts or all_hosts, not both")
     if all_hosts:
@@ -474,15 +561,19 @@ def _resolve_targets(db, hosts: list[str] | None, all_hosts: bool) -> tuple[list
             deduped.append(host)
             seen.add(host)
 
-    existing = {
-        h.hostname
-        for h in db.query(Host.hostname)
-        .filter(
-            Host.hostname.in_(deduped),
-            (Host.transport == "ssh") | (Host.transport.is_(None)),
-        )
-        .all()
-    }
+    candidates = db.query(Host).filter(Host.hostname.in_(deduped)).all()
+    existing = set()
+    for host in candidates:
+        transport = host.transport or "ssh"
+        if transport == "ssh":
+            existing.add(host.hostname)
+        elif (
+            playbook == "reachy_app_reset.yml"
+            and transport == "reachy_daemon"
+            and host.ansible_user
+            and has_capability(host, REACHY_APP_RESET)
+        ):
+            existing.add(host.hostname)
     missing = [host for host in deduped if host not in existing]
     if missing:
         raise PlaybookRequestError(f"Unknown host target(s): {', '.join(missing)}")
@@ -496,13 +587,14 @@ async def run_playbook(
     all_hosts: bool = False,
     extra_vars: dict | None = None,
     triggered_by: str = "admin",
+    completion_action: dict | None = None,
 ) -> str:
     """Queue and run an Ansible playbook. Returns the job_id."""
     if playbook not in ALLOWED_PLAYBOOKS:
         raise PlaybookRequestError(f"Unsupported playbook: {playbook}")
     _validate_extra_vars(extra_vars or {})
 
-    hosts, lock_targets = _resolve_targets(db, hosts, all_hosts)
+    hosts, lock_targets = _resolve_targets(db, hosts, all_hosts, playbook)
     registered_hosts = {
         host.hostname: host
         for host in db.query(Host).filter(Host.hostname.in_(lock_targets)).all()
@@ -604,6 +696,17 @@ async def run_playbook(
                 update_kwargs["error_summary"] = output[-2000:] if output else "Unknown error"
 
             _update_job(job_id, **update_kwargs)
+
+            if not was_cancelled and rc == 0 and completion_action:
+                try:
+                    _apply_completion_action(completion_action)
+                except Exception:
+                    logger.exception("Could not apply completion state for job %s", job_id)
+                    _update_job(
+                        job_id,
+                        status="failed",
+                        error_summary="Remote changes completed, but Fleet Manager could not reconcile its local state",
+                    )
 
             # Parse scan results after host scans. For all-host scans, keep
             # partial successes and mark explicit unreachable hosts offline.

@@ -41,9 +41,10 @@ _PRIVATE_KEY_RE = re.compile(
     r"-----BEGIN [^-\n]*PRIVATE KEY-----.*?-----END [^-\n]*PRIVATE KEY-----",
     re.IGNORECASE | re.DOTALL,
 )
-_BEARER_RE = re.compile(r"(?i)(authorization\s*[:=]\s*bearer\s+)[^\s,;]+")
+_BEARER_RE = re.compile(r'''(?i)(authorization["']?\s*[:=]\s*["']?bearer\s+)[^\s,"';}]+''')
 _SECRET_ASSIGNMENT_RE = re.compile(
-    r"(?i)(\b(?:password|passwd|secret|token|api[_-]?key)\b\s*[:=]\s*)(\"[^\"]*\"|'[^']*'|[^\s,;]+)"
+    r"(?i)(\b(?:[\w-]*[_-])?(?:password|passwd|secret|token|api[_-]?key)\b[\"']?\s*[:=]\s*)"
+    r'''("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}]+)'''
 )
 
 

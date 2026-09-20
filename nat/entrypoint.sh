@@ -11,4 +11,5 @@ else
 fi
 
 echo "Starting NeMo Agent Toolkit server..."
-exec nat serve --config_file=config.yml --host 0.0.0.0 --port 8000
+python prepare_config.py
+exec nat serve --config_file=/tmp/fleet-nat-config.yml --host 0.0.0.0 --port 8000

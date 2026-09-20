@@ -12,7 +12,6 @@ from backend.schemas import (
     ChangePasswordRequest,
     RemoveUserRequest,
     SudoersRequest,
-    UserResponse,
     _validate_linux_name,
 )
 from backend.services.ansible_runner import run_playbook
@@ -98,38 +97,12 @@ async def bulk_add_users(
         all_hosts=False,
         extra_vars=extra_vars,
         triggered_by=user,
+        completion_action={
+            "type": "provision_users",
+            "hostnames": target_names,
+            "users": extra_vars["user_records"],
+        },
     )
-
-    # Record users in DB
-    for u in payload.users:
-        username = u.username
-        existing = db.query(ManagedUser).filter(ManagedUser.username == username).first()
-        if not existing:
-            managed = ManagedUser(
-                username=username,
-                full_name=u.full_name,
-                email=u.email,
-            )
-            db.add(managed)
-            db.commit()
-            db.refresh(managed)
-        else:
-            managed = existing
-
-        for host in target_devices:
-            if host:
-                assoc = (
-                    db.query(UserHostAssociation)
-                    .filter(
-                        UserHostAssociation.user_id == managed.id,
-                        UserHostAssociation.host_id == host.id,
-                    )
-                    .first()
-                )
-                if not assoc:
-                    db.add(UserHostAssociation(user_id=managed.id, host_id=host.id))
-
-    db.commit()
     return {"job_id": job_id, "detail": f"Adding {len(payload.users)} users"}
 
 
@@ -181,6 +154,12 @@ async def bulk_update_users(
         all_hosts=False,
         extra_vars=extra_vars,
         triggered_by=user,
+        completion_action={
+            "type": "update_users",
+            "hostnames": [device.hostname for device in target_devices],
+            "usernames": payload.usernames,
+            "groups": payload.groups,
+        },
     )
     return {"job_id": job_id, "detail": f"Updating {len(payload.usernames)} users"}
 
@@ -256,12 +235,13 @@ async def add_sudoers(
         all_hosts=False,
         extra_vars=extra_vars,
         triggered_by=user,
+        completion_action={
+            "type": "set_sudoer",
+            "hostnames": [device.hostname for device in target_devices],
+            "username": username,
+            "enabled": True,
+        },
     )
-
-    managed = db.query(ManagedUser).filter(ManagedUser.username == username).first()
-    if managed:
-        managed.is_sudoer = True
-        db.commit()
 
     return {"job_id": job_id, "detail": f"Adding {username} to sudoers"}
 
@@ -284,12 +264,13 @@ async def remove_sudoers(
         all_hosts=False,
         extra_vars=extra_vars,
         triggered_by=user,
+        completion_action={
+            "type": "set_sudoer",
+            "hostnames": [device.hostname for device in target_devices],
+            "username": username,
+            "enabled": False,
+        },
     )
-
-    managed = db.query(ManagedUser).filter(ManagedUser.username == username).first()
-    if managed:
-        managed.is_sudoer = False
-        db.commit()
 
     return {"job_id": job_id, "detail": f"Removing {username} from sudoers"}
 
@@ -315,12 +296,11 @@ async def remove_user(
         all_hosts=False,
         extra_vars=extra_vars,
         triggered_by=user,
+        completion_action={
+            "type": "remove_user",
+            "hostnames": [device.hostname for device in target_devices],
+            "username": username,
+        },
     )
-
-    managed = db.query(ManagedUser).filter(ManagedUser.username == username).first()
-    if managed:
-        db.query(UserHostAssociation).filter(UserHostAssociation.user_id == managed.id).delete()
-        db.delete(managed)
-        db.commit()
 
     return {"job_id": job_id, "detail": f"Removing user {username}"}

@@ -1,13 +1,13 @@
 ---
-- name: Driver and System Upgrade (Rolling)
+- name: NVIDIA Driver Upgrade (Rolling)
   hosts: nvidia_gpu
   become: true
-  serial: 4
+  serial: "{{ maintenance_batch_size | default(1) }}"
+  force_handlers: true
   gather_facts: true
   vars:
     upgrade_mode: standard
     target_driver_version: ""
-    upgrade_firmware: false
     skip_reboot: false
     force_upgrade: false
 
@@ -23,19 +23,61 @@
     - name: Record pre-upgrade driver version
       command: nvidia-smi --query-gpu=driver_version --format=csv,noheader
       register: pre_driver_version
-      ignore_errors: true
+      failed_when: false
       changed_when: false
 
     - name: Record pre-upgrade CUDA version
       shell: nvcc --version 2>/dev/null | grep "release" | sed 's/.*release //' | sed 's/,.*//'
       register: pre_cuda_version
-      ignore_errors: true
+      failed_when: false
       changed_when: false
+
+    - name: Discover the installed NVIDIA driver metapackage
+      ansible.builtin.shell: >-
+        dpkg-query -W -f='${binary:Package}\n' 'nvidia-driver-*' 2>/dev/null |
+        sed 's/:.*//' | grep -E '^nvidia-driver-[0-9]+(-open)?$' |
+        sort -u | head -1
+      register: installed_driver_package
+      changed_when: false
+      failed_when: false
+
+    - name: Select the requested NVIDIA driver branch and package
+      ansible.builtin.set_fact:
+        effective_driver_branch: >-
+          {{
+            target_driver_version
+            if (upgrade_mode | default('standard')) == 'major'
+            else (pre_driver_version.stdout_lines | default([]) | first | default('') | regex_search('^[0-9]+'))
+          }}
+        effective_driver_package: >-
+          {{
+            (
+              'nvidia-driver-' ~ target_driver_version ~
+              ('-open' if (installed_driver_package.stdout | default('')).endswith('-open') else '')
+            )
+            if (upgrade_mode | default('standard')) == 'major'
+            else (
+              installed_driver_package.stdout
+              if installed_driver_package.stdout | default('') | length > 0
+              else 'nvidia-driver-' ~ (pre_driver_version.stdout_lines | default([]) | first | default('') | regex_search('^[0-9]+'))
+            )
+          }}
+      changed_when: false
+
+    - name: Require a supported Debian driver package target
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['os_family'] == 'Debian'
+          - effective_driver_branch | default('', true) is match('^[0-9]+$')
+          - effective_driver_package | default('', true) is match('^nvidia-driver-[0-9]+(-open)?$')
+        fail_msg: >-
+          Fleet Manager could not determine a Debian NVIDIA driver branch for
+          {{ inventory_hostname }}. Use major mode with a numeric target branch.
 
     - name: Check for active GPU processes
       command: nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader
       register: gpu_processes
-      ignore_errors: true
+      failed_when: false
       changed_when: false
 
     - name: Fail if GPU processes are running
@@ -43,15 +85,17 @@
         msg: >-
           Active GPU processes detected on {{ inventory_hostname }}.
           PIDs: {{ gpu_processes.stdout }}
-          Use -e force_upgrade=true to override.
+          Use -e force_upgrade=true for the workload check only, or
+          -e force=true for emergency maintenance.
       when:
         - gpu_processes.stdout | default('') | length > 0
         - not force_upgrade | bool
+        - not (force | default(false) | bool)
 
     - name: Check for running GPU containers
       command: docker ps --filter "runtime=nvidia" --format "{{ '{{' }}.Names{{ '}}' }}"
       register: gpu_containers
-      ignore_errors: true
+      failed_when: false
       changed_when: false
 
     - name: Fail if GPU containers are running
@@ -59,15 +103,20 @@
         msg: >-
           GPU containers running on {{ inventory_hostname }}:
           {{ gpu_containers.stdout }}
-          Use -e force_upgrade=true to override.
+          Use -e force_upgrade=true for the workload check only, or
+          -e force=true for emergency maintenance.
       when:
         - gpu_containers.stdout | default('') | length > 0
         - not force_upgrade | bool
+        - not (force | default(false) | bool)
+
+    - name: Prepare Kubernetes member for driver maintenance
+      ansible.builtin.include_tasks: tasks/kubernetes_prepare.yml
 
     - name: "A100: Run NVSM health baseline"
       command: nvsm show health
       register: pre_nvsm_health
-      ignore_errors: true
+      failed_when: false
       changed_when: false
       when: "'dgx_workstation' in group_names"
 
@@ -81,7 +130,7 @@
     - name: "Spark: Record Secure Boot state"
       command: mokutil --sb-state
       register: pre_secure_boot
-      ignore_errors: true
+      failed_when: false
       changed_when: false
       when: "'dgx_spark' in group_names"
 
@@ -121,6 +170,7 @@
       when:
         - "'dgx_workstation' in group_names"
         - nvsm_was_active.stdout | default('') == 'active'
+      notify: Restore NVSM after driver update
 
     - name: "A100: Stop DCGM before upgrade"
       systemd:
@@ -129,6 +179,7 @@
       when:
         - "'dgx_workstation' in group_names"
         - dcgm_was_active.stdout | default('') == 'active'
+      notify: Restore DCGM after driver update
 
     - name: "A100: Stop Fabric Manager before upgrade"
       systemd:
@@ -137,57 +188,17 @@
       when:
         - "'dgx_workstation' in group_names"
         - fm_was_active.stdout | default('') == 'active'
+      notify: Restore Fabric Manager after driver update
 
     # ── Perform the upgrade ──────────────────────────────────────────
     - name: Update apt cache
       apt:
         update_cache: true
 
-    - name: "A100: Run full system upgrade"
+    - name: Update the selected NVIDIA driver branch
       apt:
-        upgrade: full
-        autoremove: true
-      when:
-        - "'dgx_workstation' in group_names"
-        - (upgrade_mode | default('standard')) == 'standard'
-
-    - name: "Spark: Run dist upgrade"
-      apt:
-        upgrade: dist
-        autoremove: true
-      when:
-        - "'dgx_spark' in group_names"
-        - (upgrade_mode | default('standard')) == 'standard'
-
-    - name: Install target NVIDIA driver branch
-      apt:
-        name: "nvidia-driver-{{ target_driver_version }}"
-        state: present
-        autoremove: true
-      when: (upgrade_mode | default('standard')) == 'major'
-
-    - name: "Spark: Refresh firmware metadata"
-      command: fwupdmgr refresh --force
-      ignore_errors: true
-      changed_when: false
-      when:
-        - "'dgx_spark' in group_names"
-        - upgrade_firmware | bool
-
-    - name: "Spark: Upgrade firmware"
-      command: fwupdmgr upgrade --no-reboot --assume-yes
-      register: firmware_result
-      ignore_errors: true
-      when:
-        - "'dgx_spark' in group_names"
-        - upgrade_firmware | bool
-
-    - name: "Spark: Report firmware upgrade result"
-      debug:
-        msg: "Firmware upgrade result: {{ firmware_result.stdout_lines | default(['skipped']) }}"
-      when:
-        - "'dgx_spark' in group_names"
-        - upgrade_firmware | bool
+        name: "{{ effective_driver_package }}"
+        state: latest
 
     # ── Restart dependent services (A100 only) ───────────────────────
     - name: "A100: Start Fabric Manager"
@@ -250,19 +261,19 @@
     - name: Record post-upgrade driver version
       command: nvidia-smi --query-gpu=driver_version --format=csv,noheader
       register: post_driver_version
-      ignore_errors: true
+      failed_when: false
       changed_when: false
 
     - name: Record post-upgrade CUDA version
       shell: nvcc --version 2>/dev/null | grep "release" | sed 's/.*release //' | sed 's/,.*//'
       register: post_cuda_version
-      ignore_errors: true
+      failed_when: false
       changed_when: false
 
     - name: "A100: Run post-upgrade NVSM health check"
       command: nvsm show health
       register: post_nvsm_health
-      ignore_errors: true
+      failed_when: false
       changed_when: false
       when: "'dgx_workstation' in group_names"
 
@@ -303,7 +314,7 @@
     - name: "Spark: Verify Secure Boot status unchanged"
       command: mokutil --sb-state
       register: post_secure_boot
-      ignore_errors: true
+      failed_when: false
       changed_when: false
       when: "'dgx_spark' in group_names"
 
@@ -321,16 +332,19 @@
     - name: Compile upgrade report
       set_fact:
         upgrade_report:
+          schema_version: 1
+          report_type: driver
           hostname: "{{ inventory_hostname }}"
           machine_type: "{{ machine_type | default('unknown') }}"
           upgrade_mode: "{{ upgrade_mode | default('standard') }}"
-          target_driver_version: "{{ target_driver_version | default('') }}"
+          target_driver_version: "{{ effective_driver_branch }}"
+          driver_package: "{{ effective_driver_package }}"
           pre_driver_version: "{{ pre_driver_version.stdout | default('unknown') }}"
           post_driver_version: "{{ post_driver_version.stdout | default('unknown') }}"
           driver_changed: "{{ (pre_driver_version.stdout | default('')) != (post_driver_version.stdout | default('')) }}"
           pre_cuda_version: "{{ pre_cuda_version.stdout | default('unknown') }}"
           post_cuda_version: "{{ post_cuda_version.stdout | default('unknown') }}"
-          firmware_updated: "{{ firmware_result is defined and firmware_result.rc | default(1) == 0 }}"
+          firmware_updated: false
           reboot_performed: "{{ reboot_flag.stat.exists and not skip_reboot | bool }}"
           nvsm_health: "{{ post_nvsm_health.stdout_lines | default(['N/A']) }}"
           services_status:
@@ -347,10 +361,43 @@
       copy:
         content: "{{ upgrade_report | to_json }}"
         dest: "/tmp/fleet_driver_upgrade_report.json"
-        mode: "0644"
+        mode: "0600"
 
     - name: Fetch upgrade report to controller
       fetch:
         src: "/tmp/fleet_driver_upgrade_report.json"
-        dest: "/app/data/scans/driver_upgrade_{{ inventory_hostname }}.json"
+        dest: "{{ __fleet_scan_dir | default(playbook_dir ~ '/../data/scans') }}/driver_upgrade_{{ inventory_hostname }}.json"
         flat: true
+
+    - name: Fetch driver result for this job
+      ansible.builtin.fetch:
+        src: "/tmp/fleet_driver_upgrade_report.json"
+        dest: "{{ __fleet_results_dir | default('/tmp/fleet-job-results') }}/{{ __fleet_job_id | default('manual') }}/driver_{{ inventory_hostname }}.json"
+        flat: true
+
+    - name: Remove temporary driver report
+      ansible.builtin.file:
+        path: "/tmp/fleet_driver_upgrade_report.json"
+        state: absent
+
+  handlers:
+    - name: Restore Fabric Manager after driver update
+      ansible.builtin.systemd:
+        name: nvidia-fabricmanager
+        state: started
+        enabled: true
+
+    - name: Restore DCGM after driver update
+      ansible.builtin.systemd:
+        name: dcgm
+        state: started
+        enabled: true
+
+    - name: Restore NVSM after driver update
+      ansible.builtin.systemd:
+        name: nvsm
+        state: started
+        enabled: true
+
+    - name: Restore Kubernetes node scheduling
+      ansible.builtin.include_tasks: tasks/kubernetes_restore.yml

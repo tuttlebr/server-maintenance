@@ -57,13 +57,3 @@ def parse_csv(content: str) -> list[UserInfo]:
                 continue
 
     return users
-
-
-def users_to_user_info_format(users: list[UserInfo]) -> list[str]:
-    """Convert UserInfo list to the Ansible user_info format: 'First Last <flast@domain>;'"""
-    return [f"{u.full_name} <{u.email}>;" for u in users]
-
-
-def derive_username(email: str) -> str:
-    """Derive username from email (part before @)."""
-    return email.split("@")[0] if "@" in email else email

@@ -4,13 +4,14 @@
       <div><h2>Devices</h2><p class="page-subtitle">Compute, edge, and robotics inventory discovered by capability.</p></div>
       <div class="header-actions">
         <input ref="csvInput" class="visually-hidden" type="file" accept=".csv,text/csv" @change="loadCsv" />
+        <button class="btn btn-ghost btn-sm" :disabled="!devices.length" title="Download all devices without stored passwords" @click="downloadCsv"><i class="fas fa-download" aria-hidden="true"></i>Download CSV</button>
         <button class="btn btn-ghost btn-sm" @click="csvInput?.click()"><i class="fas fa-file-csv" aria-hidden="true"></i>Import CSV</button>
         <button class="btn btn-primary btn-sm" @click="openAdd"><i class="fas fa-plus" aria-hidden="true"></i>Add device</button>
       </div>
     </div>
 
     <div class="filter-bar" role="search" aria-label="Filter devices">
-      <div class="search-field"><i class="fas fa-search" aria-hidden="true"></i><input v-model="search" class="form-input" placeholder="Search name, vendor, model, or endpoint" /></div>
+      <div class="search-field"><i class="fas fa-search" aria-hidden="true"></i><input v-model="search" class="form-input" placeholder="Search name, vendor, model, platform, or endpoint" /></div>
       <select v-model="kindFilter" class="form-select" aria-label="Filter by device type"><option value="">All types</option><option v-for="item in availableKinds" :key="item" :value="item">{{ deviceKind(item).label }}</option></select>
       <select v-model="capabilityFilter" class="form-select" aria-label="Filter by capability"><option value="">All capabilities</option><option v-for="item in availableCapabilities" :key="item" :value="item">{{ capabilityLabel(item) }}</option></select>
       <select v-model="statusFilter" class="form-select" aria-label="Filter by status"><option value="">All states</option><option value="online">Online</option><option value="offline">Offline</option><option value="unknown">Unknown</option><option value="attention">Needs attention</option></select>
@@ -127,7 +128,8 @@ import { addDevice, discoverDevice } from "../api.js";
 import { useDevicesStore } from "../stores/devices.js";
 import DeviceCard from "../components/DeviceCard.vue";
 import BaseModal from "../components/BaseModal.vue";
-import { deviceKind } from "../utils/devices.js";
+import { createDeviceCsv } from "../utils/deviceCsv.js";
+import { deviceKind, deviceMatchesSearch } from "../utils/devices.js";
 
 const route = useRoute(); const router = useRouter(); const store = useDevicesStore();
 const devices = computed(() => store.devices); const showAdd = ref(false); const step = ref(1); const working = ref(false); const discovery = ref({ capabilities: [] }); const fingerprintConfirmed = ref(false);
@@ -140,9 +142,8 @@ const draft = reactive(emptyDraft());
 const availableKinds = computed(() => [...new Set(devices.value.map((device) => device.kind))].sort());
 const availableCapabilities = computed(() => [...new Set(devices.value.flatMap((device) => device.capabilities || []))].sort());
 const filteredDevices = computed(() => devices.value.filter((device) => {
-  const term = search.value.toLowerCase(); const searchable = [device.name, device.vendor, device.model, device.endpoint].filter(Boolean).join(" ").toLowerCase();
   const attention = device.status !== "online" || device.reboot_required || (device.disk_root_percent || 0) >= 85;
-  return (!term || searchable.includes(term)) && (!kindFilter.value || device.kind === kindFilter.value) && (!capabilityFilter.value || device.capabilities.includes(capabilityFilter.value)) && (!statusFilter.value || (statusFilter.value === "attention" ? attention : device.status === statusFilter.value));
+  return deviceMatchesSearch(device, search.value) && (!kindFilter.value || device.kind === kindFilter.value) && (!capabilityFilter.value || device.capabilities.includes(capabilityFilter.value)) && (!statusFilter.value || (statusFilter.value === "attention" ? attention : device.status === statusFilter.value));
 }));
 const canAdd = computed(() => discovery.value.reachable && (!discovery.value.fingerprint || fingerprintConfirmed.value));
 const bulkBusy = computed(() => ["discovering", "adding"].includes(bulkPhase.value));
@@ -157,6 +158,17 @@ const bulkStatusSummary = computed(() => {
   return `${ready} ready${failed ? `, ${failed} need attention` : ""}`;
 });
 function capabilityLabel(value) { return value.split(".").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" · "); }
+function downloadCsv() {
+  if (!devices.value.length) return;
+  const content = createDeviceCsv(devices.value);
+  const url = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  const now = new Date();
+  const date = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
+  link.href = url; link.download = `fleet-manager-devices-${date}.csv`; document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  window.$toast?.info(`Downloaded ${devices.value.length} device${devices.value.length === 1 ? "" : "s"}. Stored passwords aren't included.`);
+}
 function openAdd() { showAdd.value = true; }
 function closeAdd() { showAdd.value = false; step.value = 1; discovery.value = { capabilities: [] }; fingerprintConfirmed.value = false; Object.assign(draft, emptyDraft()); if (route.query.add) router.replace({ path: "/devices", query: {} }); }
 async function discover() { working.value = true; try { discovery.value = await discoverDevice({ ...draft }); step.value = 3; } catch (error) { window.$toast?.error("Couldn't discover device", error); } finally { working.value = false; } }
@@ -216,7 +228,7 @@ onMounted(() => store.start()); onUnmounted(() => store.stop());
 </script>
 
 <style scoped>
-.page-subtitle { margin: 4px 0 0; color: var(--text-secondary); }.header-actions { display: flex; gap: 8px; }.filter-bar { display: grid; grid-template-columns: minmax(260px, 1fr) repeat(3, minmax(145px, auto)); gap: 10px; padding: 12px; background: var(--surface-white); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }.search-field { position: relative; }.search-field i { position: absolute; left: 12px; top: 12px; color: var(--text-muted); }.search-field input { padding-left: 34px; }.results-summary { margin: 14px 0 9px; color: var(--text-secondary); font-size: 12px; }.device-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.page-subtitle { margin: 4px 0 0; color: var(--text-secondary); }.header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }.filter-bar { display: grid; grid-template-columns: minmax(260px, 1fr) repeat(3, minmax(145px, auto)); gap: 10px; padding: 12px; background: var(--surface-white); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }.search-field { position: relative; }.search-field i { position: absolute; left: 12px; top: 12px; color: var(--text-muted); }.search-field input { padding-left: 34px; }.results-summary { margin: 14px 0 9px; color: var(--text-secondary); font-size: 12px; }.device-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
 .stepper { display: grid; grid-template-columns: repeat(3, 1fr); list-style: none; padding: 0; margin: 0 0 24px; counter-reset: none; }.stepper li { position: relative; display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; }.stepper li::after { content: ""; height: 1px; flex: 1; background: var(--border-subtle); }.stepper li:last-child::after { display: none; }.stepper li span { width: 25px; height: 25px; border: 1px solid var(--border-color); border-radius: 50%; display: grid; place-items: center; }.stepper li.active { color: var(--text-primary); font-weight: 700; }.stepper li.active span, .stepper li.done span { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
 .transport-options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; border: 0; padding: 0; }.transport-options legend { grid-column: 1/-1; margin-bottom: 10px; font-weight: 650; }.transport-card { display: flex; align-items: center; gap: 14px; padding: 18px; border: 2px solid var(--border-subtle); border-radius: var(--radius-md); cursor: pointer; }.transport-card.selected { border-color: var(--color-accent); background: var(--surface-info-soft); }.transport-card > i { font-size: 24px; color: var(--color-accent); }.transport-card span { display: flex; flex-direction: column; }.transport-card small { margin-top: 3px; color: var(--text-secondary); }.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }.full-width { grid-column: 1/-1; margin: 4px 0 14px; }.optional { color: var(--text-muted); font-weight: 400; }.review-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 16px 0; }.review-grid div, .fingerprint-panel { padding: 13px; background: var(--surface-light); border-radius: var(--radius-sm); }.review-grid div { display: flex; flex-direction: column; }.review-grid span, .fingerprint-panel > span { color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }.fingerprint-panel code { display: block; margin: 8px 0 14px; overflow-wrap: anywhere; }.fingerprint-panel .checkbox-label { align-items: flex-start; }
 .bulk-guidance { margin-bottom: 12px; }.bulk-summary { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: var(--text-secondary); }.bulk-summary strong { color: var(--text-primary); }.bulk-table-wrap { max-height: 390px; overflow: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); }.bulk-table { width: 100%; border-collapse: collapse; font-size: 12px; }.bulk-table th, .bulk-table td { padding: 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border-subtle); }.bulk-table th { position: sticky; top: 0; background: var(--surface-light); color: var(--text-secondary); z-index: 1; }.bulk-table td strong, .bulk-table td small { display: block; }.bulk-table td small { margin-top: 3px; color: var(--text-secondary); }.bulk-table code { display: block; max-width: 260px; overflow-wrap: anywhere; }.bulk-state { font-weight: 650; }.state-ready, .state-added { color: var(--color-success); }.state-failed, .bulk-error { color: var(--color-danger) !important; }.bulk-approval { align-items: flex-start; margin-top: 14px; }

@@ -41,12 +41,8 @@
       changed_when: false
       when: "'nvidia_gpu' in group_names"
 
-    - name: Check Kubernetes node drain state
-      shell: |
-        kubectl get node "{{ inventory_hostname }}" -o jsonpath='{.spec.unschedulable}' 2>/dev/null || echo "unknown"
-      register: kube_unschedulable
-      changed_when: false
-      failed_when: false
+    - name: Discover Kubernetes membership from the controller
+      ansible.builtin.include_tasks: tasks/kubernetes_discover.yml
 
     - name: Check Fabric Manager status
       command: systemctl is-active nvidia-fabricmanager
@@ -82,7 +78,9 @@
           - "nvidia-smi rc: {{ nvidia_smi_check.rc | default('N/A') }}"
           - "GPU processes: {{ gpu_processes.stdout_lines | default([]) }}"
           - "GPU containers: {{ gpu_containers.stdout_lines | default([]) }}"
-          - "Kubernetes unschedulable: {{ kube_unschedulable.stdout | default('unknown') }}"
+          - "Kubernetes API accessible: {{ kubernetes_api_accessible }}"
+          - "Kubernetes node: {{ kubernetes_resolved_node_name | default('not a member', true) }}"
+          - "Kubernetes unschedulable: {{ kubernetes_node_was_unschedulable if kubernetes_node_found else 'N/A' }}"
           - "Fabric Manager: {{ fabric_manager_status.stdout | default('N/A') }}"
           - "DCGM: {{ dcgm_status.stdout | default('N/A') }}"
           - "NVSM rc: {{ nvsm_health.rc | default('N/A') }}"
@@ -110,3 +108,60 @@
       when:
         - "'nvidia_gpu' in group_names"
         - gpu_processes.stdout | default('') | length > 0
+
+    - name: Compile maintenance assessment
+      ansible.builtin.set_fact:
+        maintenance_assessment:
+          schema_version: 1
+          report_type: assessment
+          hostname: "{{ inventory_hostname }}"
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+          summary:
+            blocker_count: >-
+              {{
+                (1 if (storage_discovery_raw.rc | default(1)) != 0 else 0)
+                + (1 if not (kubernetes_api_accessible | bool) else 0)
+              }}
+            warning_count: >-
+              {{
+                (storage_mounts | selectattr('accessible') | selectattr('use_pct', 'ge', disk_warn_pct) | list | length)
+                + (1 if apt_lock_processes.stdout | default('') | length > 0 else 0)
+                + (1 if gpu_processes.stdout | default('') | length > 0 else 0)
+                + (1 if reboot_required_file.stat.exists else 0)
+              }}
+            pass_count: >-
+              {{
+                4
+                - (1 if apt_lock_processes.stdout | default('') | length > 0 else 0)
+                - (1 if gpu_processes.stdout | default('') | length > 0 else 0)
+                - (1 if reboot_required_file.stat.exists else 0)
+              }}
+          warnings:
+            high_storage: "{{ storage_mounts | selectattr('accessible') | selectattr('use_pct', 'ge', disk_warn_pct) | map(attribute='mountpoint') | list }}"
+            package_activity: "{{ apt_lock_processes.stdout_lines | default([]) }}"
+            gpu_processes: "{{ gpu_processes.stdout_lines | default([]) }}"
+            reboot_required: "{{ reboot_required_file.stat.exists }}"
+          details:
+            os: "{{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}"
+            kernel: "{{ ansible_facts['kernel'] }}"
+            kubernetes_api_accessible: "{{ kubernetes_api_accessible }}"
+            kubernetes_node: "{{ kubernetes_resolved_node_name | default('') }}"
+            kubernetes_unschedulable: "{{ kubernetes_node_was_unschedulable if kubernetes_node_found else false }}"
+            storage_discovery_ok: "{{ storage_discovery_raw.rc | default(1) == 0 }}"
+
+    - name: Write maintenance assessment as JSON
+      ansible.builtin.copy:
+        content: "{{ maintenance_assessment | to_json }}"
+        dest: /tmp/fleet_maintenance_assessment.json
+        mode: "0600"
+
+    - name: Fetch maintenance assessment for this job
+      ansible.builtin.fetch:
+        src: /tmp/fleet_maintenance_assessment.json
+        dest: "{{ __fleet_results_dir | default('/tmp/fleet-job-results') }}/{{ __fleet_job_id | default('manual') }}/assessment_{{ inventory_hostname }}.json"
+        flat: true
+
+    - name: Remove temporary maintenance assessment
+      ansible.builtin.file:
+        path: /tmp/fleet_maintenance_assessment.json
+        state: absent

@@ -17,6 +17,14 @@
           - target_username is match('^[a-z_][a-z0-9_-]{0,31}$')
         fail_msg: "Unsafe username: {{ target_username }}"
 
+    - name: Protect privileged and active automation accounts
+      ansible.builtin.assert:
+        that:
+          - target_username != 'root'
+          - target_username != (admin_username | default(ansible_user | default(''), true))
+          - target_username != (ansible_user | default(''))
+        fail_msg: "Refusing to remove protected account {{ target_username }}"
+
     - name: Check if user exists
       command:
         argv:

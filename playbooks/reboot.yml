@@ -2,7 +2,8 @@
 - name: Reboot Hosts
   hosts: managed_hosts
   become: true
-  serial: 4
+  serial: "{{ maintenance_batch_size | default(1) }}"
+  force_handlers: true
   vars:
     force_reboot: false
     verify_fstab_mounts: true
@@ -38,6 +39,10 @@
       when:
         - should_reboot | bool
         - verify_fstab_mounts | bool
+
+    - name: Prepare Kubernetes member for reboot
+      ansible.builtin.include_tasks: tasks/kubernetes_prepare.yml
+      when: should_reboot | bool
 
     - name: Reboot the host
       reboot:
@@ -93,3 +98,7 @@
       debug:
         msg: "{{ inventory_hostname }} rebooted successfully — {{ uptime_result.stdout | default('skipped') }}"
       when: should_reboot | bool
+
+  handlers:
+    - name: Restore Kubernetes node scheduling
+      ansible.builtin.include_tasks: tasks/kubernetes_restore.yml

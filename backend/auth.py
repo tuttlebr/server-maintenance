@@ -7,7 +7,7 @@ from fastapi.security import OAuth2PasswordBearer
 from backend.config import settings
 from backend.services.tokens import TokenError, create_token, decode_token
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v2/auth/login")
 
 
 def verify_admin(username: str, password: str) -> bool:

@@ -2,7 +2,8 @@
 - name: Firmware Update
   hosts: managed_hosts
   become: true
-  serial: 4
+  serial: "{{ maintenance_batch_size | default(1) }}"
+  force_handlers: true
   gather_facts: true
   vars:
     firmware_mode: inventory
@@ -13,23 +14,46 @@
           - firmware_mode in ['inventory', 'update']
         fail_msg: "firmware_mode must be inventory or update"
 
+    - name: Check fwupd availability
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/env
+          - which
+          - fwupdmgr
+      register: fwupd_cli
+      changed_when: false
+      failed_when: false
+
+    - name: Require fwupd for firmware updates
+      ansible.builtin.assert:
+        that:
+          - fwupd_cli.rc == 0
+        fail_msg: "fwupdmgr is not installed on {{ inventory_hostname }}"
+
     - name: Collect firmware inventory before update
       command: fwupdmgr get-updates
       register: pre_firmware_updates
-      failed_when: false
+      failed_when: pre_firmware_updates.rc not in [0, 2]
       changed_when: false
+
+    - name: Prepare Kubernetes member for firmware update
+      ansible.builtin.include_tasks: tasks/kubernetes_prepare.yml
+      when: firmware_mode == 'update'
 
     - name: Refresh firmware metadata
       command: fwupdmgr refresh --force
       register: fwupd_refresh
-      failed_when: false
-      changed_when: false
+      failed_when: fwupd_refresh.rc not in [0, 2]
+      changed_when: fwupd_refresh.rc == 0
       when: firmware_mode == 'update'
 
     - name: Apply fwupd firmware updates without reboot
       command: fwupdmgr upgrade --no-reboot --assume-yes
       register: fwupd_update
-      failed_when: false
+      failed_when: fwupd_update.rc not in [0, 2]
+      changed_when: >-
+        fwupd_update.rc == 0 and
+        'no updates' not in (((fwupd_update.stdout | default('')) ~ (fwupd_update.stderr | default(''))) | lower)
       when: firmware_mode == 'update'
 
     - name: Check if reboot is required
@@ -46,3 +70,7 @@
           - "Refresh: {{ fwupd_refresh.stdout_lines | default(['skipped']) }}"
           - "Update: {{ fwupd_update.stdout_lines | default(['skipped']) }}"
           - "Reboot required: {{ reboot_required_file.stat.exists }}"
+
+  handlers:
+    - name: Restore Kubernetes node scheduling
+      ansible.builtin.include_tasks: tasks/kubernetes_restore.yml
