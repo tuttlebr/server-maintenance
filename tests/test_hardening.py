@@ -308,6 +308,9 @@ class HostCredentialTests(unittest.TestCase):
                 self.reader = threading.Thread(target=read_payload)
                 self.reader.start()
 
+            def poll(self):
+                return None if self.reader.is_alive() else 0
+
             def wait(self, timeout=None):
                 self.reader.join(timeout=timeout)
                 return 0
@@ -360,7 +363,7 @@ class HostCredentialTests(unittest.TestCase):
         self.assertEqual(payload["new_password"], "account-password")
         self.assertEqual(payload[FLEET_JOB_ID_VAR], "job-id")
         self.assertEqual(payload[FLEET_RESULTS_DIR_VAR], str(root / "job-results"))
-        self.assertEqual(payload[FLEET_SCAN_DIR_VAR], str(root / "scans"))
+        self.assertEqual(payload[FLEET_SCAN_DIR_VAR], str(root / "scans" / "job-id"))
         self.assertEqual(
             payload[FLEET_CREDENTIALS_VAR],
             {

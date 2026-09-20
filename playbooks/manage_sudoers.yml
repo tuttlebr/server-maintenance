@@ -36,6 +36,12 @@
           - "Invalid users: {{ invalid_root_users }}"
       when: debug_mode
 
+    - name: Require every requested sudoer to exist
+      ansible.builtin.assert:
+        that:
+          - invalid_root_users | default([]) | length == 0
+        fail_msg: "Cannot grant sudo to missing accounts: {{ invalid_root_users | default([]) | join(', ') }}"
+
     - name: Create sudoers.d directory if it doesn't exist
       file:
         path: /etc/sudoers.d
@@ -69,3 +75,8 @@
         msg: "WARNING: User {{ item }} does not exist and was not added to sudoers"
       loop: "{{ invalid_root_users }}"
       when: invalid_root_users is defined and invalid_root_users | length > 0
+
+    - name: Observe resulting accounts
+      ansible.builtin.include_tasks: tasks/account_report.yml
+      vars:
+        fleet_account_names: "{{ root_users | default([]) }}"

@@ -383,6 +383,7 @@ class OperationEligibilityTests(unittest.TestCase):
             operation_ids,
             {
                 REACHY_HEALTH,
+                "reachy.recover",
                 REACHY_LOGS_READ,
                 REACHY_DAEMON_RESTART,
                 REACHY_SOFTWARE_UPDATE,
@@ -401,18 +402,19 @@ class OperationEligibilityTests(unittest.TestCase):
         self.db.add(device)
         self.db.commit()
 
-        with self.assertRaisesRegex(HTTPException, "not supported"):
+        with self.assertRaisesRegex(HTTPException, "Required capability"):
             asyncio.run(
                 run_operation(
                     "system.reboot",
-                    OperationRunRequest(device_ids=[device.id]),
+                    OperationRunRequest(device_ids=[device.id], confirmation=device.name),
                     self.db,
                     "admin",
                 )
             )
 
     def test_visible_reboot_action_forces_the_selected_reboot(self):
-        device = Device(hostname="compute-01", transport="ssh", kind="server")
+        from datetime import datetime, timezone
+        device = Device(hostname="compute-01", transport="ssh", kind="server", maintenance_mode="standalone", os_family="Debian", facts_stale=False, discovered_at=datetime.now(timezone.utc))
         device.capabilities = [SYSTEM_REBOOT]
         self.db.add(device)
         self.db.commit()
@@ -422,7 +424,7 @@ class OperationEligibilityTests(unittest.TestCase):
             result = asyncio.run(
                 run_operation(
                     "system.reboot",
-                    OperationRunRequest(device_ids=[device.id]),
+                    OperationRunRequest(device_ids=[device.id], confirmation=device.name),
                     self.db,
                     "admin",
                 )
@@ -455,7 +457,7 @@ class OperationEligibilityTests(unittest.TestCase):
             result = asyncio.run(
                 run_operation(
                     REACHY_APP_RESET,
-                    OperationRunRequest(device_ids=[device.id]),
+                    OperationRunRequest(device_ids=[device.id], confirmation=device.name),
                     self.db,
                     "admin",
                 )
@@ -555,7 +557,8 @@ class OperationEligibilityTests(unittest.TestCase):
             )
 
     def test_removing_device_cleans_access_associations(self):
-        device = Device(hostname="compute-01", transport="ssh", kind="server")
+        from datetime import datetime, timezone
+        device = Device(hostname="compute-01", transport="ssh", kind="server", maintenance_mode="standalone", os_family="Debian", facts_stale=False, discovered_at=datetime.now(timezone.utc))
         user = ManagedUser(username="operator", email="operator@example.com")
         self.db.add_all([device, user])
         self.db.commit()

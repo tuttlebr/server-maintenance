@@ -1,0 +1,8 @@
+---
+- name: Inspect Linux accounts
+  hosts: managed_hosts
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Collect observed accounts
+      ansible.builtin.include_tasks: tasks/account_report.yml

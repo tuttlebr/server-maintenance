@@ -3,7 +3,6 @@
   hosts: nvidia_gpu
   become: true
   serial: "{{ maintenance_batch_size | default(1) }}"
-  force_handlers: true
   gather_facts: true
   vars:
     upgrade_mode: standard
@@ -23,7 +22,6 @@
     - name: Record pre-upgrade driver version
       command: nvidia-smi --query-gpu=driver_version --format=csv,noheader
       register: pre_driver_version
-      failed_when: false
       changed_when: false
 
     - name: Record pre-upgrade CUDA version
@@ -35,7 +33,7 @@
     - name: Discover the installed NVIDIA driver metapackage
       ansible.builtin.shell: >-
         dpkg-query -W -f='${binary:Package}\n' 'nvidia-driver-*' 2>/dev/null |
-        sed 's/:.*//' | grep -E '^nvidia-driver-[0-9]+(-open)?$' |
+        sed 's/:.*//' | grep -E '^nvidia-driver-[0-9]+(-server)?(-open)?$' |
         sort -u | head -1
       register: installed_driver_package
       changed_when: false
@@ -53,6 +51,7 @@
           {{
             (
               'nvidia-driver-' ~ target_driver_version ~
+              ('-server' if '-server' in (installed_driver_package.stdout | default('')) else '') ~
               ('-open' if (installed_driver_package.stdout | default('')).endswith('-open') else '')
             )
             if (upgrade_mode | default('standard')) == 'major'
@@ -69,15 +68,17 @@
         that:
           - ansible_facts['os_family'] == 'Debian'
           - effective_driver_branch | default('', true) is match('^[0-9]+$')
-          - effective_driver_package | default('', true) is match('^nvidia-driver-[0-9]+(-open)?$')
+          - effective_driver_package | default('', true) is match('^nvidia-driver-[0-9]+(-server)?(-open)?$')
         fail_msg: >-
           Fleet Manager could not determine a Debian NVIDIA driver branch for
           {{ inventory_hostname }}. Use major mode with a numeric target branch.
 
+    - name: Prepare Kubernetes member for driver maintenance
+      ansible.builtin.include_tasks: tasks/kubernetes_prepare.yml
+
     - name: Check for active GPU processes
       command: nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader
       register: gpu_processes
-      failed_when: false
       changed_when: false
 
     - name: Fail if GPU processes are running
@@ -109,9 +110,6 @@
         - gpu_containers.stdout | default('') | length > 0
         - not force_upgrade | bool
         - not (force | default(false) | bool)
-
-    - name: Prepare Kubernetes member for driver maintenance
-      ansible.builtin.include_tasks: tasks/kubernetes_prepare.yml
 
     - name: "A100: Run NVSM health baseline"
       command: nvsm show health

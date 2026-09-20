@@ -12,7 +12,8 @@ from backend.config import settings
 from backend.database import SessionLocal, init_db
 from backend.routers import chat, context, devices, jobs, operations, users
 from backend.schemas import LoginRequest, TokenResponse
-from backend.services.ansible_runner import PlaybookRequestError
+from backend.services.ansible_runner import PlaybookRequestError, shutdown_executor, set_executor_lease
+from backend.services.execution_state import acquire_executor_lock, reconcile_interrupted_jobs
 from backend.services.inventory_writer import regenerate_inventory
 from backend.services.job_log_indexer import start_reconcile as start_job_log_reconcile
 from backend.services.login_throttle import (
@@ -51,17 +52,25 @@ async def lifespan(app: FastAPI):
     (settings.data_dir / "logs").mkdir(parents=True, exist_ok=True)
     initialize_known_hosts()
 
+    executor_lock = acquire_executor_lock()
+    set_executor_lease(executor_lock)
     init_db()
     encrypt_existing_host_secrets()
     db = SessionLocal()
     try:
+        reconcile_interrupted_jobs(db)
         regenerate_inventory(db)
     finally:
         db.close()
     # Reconcile in the background so startup stays available if Milvus or the
     # embedding endpoint is temporarily unavailable.
     start_job_log_reconcile()
-    yield
+    try:
+        yield
+    finally:
+        await shutdown_executor()
+        executor_lock.close()
+        set_executor_lease(None)
 
 
 app = FastAPI(

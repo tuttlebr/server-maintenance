@@ -49,7 +49,12 @@ def _validated_device_vars(device: Device) -> dict[str, str]:
     hostvars = {
         "device_kind": getattr(device, "kind", None) or "generic",
         "machine_type": legacy_type,
+        "fleet_maintenance_mode": getattr(device, "maintenance_mode", None) or "unknown",
     }
+    if getattr(device, "kubernetes_context", None):
+        hostvars["kubernetes_context"] = device.kubernetes_context
+    if getattr(device, "kubernetes_node_name", None):
+        hostvars["kubernetes_node_name"] = device.kubernetes_node_name
     if endpoint:
         hostvars["ansible_host"] = endpoint
     if device.ansible_user:
@@ -101,7 +106,9 @@ def regenerate_inventory(db: Session) -> None:
             groups["gpu"]["hosts"][name] = hostvars
         else:
             groups["cpu"]["hosts"][name] = hostvars
-        if has_capability(device, NVIDIA_DRIVER_MANAGE):
+        if has_capability(device, GPU_INSPECT) and (
+            getattr(device, "facts", {}).get("gpu_vendor") == "NVIDIA" or has_capability(device, NVIDIA_DRIVER_MANAGE)
+        ):
             groups["nvidia_gpu"]["hosts"][name] = hostvars
         if has_capability(device, NVIDIA_FABRIC_MANAGER):
             groups["fabric_manager"]["hosts"][name] = hostvars

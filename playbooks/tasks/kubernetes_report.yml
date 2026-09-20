@@ -1,0 +1,18 @@
+---
+- name: Create private recovery results directory
+  ansible.builtin.file:
+    path: "{{ __fleet_results_dir }}/{{ __fleet_job_id }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  when: __fleet_job_id is defined
+
+- name: Persist Kubernetes recovery state
+  ansible.builtin.copy:
+    content: "{{ {'schema_version': 1, 'report_type': 'kubernetes', 'hostname': inventory_hostname, 'phase': fleet_kubernetes_phase, 'node': kubernetes_resolved_node_name, 'node_uid': kubernetes_node_uid | default(''), 'context': kubernetes_context | default('current context'), 'originally_unschedulable': kubernetes_node_was_unschedulable} | to_json }}"
+    dest: "{{ __fleet_results_dir }}/{{ __fleet_job_id }}/kubernetes_{{ inventory_hostname }}.json"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+  when: __fleet_job_id is defined

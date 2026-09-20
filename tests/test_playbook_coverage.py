@@ -10,6 +10,7 @@ from backend.services.ansible_runner import ALLOWED_PLAYBOOKS
 ROOT = Path(__file__).parents[1]
 PLAYBOOK_DIR = ROOT / "playbooks"
 ACCESS_PLAYBOOKS = {
+    "access_inspect.yml",
     "bulk_password_reset.yml",
     "change_password.yml",
     "manage_sudoers.yml",

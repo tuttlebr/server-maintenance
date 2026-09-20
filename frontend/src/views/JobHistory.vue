@@ -10,6 +10,7 @@
           <option value="failed">Failed</option>
           <option value="running">Running</option>
           <option value="pending">Pending</option>
+          <option value="cancelled">Cancelled</option><option value="cancelling">Cancelling</option><option value="recovery_required">Recovery required</option>
         </select>
         <button class="btn btn-ghost btn-sm" aria-label="Refresh job list" @click="load">
           <i class="fas fa-sync-alt" aria-hidden="true"></i> Refresh
@@ -40,11 +41,11 @@
               <td>{{ job.triggered_by }}</td>
               <td>{{ formatTime(job.created_at) }}</td>
               <td>
-                <i
+                <button type="button" class="btn btn-ghost btn-sm btn-icon" :aria-label="`${expanded === job.job_id ? 'Collapse' : 'Expand'} ${operationLabel(job.playbook)} details`" :aria-expanded="expanded === job.job_id" @click.stop="toggleExpand(job.job_id)"><i
                   :class="['fas', expanded === job.job_id ? 'fa-chevron-up' : 'fa-chevron-down']"
                   :aria-label="expanded === job.job_id ? 'Collapse details' : 'Expand details'"
                   style="color: var(--text-secondary)"
-                ></i>
+                aria-hidden="true"></i></button>
               </td>
             </tr>
             <tr v-if="job.recap && expanded !== job.job_id" style="cursor: pointer" @click="toggleExpand(job.job_id)">
@@ -55,6 +56,11 @@
             <tr v-if="expanded === job.job_id">
               <td colspan="7" style="padding: 0">
                 <div class="job-detail">
+                  <p v-if="expandedJob?.error_summary" role="status" class="callout callout-danger">{{ expandedJob.error_summary }}</p>
+                  <p v-if="expandedJob?.status === 'recovery_required'" class="callout callout-warn">Remote state needs verification. Review the log and Kubernetes recovery details, repair the host if needed, then run Verify recovery in <router-link to="/operations">Operations</router-link>. Resume Kubernetes scheduling separately when ready.</p>
+                  <p v-if="expandedJob && ['pending', 'running', 'cancelling'].includes(expandedJob.status)">Phase: {{ expandedJob.phase?.replaceAll('_', ' ') }}. <button v-if="canCancel(expandedJob)" class="btn btn-ghost btn-sm" :disabled="cancelling" @click="requestCancel(expandedJob)">Cancel {{ expandedJob.status === 'pending' ? 'queued job' : 'inspection' }}</button><span v-else>Running changes finish under supervision; they cannot be safely cancelled.</span></p>
+                  <ul v-if="expandedJob?.device_results?.length" class="outcomes" aria-label="Per-device outcomes"><li v-for="result in expandedJob.device_results" :key="result.hostname"><strong>{{ result.hostname }}</strong>: {{ result.status.replaceAll('_', ' ') }}</li></ul>
+                  <router-link v-if="expandedJob?.playbook === 'package_preview.yml' && expandedJob.status === 'success'" :to="`/operations?preview=${expandedJob.job_id}`" class="btn btn-primary btn-sm">Review and apply this preview</router-link>
                   <div v-if="job.recap" class="job-recap-expanded"><pre>{{ job.recap }}</pre></div>
                   <section v-if="expandedJob?.result_artifacts?.length" class="result-grid" aria-label="Structured operation results">
                     <article v-for="result in expandedJob.result_artifacts" :key="`${result.report_type}-${result.hostname}`" class="result-card">
@@ -62,7 +68,11 @@
                         <span>{{ resultTitle(result.report_type) }}</span>
                         <strong>{{ result.hostname }}</strong>
                       </div>
-                      <template v-if="result.report_type === 'assessment'">
+                      <template v-if="result.report_type === 'packages'"><p>{{ result.changes?.length || 0 }} transaction entries. Installation rechecks this plan; changed plans require a new preview.</p><pre class="structured-text">{{ result.changes?.join('\n') || 'No package updates proposed.' }}</pre></template>
+                      <template v-else-if="result.report_type === 'kubernetes'"><dl><dt>Phase</dt><dd>{{ result.phase }}</dd><dt>Node</dt><dd>{{ result.node }}</dd><dt>Context</dt><dd>{{ result.context }}</dd><dt>Originally cordoned</dt><dd>{{ result.originally_unschedulable ? 'Yes' : 'No' }}</dd></dl></template>
+                      <template v-else-if="result.report_type === 'services'"><p>{{ result.action === 'status' ? 'Observed services' : `${result.action}: ${result.service}` }}</p><details :open="result.action !== 'status'"><summary>Service states</summary><div class="service-results"><table><thead><tr><th>Unit</th><th>State</th><th>Startup</th></tr></thead><tbody><tr v-for="unit in Object.values(result.services || {}).sort((a,b) => a.name.localeCompare(b.name))" :key="unit.name"><td>{{ unit.name }}</td><td>{{ unit.state }}</td><td>{{ unit.status }}</td></tr></tbody></table></div></details></template>
+                      <template v-else-if="result.report_type === 'accounts'"><p>{{ result.accounts?.length || 0 }} account observations. <router-link to="/access">Review per-device privileges in Access</router-link>.</p><ul><li v-for="account in result.accounts" :key="account.username">{{ account.username }}: {{ account.present ? 'present' : 'absent' }}</li></ul></template>
+                      <template v-else-if="result.report_type === 'assessment'">
                         <div class="result-metrics">
                           <span class="metric-good"><strong>{{ result.summary?.pass_count || 0 }}</strong> passed</span>
                           <span class="metric-warn"><strong>{{ result.summary?.warning_count || 0 }}</strong> warnings</span>
@@ -155,11 +165,16 @@
 import { ref, watch, onMounted, onUnmounted, nextTick, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AnsiToHtml from "ansi-to-html";
-import { getJobs, getJob, streamJobOutput } from "../api.js";
+import { getJobs, getJob, streamJobOutput, cancelJob } from "../api.js";
 import StatusBadge from "../components/StatusBadge.vue";
 import { formatTargetList, operationLabel } from "../utils/devices.js";
+import { formatLongTime } from "../utils/time.js";
 
 const jobs = ref([]);
+const cancelling = ref(false);
+let refreshTimer;
+function canCancel(job) { return !job.playbook.startsWith("reachy.") && (job.status === "pending" || (job.status === "running" && job.execution_kind === "read_only")); }
+async function requestCancel(job) { cancelling.value = true; try { await cancelJob(job.job_id); expandedJob.value = await getJob(job.job_id); await load(); } catch(e) { window.$toast?.error("Could not cancel job", e); } finally { cancelling.value = false; } }
 const route = useRoute();
 const router = useRouter();
 const filterStatus = ref("");
@@ -249,18 +264,22 @@ async function startStream(jobId) {
   await streamJobOutput(jobId, {
     signal: streamController.signal,
     onLine: (line) => {
+      if (expanded.value !== jobId) return;
       liveOutput.value += line + "\n";
       scrollIfNeeded();
     },
     onDone: async () => {
+      if (expanded.value !== jobId) return;
       streaming.value = false;
       streamController = null;
       await load();
       try {
-        expandedJob.value = await getJob(jobId);
+        const result = await getJob(jobId);
+        if (expanded.value === jobId) expandedJob.value = result;
       } catch { /* ignore */ }
     },
     onError: (err) => {
+      if (expanded.value !== jobId) return;
       streaming.value = false;
       streamController = null;
       window.$toast?.error("Stream disconnected", err);
@@ -271,27 +290,24 @@ async function startStream(jobId) {
 async function toggleExpand(jobId) {
   const selected = expanded.value === jobId ? undefined : jobId;
   await router.replace({ query: { ...route.query, job: selected } });
-  if (expanded.value === jobId) {
-    expanded.value = null;
-    expandedJob.value = null;
-    liveOutput.value = "";
-    stopStream();
-    return;
-  }
+}
 
-  expanded.value = jobId;
+async function showJob(jobId) {
+  stopStream();
+  expanded.value = typeof jobId === 'string' ? jobId : null;
   expandedJob.value = null;
   liveOutput.value = "";
   autoScroll.value = true;
-
-  const job = jobs.value.find((j) => j.job_id === jobId);
-  if (job && (job.status === "running" || job.status === "pending")) {
-    startStream(jobId);
-  } else {
-    try {
-      expandedJob.value = await getJob(jobId);
-      nextTick(scrollIfNeeded);
-    } catch (e) {
+  if (!expanded.value) return;
+  try {
+    const job = await getJob(jobId);
+    if (expanded.value !== jobId) return;
+    expandedJob.value = job;
+    if (!jobs.value.some((item) => item.job_id === jobId)) jobs.value.unshift(job);
+    if (['running', 'pending', 'cancelling'].includes(job.status)) startStream(jobId);
+    else nextTick(scrollIfNeeded);
+  } catch (e) {
+    if (expanded.value === jobId) {
       window.$toast?.error("Couldn't load job details", e);
     }
   }
@@ -304,13 +320,11 @@ function askAboutJob(job) {
 }
 
 function formatTime(dt) {
-  if (!dt) return "--";
-  const str = String(dt).endsWith("Z") || String(dt).includes("+") ? dt : dt + "Z";
-  return new Date(str).toLocaleString("en-US", { timeZone: "America/Los_Angeles" });
+  return formatLongTime(dt) || "--";
 }
 
 function resultTitle(type) {
-  return ({ assessment: "Maintenance assessment", driver: "Driver update", gpu: "GPU usage", storage: "Storage analysis" })[type] || "Result";
+  return ({ assessment: "Maintenance assessment", driver: "Driver update", gpu: "GPU usage", storage: "Storage analysis", packages: "Package preview", services: "System services", accounts: "Account state", kubernetes: "Kubernetes recovery" })[type] || "Result";
 }
 
 function storagePressure(result) {
@@ -321,13 +335,14 @@ function topStorageOwners(result) {
   return (result?.mounts || []).flatMap((mount) => mount?.entries || []).sort((a, b) => Number(b.size_mb || 0) - Number(a.size_mb || 0)).slice(0, 3);
 }
 
-onUnmounted(stopStream);
+onUnmounted(() => { stopStream(); clearInterval(refreshTimer); });
 watch(filterStatus, load);
-onMounted(load);
+watch(() => route.query.job, showJob);
+onMounted(async () => { await load(); await showJob(route.query.job); refreshTimer = setInterval(async () => { await load(); if (expanded.value) { const id = expanded.value; try { const job = await getJob(id); if (expanded.value === id) { expandedJob.value = job; if (!jobs.value.some(j => j.job_id === id)) jobs.value.unshift(job); } } catch { /* preserve the last observation on a transient failure */ } } }, 5000); });
 </script>
 
 <style scoped>
-.job-detail {
+.structured-text { white-space:pre-wrap; max-height:350px; overflow:auto; overflow-wrap:anywhere; }.service-results { max-height:350px; overflow:auto; }.outcomes { display:flex; flex-wrap:wrap; gap:8px 24px; }.job-detail {
   padding: var(--space-sm);
   background-color: var(--surface-light);
   border-top: 1px solid var(--border-subtle);

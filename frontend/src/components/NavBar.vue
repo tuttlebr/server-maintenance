@@ -7,7 +7,7 @@
       </router-link>
 
       <div class="navbar-links">
-        <router-link v-for="item in navigation" :key="item.to" :to="item.to" class="nav-link">
+        <router-link v-for="item in navigation" :key="item.to" :to="item.to" :aria-label="item.label" :title="item.label" class="nav-link">
           <i :class="['fas', item.icon]" aria-hidden="true"></i>
           <span>{{ item.label }}</span>
         </router-link>
@@ -20,12 +20,12 @@
             class="nav-link active-jobs-trigger"
             :aria-expanded="showJobs"
             aria-haspopup="true"
-            :aria-label="`Active jobs: ${activeJobs.length}`"
+            :aria-label="store.activeJobCount == null ? 'Activity state unavailable' : `Active jobs: ${store.activeJobCount}`"
             @click.stop="showJobs = !showJobs"
           >
             <span class="active-jobs-icon">
               <i class="fas fa-bolt" aria-hidden="true"></i>
-              <span v-if="activeJobs.length" class="active-jobs-badge" aria-hidden="true">{{ activeJobs.length }}</span>
+              <span v-if="store.activeJobCount" class="active-jobs-badge" aria-hidden="true">{{ store.activeJobCount }}</span>
             </span>
             <span>Active</span>
           </button>
@@ -37,7 +37,7 @@
             <router-link
               v-for="job in activeJobs"
               :key="job.job_id"
-              to="/activity"
+              :to="`/activity?job=${job.job_id}`"
               class="active-jobs-item"
               @click="showJobs = false"
             >
@@ -47,7 +47,7 @@
                 <small>{{ formatTargetList(job.target_devices) }} · {{ relativeTime(job.created_at) }}</small>
               </span>
             </router-link>
-            <div v-if="!activeJobs.length" class="active-jobs-empty">No jobs running.</div>
+            <div v-if="store.error" class="active-jobs-empty">Activity could not be refreshed. {{ store.activeJobCount == null ? 'State is unavailable.' : 'Showing the last observation.' }}</div><div v-else-if="store.activeJobCount == null" class="active-jobs-empty">Loading activity…</div><div v-else-if="store.activeJobCount === 0" class="active-jobs-empty">No jobs running.</div>
             <router-link to="/activity" class="active-jobs-footer" @click="showJobs = false">
               View all activity
             </router-link>

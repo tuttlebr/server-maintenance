@@ -17,7 +17,7 @@ const props = defineProps({
   withTooltip: { type: Boolean, default: false },
 });
 
-const ACTIVE_STATUSES = new Set(["running", "pending", "scanning", "starting"]);
+const ACTIVE_STATUSES = new Set(["running", "pending", "cancelling", "scanning", "starting"]);
 
 const badgeClass = computed(() => {
   const map = {
@@ -25,7 +25,7 @@ const badgeClass = computed(() => {
     offline: "badge-outline",
     unknown: "badge-outline",
     success: "badge-green",
-    failed: "badge-red",
+    failed: "badge-red", recovery_required: "badge-red", cancelling: "badge-blue",
     running: "badge-blue",
     pending: "badge-outline",
     scanning: "badge-blue",
@@ -39,7 +39,7 @@ const dotClass = computed(() => {
     offline: "dot-red",
     unknown: "dot-gray",
     success: "dot-green",
-    failed: "dot-red",
+    failed: "dot-red", recovery_required: "dot-red", cancelling: "dot-blue",
     running: "dot-blue",
     pending: "dot-orange",
     scanning: "dot-blue",
@@ -54,6 +54,8 @@ const DESCRIPTIONS = {
   success: "The job finished without errors.",
   failed: "The job hit an error. Open the job to read the log and (optionally) run AI analysis.",
   running: "Job is in progress.",
+  recovery_required: "The change did not complete with verified state. Inspect the job and verify recovery before further maintenance.",
+  cancelling: "Waiting for execution to stop.",
   pending: "Job is queued and will start shortly.",
   scanning: "A fleet scan is in progress.",
 };
@@ -63,7 +65,7 @@ const description = computed(() => DESCRIPTIONS[props.status] || "");
 const isActive = computed(() => ACTIVE_STATUSES.has(props.status));
 
 const label = computed(() =>
-  props.status.charAt(0).toUpperCase() + props.status.slice(1)
+  props.status.charAt(0).toUpperCase() + props.status.slice(1).replaceAll("_", " ")
 );
 </script>
 

@@ -4,7 +4,6 @@
   become: true
   gather_facts: true
   serial: "{{ maintenance_batch_size | default(1) }}"
-  force_handlers: true
   tasks:
     - name: Validate supported package manager
       ansible.builtin.assert:
@@ -12,27 +11,48 @@
           - ansible_facts['os_family'] in ['Debian', 'RedHat']
         fail_msg: "System package updates support Debian and Red Hat families only."
 
+    - name: Recompute the proposed transaction before changing the host
+      ansible.builtin.include_tasks: tasks/package_plan.yml
+
+    - name: Require a matching reviewed package preview
+      ansible.builtin.assert:
+        that:
+          - fleet_approved_package_plans is defined
+          - inventory_hostname in fleet_approved_package_plans
+          - fleet_package_fingerprint == fleet_approved_package_plans[inventory_hostname]
+        fail_msg: "Package changes differ from the reviewed preview. Run and review a new package preview."
+
     - name: Prepare Kubernetes member for system update
       ansible.builtin.include_tasks: tasks/kubernetes_prepare.yml
 
+    - name: Recheck package drift after draining workloads
+      ansible.builtin.include_tasks: tasks/package_plan.yml
+
+    - name: Require the approved plan immediately before applying it
+      ansible.builtin.assert:
+        that: fleet_package_fingerprint == fleet_approved_package_plans[inventory_hostname]
+        fail_msg: "Package state changed during drain. The node remains cordoned; review a fresh preview and verify recovery."
+
     - name: Apply Debian-family package updates
       ansible.builtin.apt:
-        upgrade: dist
-        update_cache: true
-        cache_valid_time: 3600
+        name: "{{ fleet_package_targets }}"
+        state: present
+        update_cache: false
+        fail_on_autoremove: true
         autoremove: false
         autoclean: false
         install_recommends: false
       register: debian_update
-      when: ansible_facts['os_family'] == 'Debian'
+      when: ansible_facts['os_family'] == 'Debian' and fleet_package_targets | length > 0
 
     - name: Apply Red Hat-family package updates
       ansible.builtin.dnf:
-        name: "*"
-        state: latest
-        update_cache: true
+        name: "{{ fleet_package_targets }}"
+        state: present
+        allowerasing: false
+        update_cache: false
       register: redhat_update
-      when: ansible_facts['os_family'] == 'RedHat'
+      when: ansible_facts['os_family'] == 'RedHat' and fleet_package_targets | length > 0
 
     - name: Check whether a reboot is required
       ansible.builtin.stat:

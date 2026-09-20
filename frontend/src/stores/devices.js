@@ -1,13 +1,15 @@
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { ref } from "vue";
 import { useDocumentVisibility, useIntervalFn } from "@vueuse/core";
-import { getDevices, getJobs } from "../api.js";
+import { getDevices, getJobs, getJobSummary } from "../api.js";
 
 // Shared fleet state. Poll only while the tab is visible so navigation stays
 // current without multiplying requests across screens.
 export const useDevicesStore = defineStore("devices", () => {
   const devices = ref([]);
   const recentJobs = ref([]);
+  const activeJobs = ref([]);
+  const activeJobCount = ref(null);
   const lastUpdated = ref(null);
   const loading = ref(false);
   const hasLoadedOnce = ref(false);
@@ -20,12 +22,16 @@ export const useDevicesStore = defineStore("devices", () => {
     error.value = null;
     inFlight = (async () => {
       try {
-        const [deviceRows, jobs] = await Promise.all([
+        const [deviceRows, jobs, active, summary] = await Promise.all([
           getDevices(),
-          getJobs({ limit: 10 }).catch(() => []),
+          getJobs({ limit: 10 }),
+          getJobs({ status: "active", limit: 200 }),
+          getJobSummary(),
         ]);
         devices.value = deviceRows;
         recentJobs.value = jobs;
+        activeJobs.value = active;
+        activeJobCount.value = summary.active_count;
         lastUpdated.value = new Date();
         hasLoadedOnce.value = true;
       } catch (caught) {
@@ -53,12 +59,9 @@ export const useDevicesStore = defineStore("devices", () => {
   }
   function stop() { pause(); }
 
-  const activeJobs = computed(() =>
-    recentJobs.value.filter((job) => job.status === "running" || job.status === "pending")
-  );
 
   return {
-    devices, recentJobs, activeJobs, lastUpdated, loading, hasLoadedOnce,
+    devices, recentJobs, activeJobs, activeJobCount, lastUpdated, loading, hasLoadedOnce,
     error, refresh, start, stop,
   };
 });

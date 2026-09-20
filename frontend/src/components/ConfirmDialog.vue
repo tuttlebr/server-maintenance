@@ -101,6 +101,7 @@ watch(
 }
 
 .confirm-typed code {
+  text-transform: none;
   font-family: var(--font-mono, "JetBrains Mono", "Courier New", monospace);
   background: var(--surface-lighter);
   padding: 2px 6px;

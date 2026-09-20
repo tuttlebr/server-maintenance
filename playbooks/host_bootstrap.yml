@@ -1,6 +1,16 @@
 ---
+- name: Validate bootstrap platform before making changes
+  hosts: managed_hosts
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - name: Require Ubuntu for the bootstrap workflow
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+        fail_msg: "Bootstrap supports Ubuntu only. No bootstrap changes have been made."
+
 - import_playbook: manage_groups.yml
 - import_playbook: admin_setup.yml
 - import_playbook: install_docker.yml
 - import_playbook: host_facts.yml
-

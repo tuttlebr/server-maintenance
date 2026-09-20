@@ -27,6 +27,12 @@ class Device(Base):
     facts_json = Column(Text, default="{}")
     annotations_json = Column(Text, default="{}")
     discovered_at = Column(DateTime)
+    maintenance_mode = Column(String, default="unknown")
+    kubernetes_context = Column(String)
+    kubernetes_node_name = Column(String)
+    facts_stale = Column(Boolean, default=True)
+    recovery_required = Column(Boolean, default=False)
+    recovery_reason = Column(Text)
     ansible_user = Column(String)
     # Keep the deployed column names while making the ciphertext-only storage
     # contract explicit in the ORM. Plaintext credentials never belong here.
@@ -118,6 +124,12 @@ class UserHostAssociation(Base):
     user_id = Column(Integer, ForeignKey("managed_users.id", ondelete="CASCADE"), primary_key=True)
     host_id = Column(Integer, ForeignKey("hosts.id", ondelete="CASCADE"), primary_key=True)
     provisioned_at = Column(DateTime, default=func.now())
+    groups = Column(String)
+    shell = Column(String)
+    managed_sudo = Column(Boolean, nullable=True)
+    sudo_policy = Column(Text)
+    observed_at = Column(DateTime)
+    state = Column(String, default="unverified")
 
 
 class Job(Base):
@@ -138,9 +150,26 @@ class Job(Base):
     recap = Column(Text)  # PLAY RECAP summary
     created_at = Column(DateTime, default=func.now())
 
+    execution_kind = Column(String, default="read_only")
+    phase = Column(String, default="queued")
+    outcomes_json = Column(Text, default="[]")
+    request_key = Column(String, unique=True, nullable=True)
+    request_fingerprint = Column(String)
+
     @property
     def target_devices(self) -> str | None:
         return self.target_hosts
+
+    @property
+    def device_results(self) -> list[dict]:
+        return json.loads(self.outcomes_json or "[]")
+
+
+class DeviceReservation(Base):
+    __tablename__ = "device_reservations"
+
+    device_id = Column(Integer, ForeignKey("hosts.id", ondelete="CASCADE"), primary_key=True)
+    job_id = Column(String, ForeignKey("jobs.job_id", ondelete="CASCADE"), nullable=False)
 
 
 class ContextDocument(Base):

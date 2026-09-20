@@ -1,0 +1,54 @@
+---
+- name: Verify filesystem configuration
+  ansible.builtin.command: findmnt --verify --tab-file /etc/fstab
+  changed_when: false
+
+- name: Read required fstab mount targets
+  ansible.builtin.shell: >-
+    awk '$1 !~ /^[[:space:]]*#/ && $1 != "" && $3 != "swap" && NF >= 4
+    && $4 !~ /(^|,)(noauto|nofail|x-systemd[.]automount)(,|$)/ {print $2}' /etc/fstab
+  register: fleet_required_mounts
+  changed_when: false
+
+- name: Read currently mounted targets
+  ansible.builtin.command: findmnt -rno TARGET
+  register: fleet_current_mounts
+  changed_when: false
+
+- name: Require all mandatory filesystems to be mounted
+  ansible.builtin.assert:
+    that: fleet_required_mounts.stdout_lines | difference(fleet_current_mounts.stdout_lines) | length == 0
+    fail_msg: "Required mounts are missing: {{ fleet_required_mounts.stdout_lines | difference(fleet_current_mounts.stdout_lines) | join(', ') }}"
+
+- name: Read failed systemd units
+  ansible.builtin.command: systemctl --failed --no-pager --plain
+  register: fleet_failed_units
+  changed_when: false
+  when: ansible_facts.service_mgr == 'systemd'
+
+- name: Check systemd health
+  ansible.builtin.command: systemctl is-system-running
+  register: fleet_systemd_health
+  failed_when: false
+  changed_when: false
+  when: ansible_facts.service_mgr == 'systemd'
+
+- name: Require healthy system services
+  ansible.builtin.assert:
+    that: fleet_systemd_health.rc == 0 and fleet_systemd_health.stdout | trim == 'running'
+    fail_msg: "System services need recovery: {{ fleet_failed_units.stdout }}"
+  when: ansible_facts.service_mgr == 'systemd'
+
+- name: Verify Debian package configuration is complete
+  ansible.builtin.command: dpkg --audit
+  register: fleet_package_audit
+  changed_when: false
+  failed_when: fleet_package_audit.rc != 0 or fleet_package_audit.stdout | trim | length > 0
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Verify discovered NVIDIA GPUs respond
+  ansible.builtin.command: nvidia-smi --query-gpu=uuid,driver_version --format=csv,noheader
+  register: fleet_gpu_health
+  changed_when: false
+  failed_when: fleet_gpu_health.rc != 0 or fleet_gpu_health.stdout | trim | length == 0
+  when: "'nvidia_gpu' in group_names"

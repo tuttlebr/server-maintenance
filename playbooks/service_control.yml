@@ -1,0 +1,70 @@
+---
+- name: Inspect or control a system service
+  hosts: managed_hosts
+  become: true
+  gather_facts: true
+  serial: 1
+  vars:
+    service_action: status
+    service_name: ''
+  tasks:
+    - name: Require systemd and a supported action
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.service_mgr == 'systemd'
+          - service_action in ['status', 'started', 'stopped', 'restarted']
+
+    - name: Read installed services
+      ansible.builtin.service_facts:
+
+    - name: Validate service and protect control-plane dependencies
+      ansible.builtin.assert:
+        that:
+          - service_name is match('^[A-Za-z0-9][A-Za-z0-9_.@:-]{0,120}\.service$')
+          - service_name in ansible_facts.services
+          - ansible_facts.services[service_name].status | default('') != 'alias'
+          - service_name is not match('^(ssh.*|sshd.*|systemd.*|dbus.*|NetworkManager.*|network.*|networking|docker.*|containerd.*|kubelet|k3s.*|rke2.*|snap.microk8s.*|crio.*|cri-o.*|fleet.*|firewalld|ufw)\.service$')
+        fail_msg: "Choose an installed service. SSH, networking, container runtimes and cluster/control-plane services are protected."
+      when: service_action != 'status'
+
+    - name: Prepare selected service maintenance
+      ansible.builtin.include_tasks: tasks/kubernetes_prepare.yml
+      when: service_action != 'status'
+
+    - name: Set requested service state
+      ansible.builtin.systemd_service:
+        name: "{{ service_name }}"
+        state: "{{ service_action }}"
+      when: service_action != 'status'
+
+    - name: Read resulting service state
+      ansible.builtin.service_facts:
+
+    - name: Verify the requested state
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services[service_name].state == ('stopped' if service_action == 'stopped' else 'running')
+        fail_msg: "The service did not reach the requested state. Inspect its journal and verify recovery."
+      when: service_action != 'status'
+
+    - name: Create private service results directory
+      ansible.builtin.file:
+        path: "{{ __fleet_results_dir }}/{{ __fleet_job_id }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      become: false
+      when: __fleet_job_id is defined
+
+    - name: Save observed service states
+      ansible.builtin.copy:
+        content: "{{ {'schema_version': 1, 'report_type': 'services', 'hostname': inventory_hostname, 'action': service_action, 'service': service_name, 'services': ansible_facts.services} | to_json }}"
+        dest: "{{ __fleet_results_dir }}/{{ __fleet_job_id }}/services_{{ inventory_hostname }}.json"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+      when: __fleet_job_id is defined
+
+  handlers:
+    - name: Restore Kubernetes node scheduling
+      ansible.builtin.include_tasks: tasks/kubernetes_restore.yml

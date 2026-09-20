@@ -27,16 +27,24 @@
     - name: Discover Kubernetes membership from the controller
       ansible.builtin.include_tasks: tasks/kubernetes_discover.yml
 
-    - name: Require controller access for a drain state change
-      ansible.builtin.fail:
-        msg: >-
-          Kubernetes could not be reached from the Ansible controller.
-          Verify kubeconfig, context, API connectivity, and RBAC. Use
-          -e force=true only for emergency maintenance. {{ kubernetes_api_error }}
-      when:
-        - drain_action != 'status'
-        - not kubernetes_api_accessible | bool
-        - not (force | default(false) | bool)
+    - name: Require explicit Kubernetes maintenance configuration for changes
+      ansible.builtin.assert:
+        that:
+          - fleet_maintenance_mode | default('unknown') == 'kubernetes'
+          - kubernetes_api_accessible | bool
+          - kubernetes_node_found | bool
+        fail_msg: "Verify the device's cluster context and node identity before changing scheduling."
+      when: drain_action != 'status'
+
+    - name: Persist recovery information before changing scheduling
+      ansible.builtin.include_tasks: tasks/kubernetes_report.yml
+      vars:
+        fleet_kubernetes_phase: "{{ 'preparing_drain' if drain_action == 'drain' else 'preparing_resume' }}"
+      when: drain_action != 'status'
+
+    - name: Verify health and readiness before resuming
+      ansible.builtin.include_tasks: tasks/kubernetes_ready.yml
+      when: drain_action == 'resume'
 
     - name: Drain Kubernetes node
       ansible.builtin.include_tasks: tasks/kubernetes_drain.yml
@@ -61,6 +69,12 @@
       when:
         - drain_action == 'resume'
         - kubernetes_node_found | bool
+
+    - name: Persist final scheduling action
+      ansible.builtin.include_tasks: tasks/kubernetes_report.yml
+      vars:
+        fleet_kubernetes_phase: "{{ 'drained' if drain_action == 'drain' else 'resumed' }}"
+      when: drain_action != 'status'
 
     - name: Report drain status
       ansible.builtin.debug:

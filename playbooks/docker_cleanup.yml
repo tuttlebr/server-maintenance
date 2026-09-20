@@ -21,6 +21,29 @@
       changed_when: false
       when: docker_cli.rc == 0
 
+    - name: Check if nerdctl is installed
+      command: which nerdctl
+      register: nerdctl_cli
+      failed_when: false
+      changed_when: false
+
+    - name: Check whether containerd is running
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - containerd
+      register: containerd_service
+      failed_when: false
+      changed_when: false
+      when:
+        - nerdctl_cli.rc | default(1) == 0
+
+    - name: Require at least one available container runtime
+      ansible.builtin.assert:
+        that: (docker_cli.rc == 0 and docker_service.rc | default(1) == 0) or (nerdctl_cli.rc == 0 and containerd_service.rc | default(1) == 0)
+        fail_msg: "No supported container runtime is available for cleanup."
+
     - name: Prune unused Docker images
       command: docker image prune -a -f
       register: docker_image_prune
@@ -45,32 +68,11 @@
         - docker_cli.rc == 0
         - docker_service.rc | default(1) == 0
 
-    - name: Check if nerdctl is installed
-      command: which nerdctl
-      register: nerdctl_cli
-      failed_when: false
-      changed_when: false
-      when: "'dgx_workstation' in group_names"
-
-    - name: Check whether containerd is running
-      ansible.builtin.command:
-        argv:
-          - systemctl
-          - is-active
-          - containerd
-      register: containerd_service
-      failed_when: false
-      changed_when: false
-      when:
-        - "'dgx_workstation' in group_names"
-        - nerdctl_cli.rc | default(1) == 0
-
     - name: Prune unused containerd images in k8s namespace
       command: nerdctl --namespace k8s.io image prune -f
       register: containerd_image_prune
       changed_when: "'Total reclaimed space: 0B' not in containerd_image_prune.stdout"
       when:
-        - "'dgx_workstation' in group_names"
         - nerdctl_cli.rc | default(1) == 0
         - containerd_service.rc | default(1) == 0
 

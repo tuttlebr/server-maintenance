@@ -16,15 +16,22 @@
           - target_username is match('^[a-z_][a-z0-9_-]{0,31}$')
         fail_msg: "Unsafe username: {{ target_username }}"
 
+    - name: Protect the active automation account
+      ansible.builtin.assert:
+        that:
+          - target_username not in ['root', ansible_user | default(''), admin_username | default('')]
+
     - name: Check if sudoers file exists
       stat:
         path: "/etc/sudoers.d/{{ target_username }}"
       register: sudoers_file
 
-    - name: Remove sudoers file
-      file:
+    - name: Remove only the managed sudo grant
+      ansible.builtin.lineinfile:
         path: "/etc/sudoers.d/{{ target_username }}"
+        line: "{{ target_username }} ALL=(ALL) NOPASSWD:ALL"
         state: absent
+        validate: "/usr/sbin/visudo -cf %s"
       when: sudoers_file.stat.exists
 
     - name: Report result
@@ -32,3 +39,8 @@
         msg: >-
           {{ 'Removed' if sudoers_file.stat.exists else 'No' }}
           sudoers entry for {{ target_username }} on {{ inventory_hostname }}
+
+    - name: Observe resulting accounts
+      ansible.builtin.include_tasks: tasks/account_report.yml
+      vars:
+        fleet_account_names: "{{ [target_username] }}"

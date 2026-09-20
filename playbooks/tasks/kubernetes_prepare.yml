@@ -1,115 +1,46 @@
 ---
-- name: Check managed host for Kubernetes membership indicators
-  ansible.builtin.stat:
-    path: "{{ item }}"
-    follow: false
-    get_attributes: false
-    get_checksum: false
-    get_mime: false
-  loop:
-    - /var/lib/kubelet/config.yaml
-    - /etc/kubernetes/kubelet.conf
-    - /etc/rancher/k3s/k3s.yaml
-    - /var/lib/rancher/k3s/agent/etc/kubelet.conf
-    - /etc/rancher/rke2/rke2.yaml
-    - /var/lib/rancher/rke2/agent/etc/kubelet.conf
-    - /var/snap/microk8s/common/var/lib/kubelet/config.yaml
-  register: kubernetes_membership_indicators
-  changed_when: false
+- name: Inspect local membership evidence
+  ansible.builtin.include_tasks: kubernetes_indicators.yml
 
-- name: Record expected Kubernetes membership
+- name: Require an explicit maintenance mode
+  ansible.builtin.assert:
+    that:
+      - fleet_maintenance_mode | default('unknown') in ['standalone', 'kubernetes']
+      - fleet_maintenance_mode != 'standalone' or not kubernetes_membership_expected | bool
+    fail_msg: "Configure the device's maintenance mode. A host with Kubernetes membership files cannot be treated as standalone."
+
+- name: Initialize standalone scheduling state
   ansible.builtin.set_fact:
-    kubernetes_membership_expected: >-
-      {{
-        kubernetes_membership_required
-        if kubernetes_membership_required is defined
-        else
-        (
-          kubernetes_membership_indicators.results
-          | selectattr('stat.exists', 'defined')
-          | selectattr('stat.exists')
-          | list
-          | length > 0
-        )
-      }}
-  changed_when: false
+    kubernetes_restore_required: false
+    kubernetes_node_found: false
 
-- name: Discover Kubernetes membership from the controller
-  ansible.builtin.include_tasks: kubernetes_discover.yml
+- name: Prepare a Kubernetes member
+  when: fleet_maintenance_mode == 'kubernetes'
+  block:
+    - name: Discover the selected cluster and node
+      ansible.builtin.include_tasks: kubernetes_discover.yml
 
-- name: Require controller access before disruptive maintenance
-  ansible.builtin.fail:
-    msg: >-
-      Kubernetes membership could not be checked from the Ansible controller for
-      {{ inventory_hostname }}. Verify the controller kubeconfig, context, API
-      connectivity, and RBAC. Use -e force=true only for emergency maintenance.
-      {{ kubernetes_api_error }}
-  when:
-    - not kubernetes_api_accessible | bool
-    - not (force | default(false) | bool)
+    - name: Require a unique node in an accessible cluster
+      ansible.builtin.assert:
+        that:
+          - kubernetes_api_accessible | bool
+          - kubernetes_node_found | bool
+        fail_msg: "Cannot safely drain this node. Verify Kubernetes context, node identity, API connectivity and RBAC. {{ kubernetes_api_error }}"
 
-- name: Warn when Kubernetes safety checks are bypassed
-  ansible.builtin.debug:
-    msg: >-
-      WARNING: Kubernetes membership and drain safety could not be verified for
-      {{ inventory_hostname }}. Continuing because force=true.
-      {{ kubernetes_api_error }}
-  when:
-    - not kubernetes_api_accessible | bool
-    - force | default(false) | bool
+    - name: Remember the original scheduling state
+      ansible.builtin.set_fact:
+        kubernetes_restore_required: "{{ not kubernetes_node_was_unschedulable | bool }}"
 
-- name: Refuse an unmatched host that appears to run Kubernetes
-  ansible.builtin.fail:
-    msg: >-
-      {{ inventory_hostname }} appears to be a Kubernetes node but did not match
-      any node in the selected controller context. Set kubernetes_node_name or
-      kubernetes_context correctly. Set kubernetes_membership_required=false only
-      when the local Kubernetes files are stale, or use -e force=true for an
-      emergency bypass.
-  when:
-    - kubernetes_api_accessible | bool
-    - kubernetes_membership_expected | bool
-    - not kubernetes_node_found | bool
-    - not (force | default(false) | bool)
+    - name: Record recovery information before draining
+      ansible.builtin.include_tasks: kubernetes_report.yml
+      vars:
+        fleet_kubernetes_phase: preparing_drain
 
-- name: Warn when an expected Kubernetes node is unmatched
-  ansible.builtin.debug:
-    msg: >-
-      WARNING: {{ inventory_hostname }} appears to run Kubernetes but is absent
-      from the selected context. Continuing because force=true.
-  when:
-    - kubernetes_api_accessible | bool
-    - kubernetes_membership_expected | bool
-    - not kubernetes_node_found | bool
-    - force | default(false) | bool
+    - name: Drain while respecting disruption budgets
+      ansible.builtin.include_tasks: kubernetes_drain.yml
 
-- name: Record whether scheduling must be restored
-  ansible.builtin.set_fact:
-    kubernetes_restore_required: >-
-      {{
-        kubernetes_node_found | bool
-        and not (kubernetes_node_was_unschedulable | bool)
-      }}
-  changed_when: false
-
-- name: Schedule Kubernetes state restoration
-  ansible.builtin.debug:
-    msg: >-
-      {{ kubernetes_resolved_node_name }} will be returned to its original
-      schedulable state after maintenance.
-  changed_when: kubernetes_restore_required | bool
-  notify: Restore Kubernetes node scheduling
-  when: kubernetes_node_found | bool
-
-- name: Drain Kubernetes member before maintenance
-  ansible.builtin.include_tasks: kubernetes_drain.yml
-  when: kubernetes_node_found | bool
-
-- name: Report non-Kubernetes maintenance target
-  ansible.builtin.debug:
-    msg: >-
-      {{ inventory_hostname }} does not match a node in the selected Kubernetes
-      context; continuing without a drain.
-  when:
-    - kubernetes_api_accessible | bool
-    - not kubernetes_node_found | bool
+    - name: Restore scheduling only after successful maintenance and verification
+      ansible.builtin.debug:
+        msg: "Scheduling is restored only when this play and its health checks succeed. Failure leaves the node cordoned for recovery."
+      changed_when: kubernetes_restore_required | bool
+      notify: Restore Kubernetes node scheduling

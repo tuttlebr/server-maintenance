@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from backend.database import Base
 from backend.models import Device, ManagedUser, UserHostAssociation
 from backend.services.ansible_runner import _apply_completion_action
+from backend.services.account_state import reconcile_accounts
 
 
 class UserJobCompletionTests(unittest.TestCase):
@@ -55,7 +56,11 @@ class UserJobCompletionTests(unittest.TestCase):
         })
         db = self.session_factory()
         managed = db.query(ManagedUser).filter_by(username="juser").one()
-        self.assertEqual(db.query(UserHostAssociation).filter_by(user_id=managed.id).count(), 1)
+        reconcile_accounts(db, [{"report_type":"accounts", "hostname":"node-01", "accounts":[{"username":"juser", "present":False}]}], ["node-01"])
+        placements = db.query(UserHostAssociation).filter_by(user_id=managed.id).order_by(UserHostAssociation.host_id).all()
+        self.assertEqual(len(placements), 2)
+        self.assertEqual(placements[0].state, "absent")
+        self.assertEqual(placements[1].state, "unverified")
         db.close()
 
 

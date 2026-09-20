@@ -9,7 +9,6 @@
       register: gpu_info
       failed_when: false
       changed_when: false
-      when: inventory_hostname in groups['nvidia_gpu']
 
     - name: Initialize DGX release facts
       ansible.builtin.set_fact:
@@ -128,6 +127,18 @@
       failed_when: false
       changed_when: false
 
+    - name: Check whether Docker is available
+      ansible.builtin.command: docker info --format '{{ '{{' }}.ServerVersion{{ '}}' }}'
+      register: fleet_docker_available
+      changed_when: false
+      failed_when: false
+
+    - name: Check whether nerdctl can access containerd
+      ansible.builtin.command: nerdctl --namespace k8s.io info
+      register: fleet_containerd_available
+      changed_when: false
+      failed_when: false
+
     - name: Check whether fwupd tooling is installed
       ansible.builtin.command:
         argv:
@@ -157,6 +168,13 @@
         get_mime: false
       register: reachy_mini_environment
       changed_when: false
+
+    - name: Inspect local Kubernetes membership indicators
+      ansible.builtin.include_tasks: tasks/kubernetes_indicators.yml
+
+    - name: Read installed package inventory
+      ansible.builtin.package_facts:
+        manager: auto
 
     - name: Discover Kubernetes membership from the controller
       ansible.builtin.include_tasks: tasks/kubernetes_discover.yml
@@ -194,6 +212,13 @@
           ip_address: "{{ ansible_facts['default_ipv4']['address'] | default('unknown') }}"
           os_version: "{{ os_info.stdout | default('unknown') }}"
           os_family: "{{ ansible_facts['os_family'] | default('unknown') }}"
+          docker_available: "{{ fleet_docker_available.rc == 0 }}"
+          containerd_available: "{{ fleet_containerd_available.rc == 0 }}"
+          distribution: "{{ ansible_facts.distribution }}"
+          service_manager: "{{ ansible_facts.service_mgr }}"
+          package_manager: "{{ ansible_facts.pkg_mgr }}"
+          nvidia_driver_package: "{{ ansible_facts.packages.keys() | select('match', '^nvidia-driver-[0-9]+(-server)?(-open)?$') | sort | first | default('') }}"
+          kubernetes_membership_expected: "{{ kubernetes_membership_expected }}"
           architecture: "{{ ansible_facts['architecture'] | default('unknown') }}"
           system_vendor: "{{ ansible_facts['system_vendor'] | default('unknown') }}"
           product_name: "{{ ansible_facts['product_name'] | default('unknown') }}"

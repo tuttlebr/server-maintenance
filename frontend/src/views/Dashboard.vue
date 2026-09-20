@@ -44,7 +44,7 @@
       </router-link>
       <router-link to="/activity" class="metric-card">
         <i class="fas fa-bolt metric-icon" aria-hidden="true"></i>
-        <div><strong>{{ store.activeJobs.length }}</strong><span>Active jobs</span></div>
+        <div><strong>{{ store.activeJobCount ?? "--" }}</strong><span>Active jobs</span></div>
       </router-link>
       <router-link to="/devices?attention=1" class="metric-card" :class="{ warning: attentionCount }">
         <i class="fas fa-triangle-exclamation metric-icon" aria-hidden="true"></i>
@@ -68,7 +68,7 @@
             <router-link to="/devices?attention=1">View devices</router-link>
           </div>
           <div v-if="attentionItems.length" class="attention-list">
-            <router-link v-for="item in attentionItems" :key="`${item.device.id}-${item.reason}`" :to="`/devices/${item.device.id}`" class="attention-row">
+            <router-link v-for="item in attentionItems.slice(0, 7)" :key="`${item.device.id}-${item.reason}`" :to="`/devices/${item.device.id}`" class="attention-row">
               <span :class="['status-symbol', item.severity]" aria-hidden="true"><i :class="['fas', item.icon]"></i></span>
               <span><strong>{{ item.device.name }}</strong><small>{{ item.reason }}</small></span>
               <i class="fas fa-chevron-right" aria-hidden="true"></i>
@@ -85,7 +85,7 @@
             <router-link to="/activity">View all</router-link>
           </div>
           <div v-if="recentJobs.length" class="activity-list">
-            <router-link v-for="job in recentJobs.slice(0, 6)" :key="job.job_id" to="/activity" class="activity-row">
+            <router-link v-for="job in recentJobs.slice(0, 6)" :key="job.job_id" :to="`/activity?job=${job.job_id}`" class="activity-row">
               <StatusBadge :status="job.status" />
               <span><strong>{{ operationLabel(job.playbook) }}</strong><small>{{ formatTargetList(job.target_devices) }}</small></span>
               <time>{{ relativeTime(job.created_at) }}</time>
@@ -124,12 +124,14 @@ const healthMessage = computed(() => {
 const attentionItems = computed(() => {
   const items = [];
   devices.value.forEach((device) => {
+    if (device.recovery_required) items.push({ device, reason: "Recovery verification required", severity: "danger", icon: "fa-triangle-exclamation" });
+    else if (device.facts_stale) items.push({ device, reason: "Facts need verification", severity: "warning", icon: "fa-satellite-dish" });
     if (device.status === "offline") items.push({ device, reason: "Device is offline", severity: "danger", icon: "fa-link-slash" });
     else if (device.status === "unknown") items.push({ device, reason: "No successful scan yet", severity: "muted", icon: "fa-circle-question" });
     if (device.reboot_required) items.push({ device, reason: "Reboot required", severity: "warning", icon: "fa-power-off" });
     if ((device.disk_root_percent || 0) >= 85) items.push({ device, reason: `Root storage is ${device.disk_root_percent}% full`, severity: "warning", icon: "fa-hard-drive" });
   });
-  return items.slice(0, 7);
+  return items;
 });
 const attentionCount = computed(() => new Set(attentionItems.value.map((item) => item.device.id)).size);
 

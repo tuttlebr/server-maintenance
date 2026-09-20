@@ -1,0 +1,27 @@
+---
+- name: Read account state and effective sudo policy
+  ansible.builtin.script:
+    cmd: "{{ playbook_dir }}/files/inspect_accounts.py {{ fleet_account_names | default([]) | to_json | quote }}"
+    executable: "{{ ansible_facts.python.executable | default('/usr/bin/python3') }}"
+  register: fleet_account_observations
+  changed_when: false
+  no_log: true
+
+- name: Create private job results directory
+  ansible.builtin.file:
+    path: "{{ __fleet_results_dir }}/{{ __fleet_job_id }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+  when: __fleet_job_id is defined
+
+- name: Save observed account state
+  ansible.builtin.copy:
+    content: "{{ {'schema_version': 1, 'report_type': 'accounts', 'hostname': inventory_hostname, 'accounts': fleet_account_observations.stdout | from_json} | to_json }}"
+    dest: "{{ __fleet_results_dir }}/{{ __fleet_job_id }}/accounts_{{ inventory_hostname }}.json"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+  no_log: true
+  when: __fleet_job_id is defined

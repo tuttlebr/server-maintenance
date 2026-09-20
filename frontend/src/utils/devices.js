@@ -38,6 +38,10 @@ export function formatTargetList(value) {
 }
 
 const OPERATION_LABELS = {
+  "package_preview.yml": "Preview package updates",
+  "service_control.yml": "System services",
+  "recovery_check.yml": "Verify recovery",
+  "access_inspect.yml": "Inspect accounts",
   "host_facts.yml": "Scan device",
   "maintenance_assessment.yml": "Assess maintenance readiness",
   "storage_analysis.yml": "Analyze storage",
@@ -49,7 +53,7 @@ const OPERATION_LABELS = {
   "driver_upgrade.yml": "Update NVIDIA drivers",
   "fabric_manager.yml": "Check Fabric Manager",
   "mig_management.yml": "Check MIG mode",
-  "host_drain.yml": "Check Kubernetes readiness",
+  "host_drain.yml": "Kubernetes scheduling",
   "firmware_inventory.yml": "Inspect firmware",
   "firmware_update.yml": "Update firmware",
   "reachy.health": "Check Reachy health",

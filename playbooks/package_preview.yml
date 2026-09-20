@@ -1,0 +1,36 @@
+---
+- name: Preview package updates without installing packages
+  hosts: managed_hosts
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Refresh Debian package metadata
+      ansible.builtin.apt:
+        update_cache: true
+      when: ansible_facts.os_family == 'Debian'
+
+    - name: Refresh Red Hat package metadata
+      ansible.builtin.command: dnf -q makecache --refresh
+      changed_when: false
+      when: ansible_facts.os_family == 'RedHat'
+
+    - name: Compute proposed package transaction
+      ansible.builtin.include_tasks: tasks/package_plan.yml
+
+    - name: Create private results directory
+      ansible.builtin.file:
+        path: "{{ __fleet_results_dir }}/{{ __fleet_job_id }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      become: false
+      when: __fleet_job_id is defined
+
+    - name: Save package preview
+      ansible.builtin.copy:
+        content: "{{ {'schema_version': 1, 'report_type': 'packages', 'hostname': inventory_hostname, 'family': ansible_facts.os_family, 'changes': fleet_package_changes, 'fingerprint': fleet_package_fingerprint} | to_json }}"
+        dest: "{{ __fleet_results_dir }}/{{ __fleet_job_id }}/packages_{{ inventory_hostname }}.json"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+      when: __fleet_job_id is defined

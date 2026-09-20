@@ -136,6 +136,16 @@ class DeviceUpdate(BaseModel):
     become_password: str | None = None
     passwordless_ssh: bool | None = None
     daemon_port: int | None = Field(default=None, ge=1, le=65535)
+    maintenance_mode: Literal["unknown", "standalone", "kubernetes"] | None = None
+    kubernetes_context: str | None = Field(default=None, max_length=253)
+    kubernetes_node_name: str | None = Field(default=None, max_length=253)
+
+    @field_validator("kubernetes_context", "kubernetes_node_name")
+    @classmethod
+    def validate_cluster_identity(cls, value):
+        if value and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@-]{0,252}", value):
+            raise ValueError("cluster context and node name contain unsupported characters")
+        return value
 
     @field_validator("endpoint")
     @classmethod
@@ -209,6 +219,12 @@ class DeviceResponse(BaseModel):
     last_seen: datetime | None = None
     discovered_at: datetime | None = None
     created_at: datetime | None = None
+    maintenance_mode: str = "unknown"
+    kubernetes_context: str | None = None
+    kubernetes_node_name: str | None = None
+    facts_stale: bool = True
+    recovery_required: bool = False
+    recovery_reason: str | None = None
 
 
 class ContextDocumentResponse(BaseModel):
@@ -296,10 +312,17 @@ class OperationResponse(BaseModel):
     icon: str
     eligible_device_ids: list[int]
     eligible_count: int
+    excluded_devices: list[dict] = Field(default_factory=list)
 
 
 class OperationRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     device_ids: list[int] = Field(min_length=1, max_length=200)
+    request_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,64}$")
+    preview_job_id: str | None = Field(default=None, pattern=r"^[0-9a-f-]{36}$")
+    service_name: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.@:-]{0,120}\.service$")
+    service_action: Literal["started", "stopped", "restarted"] = "restarted"
+    confirmation: str | None = None
 
     @field_validator("device_ids")
     @classmethod
@@ -336,6 +359,7 @@ class UserInfo(BaseModel):
 
 
 class BulkUserAdd(BaseModel):
+    request_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,64}$")
     users: list[UserInfo] = Field(min_length=1, max_length=500)
     device_ids: list[int] | None = None
     all_devices: bool = False
@@ -358,6 +382,7 @@ class BulkUserAdd(BaseModel):
 
 
 class BulkUserUpdate(BaseModel):
+    request_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,64}$")
     usernames: list[str] = Field(min_length=1, max_length=500)
     device_ids: list[int] | None = None
     all_devices: bool = False
@@ -404,6 +429,7 @@ class BulkUserUpdate(BaseModel):
 
 
 class ChangePasswordRequest(BaseModel):
+    request_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,64}$")
     device_ids: list[int] | None = None
     all_devices: bool = False
     new_password: str
@@ -426,6 +452,7 @@ class ChangePasswordRequest(BaseModel):
 
 
 class BulkPasswordResetRequest(BaseModel):
+    request_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,64}$")
     device_ids: list[int] | None = None
     all_devices: bool = False
     usernames: list[str] | None = None
@@ -455,6 +482,7 @@ class BulkPasswordResetRequest(BaseModel):
 
 
 class SudoersRequest(BaseModel):
+    request_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,64}$")
     device_ids: list[int] | None = None
     all_devices: bool = False
 
@@ -470,6 +498,7 @@ class SudoersRequest(BaseModel):
 
 
 class RemoveUserRequest(BaseModel):
+    request_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,64}$")
     device_ids: list[int] | None = None
     all_devices: bool = False
     remove_home: bool = False
@@ -504,6 +533,9 @@ class JobResponse(BaseModel):
     recap: str | None
     created_at: datetime | None
     result_artifacts: list[dict] = Field(default_factory=list)
+    execution_kind: str | None = None
+    phase: str | None = None
+    device_results: list[dict] = Field(default_factory=list)
 
 # Chat
 class ChatMessage(BaseModel):

@@ -4,7 +4,6 @@
   become: true
   serial: "{{ maintenance_batch_size | default(1) }}"
   gather_facts: true
-  force_handlers: true
   vars:
     mig_action: status
   tasks:

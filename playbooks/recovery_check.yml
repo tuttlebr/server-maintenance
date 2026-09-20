@@ -1,0 +1,29 @@
+---
+- name: Verify recovery without changing scheduling
+  hosts: managed_hosts
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Check local Kubernetes membership evidence
+      ansible.builtin.include_tasks: tasks/kubernetes_indicators.yml
+    - name: Require a valid recovery policy
+      ansible.builtin.assert:
+        that:
+          - fleet_maintenance_mode | default('unknown') in ['standalone', 'kubernetes']
+          - fleet_maintenance_mode != 'standalone' or not kubernetes_membership_expected | bool
+        fail_msg: "Configure a verified maintenance mode before recovery."
+    - name: Verify host health
+      ansible.builtin.include_tasks: tasks/verify_host_health.yml
+
+    - name: Verify Kubernetes identity and health
+      when: fleet_maintenance_mode | default('unknown') == 'kubernetes'
+      block:
+        - name: Discover the configured node
+          ansible.builtin.include_tasks: tasks/kubernetes_discover.yml
+        - name: Require cluster access and node identity
+          ansible.builtin.assert:
+            that:
+              - kubernetes_api_accessible | bool
+              - kubernetes_node_found | bool
+        - name: Verify node readiness without uncordoning
+          ansible.builtin.include_tasks: tasks/kubernetes_ready.yml

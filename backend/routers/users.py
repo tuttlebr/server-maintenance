@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from backend.auth import get_current_user
 from backend.database import get_db
 from backend.models import Host, ManagedUser, UserHostAssociation
-from backend.capabilities import USERS_MANAGE, has_capability
+from backend.capabilities import USERS_MANAGE, has_capability, facts_are_stale
 from backend.schemas import (
     BulkPasswordResetRequest,
     BulkUserAdd,
@@ -34,8 +34,7 @@ def _user_to_response(db: Session, user: ManagedUser) -> dict:
         "username": user.username,
         "full_name": user.full_name,
         "email": user.email,
-        "is_sudoer": user.is_sudoer,
-        "groups": user.groups,
+        "placements": [{"device_id": a.host_id, "groups": a.groups, "shell": a.shell, "managed_sudo": a.managed_sudo, "sudo_policy": a.sudo_policy, "observed_at": a.observed_at, "state": a.state} for a in db.query(UserHostAssociation).filter_by(user_id=user.id).all()],
         "device_ids": _get_user_devices(db, user.id),
         "created_at": user.created_at,
     }
@@ -49,7 +48,9 @@ def _validated_username(username: str) -> str:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-def _target_devices(payload, db: Session) -> list[Host]:
+def _target_devices(payload, db: Session, *, inspect=False) -> list[Host]:
+    if payload.all_devices or not payload.device_ids:
+        raise HTTPException(status_code=400, detail="Select explicit target devices. Fleet-wide implicit account changes are disabled.")
     query = db.query(Host).filter((Host.transport == "ssh") | (Host.transport.is_(None)))
     devices = query.order_by(Host.hostname).all() if payload.all_devices else query.filter(
         Host.id.in_(payload.device_ids or [])
@@ -63,6 +64,14 @@ def _target_devices(payload, db: Session) -> list[Host]:
         raise HTTPException(status_code=400, detail=f"Linux account management is not supported on: {', '.join(unsupported)}")
     if not devices:
         raise HTTPException(status_code=400, detail="No access-capable devices are available")
+    if not inspect:
+        for device in devices:
+            if device.os_family not in {"Debian", "RedHat"}:
+                raise HTTPException(status_code=409, detail=f"Account changes support discovered Debian and Red Hat family devices: {device.name}")
+            if device.recovery_required:
+                raise HTTPException(status_code=409, detail=f"{device.name} requires recovery verification")
+            if facts_are_stale(device):
+                raise HTTPException(status_code=409, detail=f"Scan {device.name} before changing accounts")
     return devices
 
 
@@ -89,6 +98,8 @@ async def bulk_add_users(
         extra_vars["default_password"] = payload.password
 
     target_devices = _target_devices(payload, db)
+    if any(device.os_family not in {"Debian", "RedHat"} for device in target_devices):
+        raise HTTPException(status_code=400, detail="Provisioning supports discovered Debian and Red Hat family devices")
     target_names = [device.hostname for device in target_devices]
     job_id = await run_playbook(
         db=db,
@@ -97,6 +108,7 @@ async def bulk_add_users(
         all_hosts=False,
         extra_vars=extra_vars,
         triggered_by=user,
+        request_key=payload.request_key,
         completion_action={
             "type": "provision_users",
             "hostnames": target_names,
@@ -154,6 +166,7 @@ async def bulk_update_users(
         all_hosts=False,
         extra_vars=extra_vars,
         triggered_by=user,
+        request_key=payload.request_key,
         completion_action={
             "type": "update_users",
             "hostnames": [device.hostname for device in target_devices],
@@ -187,6 +200,7 @@ async def change_password(
         all_hosts=False,
         extra_vars=extra_vars,
         triggered_by=user,
+        request_key=payload.request_key,
     )
     return {"job_id": job_id, "detail": f"Changing password for {username}"}
 
@@ -197,6 +211,8 @@ async def bulk_password_reset(
     db: Session = Depends(get_db),
     user: str = Depends(get_current_user),
 ):
+    if not payload.usernames:
+        raise HTTPException(status_code=400, detail="Select explicit account names for a password reset")
     if not payload.temp_password:
         raise HTTPException(status_code=400, detail="A temporary password is required for bulk resets")
 
@@ -213,6 +229,7 @@ async def bulk_password_reset(
         all_hosts=False,
         extra_vars=extra_vars,
         triggered_by=user,
+        request_key=payload.request_key,
     )
     return {"job_id": job_id, "detail": "Bulk password reset initiated"}
 
@@ -235,6 +252,7 @@ async def add_sudoers(
         all_hosts=False,
         extra_vars=extra_vars,
         triggered_by=user,
+        request_key=payload.request_key,
         completion_action={
             "type": "set_sudoer",
             "hostnames": [device.hostname for device in target_devices],
@@ -264,6 +282,7 @@ async def remove_sudoers(
         all_hosts=False,
         extra_vars=extra_vars,
         triggered_by=user,
+        request_key=payload.request_key,
         completion_action={
             "type": "set_sudoer",
             "hostnames": [device.hostname for device in target_devices],
@@ -296,6 +315,7 @@ async def remove_user(
         all_hosts=False,
         extra_vars=extra_vars,
         triggered_by=user,
+        request_key=payload.request_key,
         completion_action={
             "type": "remove_user",
             "hostnames": [device.hostname for device in target_devices],
@@ -304,3 +324,10 @@ async def remove_user(
     )
 
     return {"job_id": job_id, "detail": f"Removing user {username}"}
+
+
+@router.post("/inspect")
+async def inspect_accounts(payload: SudoersRequest, db: Session = Depends(get_db), user: str = Depends(get_current_user)):
+    devices = _target_devices(payload, db, inspect=True)
+    job_id = await run_playbook(db, "access_inspect.yml", hosts=[d.hostname for d in devices], triggered_by=user, request_key=payload.request_key)
+    return {"job_id": job_id, "detail": "Account inspection queued"}

@@ -1,0 +1,22 @@
+---
+- name: Check local Kubernetes membership indicators
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+    get_attributes: false
+    get_checksum: false
+    get_mime: false
+  loop:
+    - /var/lib/kubelet/config.yaml
+    - /etc/kubernetes/kubelet.conf
+    - /etc/rancher/k3s/k3s.yaml
+    - /var/lib/rancher/k3s/agent/etc/kubelet.conf
+    - /etc/rancher/rke2/rke2.yaml
+    - /var/lib/rancher/rke2/agent/etc/kubelet.conf
+    - /var/snap/microk8s/common/var/lib/kubelet/config.yaml
+  register: kubernetes_membership_indicators
+  changed_when: false
+
+- name: Record local Kubernetes membership evidence
+  ansible.builtin.set_fact:
+    kubernetes_membership_expected: "{{ kubernetes_membership_indicators.results | selectattr('stat.exists') | list | length > 0 }}"

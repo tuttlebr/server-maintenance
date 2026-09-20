@@ -1,0 +1,42 @@
+---
+- name: Validate supported package manager
+  ansible.builtin.assert:
+    that: ansible_facts.os_family in ['Debian', 'RedHat']
+
+- name: Preview Debian package changes
+  ansible.builtin.apt:
+    upgrade: dist
+    update_cache: false
+    autoremove: false
+    fail_on_autoremove: true
+    install_recommends: false
+  check_mode: true
+  register: fleet_apt_plan
+  when: ansible_facts.os_family == 'Debian'
+
+- name: Preview Red Hat package changes
+  ansible.builtin.dnf:
+    name: '*'
+    state: latest
+    update_cache: false
+    cacheonly: true
+  check_mode: true
+  register: fleet_dnf_plan
+  when: ansible_facts.os_family == 'RedHat'
+
+- name: Normalize the proposed transaction
+  ansible.builtin.set_fact:
+    fleet_package_changes: "{{ (fleet_apt_plan.stdout_lines | default([]) | select('match', '^(Inst|Conf|Remv) ') | list | sort) if ansible_facts.os_family == 'Debian' else (fleet_dnf_plan.results | default([]) | sort) }}"
+
+- name: Fingerprint the proposed transaction
+  ansible.builtin.set_fact:
+    fleet_package_fingerprint: "{{ (ansible_facts.os_family ~ (fleet_package_changes | to_json)) | hash('sha256') }}"
+
+- name: Pin the exact proposed package versions
+  ansible.builtin.set_fact:
+    fleet_package_targets: >-
+      {{
+        (fleet_package_changes | select('match', '^Inst ') | map('regex_replace', '^Inst ([^ ]+)(?: \[[^\]]+\])? \(([^ ]+).*$', '\1=\2') | list)
+        if ansible_facts.os_family == 'Debian'
+        else (fleet_package_changes | select('match', '^Installed: ') | map('regex_replace', '^Installed: ', '') | list)
+      }}

@@ -82,7 +82,7 @@ async function request(path, options = {}) {
 
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    const detail = data.detail || `HTTP ${res.status}`;
+    const detail = Array.isArray(data.detail) ? data.detail.map(item => `${(item.loc || []).filter(part => part !== "body").join(".")}: ${item.msg}`).join("; ") : data.detail || `HTTP ${res.status}`;
     throw new ApiError(detail, { status: res.status, detail });
   }
 
@@ -121,13 +121,15 @@ export const scanAllDevices = () => request("/devices/scan-all", { method: "POST
 
 // Operations
 export const getOperations = () => request("/operations");
-export const runOperation = (operationId, deviceIds) =>
+export const runOperation = (operationId, deviceIds, parameters = {}) =>
   request(`/operations/${operationId}/jobs`, {
     method: "POST",
-    body: { device_ids: deviceIds },
+    body: { device_ids: deviceIds, ...parameters },
   });
 
 // Users
+export const inspectAccounts = (data) => request("/users/inspect", { method: "POST", body: data });
+export const bulkUpdateUsers = (data) => request("/users/bulk-update", { method: "PUT", body: data });
 export const getUsers = () => request("/users");
 export const bulkAddUsers = (data) => request("/users/bulk-add", { method: "POST", body: data });
 export const changePassword = (username, data) =>
@@ -142,6 +144,8 @@ export const removeUser = (username, data) =>
   request(`/users/${username}`, { method: "DELETE", body: data || {} });
 
 // Jobs
+export const getJobSummary = () => request("/jobs/summary");
+export const cancelJob = (jobId) => request(`/jobs/${jobId}/cancel`, { method: "POST" });
 export const getJobs = (params = {}) => {
   const qs = new URLSearchParams(params).toString();
   return request(`/jobs${qs ? "?" + qs : ""}`);
@@ -213,7 +217,8 @@ export async function streamJobOutput(jobId, { onLine, onDone, onError, signal }
         }
       }
     }
-    onDone?.(doneStatus || "success");
+    if (!doneStatus || doneStatus === "pending") throw new ApiError("Stream ended before completion. Refresh activity to check the job.");
+    onDone?.(doneStatus);
   } catch (err) {
     if (err.name === "AbortError") return; // caller-initiated cancel; not an error
     onError?.(err);

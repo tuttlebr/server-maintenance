@@ -6,9 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.auth import get_current_user
-from backend.capabilities import REACHY_APP_RESET, device_capabilities, normalize_capabilities
+from backend.capabilities import REACHY_APP_RESET, device_capabilities, normalize_capabilities, facts_are_stale
 from backend.database import get_db
-from backend.models import ContextDocument, Device, UserHostAssociation
+from backend.models import ContextDocument, Device, DeviceReservation, UserHostAssociation
 from backend.schemas import (
     DeviceAnnotationsUpdate,
     DeviceCreate,
@@ -69,6 +69,12 @@ def device_response(device: Device) -> DeviceResponse:
         last_seen=device.last_seen,
         discovered_at=device.discovered_at,
         created_at=device.created_at,
+        maintenance_mode=device.maintenance_mode or "unknown",
+        kubernetes_context=device.kubernetes_context,
+        kubernetes_node_name=device.kubernetes_node_name,
+        facts_stale=facts_are_stale(device),
+        recovery_required=bool(device.recovery_required),
+        recovery_reason=device.recovery_reason,
     )
 
 
@@ -311,6 +317,14 @@ def update_device(
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
+    if db.get(DeviceReservation, device_id):
+        raise HTTPException(status_code=409, detail="Wait for the active device operation before changing its connection or maintenance policy")
+    if device.recovery_required and ((device.maintenance_mode != "unknown" and payload.maintenance_mode not in {None, device.maintenance_mode, "kubernetes"}) or (payload.endpoint is not None and payload.endpoint != (device.endpoint or device.ip_address))):
+        raise HTTPException(status_code=409, detail="Verify recovery before changing endpoint or maintenance mode")
+    if payload.maintenance_mode == "standalone" and (
+        device.facts.get("kubernetes_membership_detected") or device.facts.get("kubernetes_available")
+    ):
+        raise HTTPException(status_code=409, detail="Kubernetes membership was detected; standalone maintenance cannot bypass it")
     if device.transport == "reachy_daemon" and any(
         value is not None
         for value in (
@@ -330,6 +344,20 @@ def update_device(
         endpoint_changed = payload.endpoint != (device.endpoint or device.ip_address)
         device.endpoint = payload.endpoint
         device.ip_address = payload.endpoint
+        if endpoint_changed:
+            device.status = "unknown"
+            device.facts_stale = True
+            device.discovered_at = None
+            device.os_family = None
+            device.os_version = None
+            device.facts = {}
+            device.capabilities = initial_profile(device.transport or "ssh")["capabilities"]
+            device.maintenance_mode = "unknown"
+            payload.maintenance_mode = "unknown"
+            device.kubernetes_context = None
+            device.kubernetes_node_name = None
+            payload.kubernetes_context = ""
+            payload.kubernetes_node_name = ""
         if device.transport == "reachy_daemon" and endpoint_changed:
             device.ansible_user = None
             device.encrypted_ansible_password = None
@@ -349,6 +377,9 @@ def update_device(
         device.encrypted_ansible_become_password = encrypt_secret(payload.become_password)
     if payload.daemon_port is not None:
         device.daemon_port = payload.daemon_port
+    for field in ("maintenance_mode", "kubernetes_context", "kubernetes_node_name"):
+        if getattr(payload, field) is not None:
+            setattr(device, field, getattr(payload, field) or None)
     db.commit()
     db.refresh(device)
     regenerate_inventory(db)
@@ -364,6 +395,8 @@ def delete_device(
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
+    if db.get(DeviceReservation, device_id) or device.recovery_required:
+        raise HTTPException(status_code=409, detail="Complete active work and recovery before removing this device")
     name = device.name
     db.query(UserHostAssociation).filter(UserHostAssociation.host_id == device.id).delete(
         synchronize_session=False
@@ -387,14 +420,8 @@ async def scan_device(
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     if device.transport == "reachy_daemon":
-        result = probe_reachy(device.endpoint or device.hostname, device.daemon_port or 8000)
-        device.status = "online" if result["reachable"] else "offline"
-        if result["reachable"]:
-            device.last_seen = datetime.now(timezone.utc)
-            device.discovered_at = device.last_seen
-            device.facts = result.get("facts", {})
-        db.commit()
-        return {"detail": result["detail"], "status": device.status}
+        from backend.routers.operations import _start_reachy_inspection
+        return _start_reachy_inspection(db, [device], user)
     job_id = await run_playbook(db=db, playbook="host_facts.yml", hosts=[device.hostname], triggered_by=user)
     return {"job_id": job_id, "detail": f"Scanning {device.name}"}
 
@@ -403,19 +430,13 @@ async def scan_device(
 async def scan_all_devices(db: Session = Depends(get_db), user: str = Depends(get_current_user)):
     ssh_devices = db.query(Device).filter(Device.transport == "ssh").all()
     reachy_devices = db.query(Device).filter(Device.transport == "reachy_daemon").all()
-    for device in reachy_devices:
-        result = probe_reachy(device.endpoint or device.hostname, device.daemon_port or 8000)
-        device.status = "online" if result["reachable"] else "offline"
-        if result["reachable"]:
-            device.last_seen = datetime.now(timezone.utc)
-            device.facts = result.get("facts", {})
-    db.commit()
-    if not ssh_devices:
-        return {"detail": f"Checked {len(reachy_devices)} Reachy device(s)"}
-    job_id = await run_playbook(
-        db=db,
-        playbook="host_facts.yml",
-        hosts=[device.hostname for device in ssh_devices],
-        triggered_by=user,
-    )
-    return {"job_id": job_id, "detail": "Scanning all manageable devices"}
+    if any(db.get(DeviceReservation, device.id) for device in [*ssh_devices, *reachy_devices]):
+        raise HTTPException(status_code=409, detail="Some devices have active operations. Wait or scan idle devices individually.")
+    from backend.routers.operations import _start_reachy_inspection
+    job_ids = []
+    if ssh_devices:
+        job_ids.append(await run_playbook(db=db, playbook="host_facts.yml", hosts=[device.hostname for device in ssh_devices], triggered_by=user))
+    if reachy_devices:
+        result = _start_reachy_inspection(db, reachy_devices, user)
+        job_ids.append(result["job_id"])
+    return {"job_id": job_ids[0] if job_ids else None, "job_ids": job_ids, "detail": f"Queued {len(job_ids)} fleet inspection job(s)"}

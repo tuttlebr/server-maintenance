@@ -1,4 +1,7 @@
 import asyncio
+import errno
+import sys
+import time
 import json
 import logging
 import os
@@ -13,6 +16,8 @@ from pathlib import Path
 from backend.config import settings
 from backend.database import SessionLocal
 from backend.models import Host, Job, ManagedUser, UserHostAssociation
+from backend.services.execution_state import (ExecutionConflict, is_read_only, parse_host_outcomes, request_fingerprint, reserve_devices, release_devices)
+from backend.services.job_results import get_job_results
 from backend.services import job_log_indexer
 from backend.capabilities import NVIDIA_FABRIC_MANAGER, REACHY_APP_RESET, has_capability
 from backend.services.device_discovery import enrich_from_scan
@@ -39,6 +44,7 @@ RESERVED_EXTRA_VARS = {
     "ansible_become_pass",
 }
 ALLOWED_PLAYBOOKS = {
+    "package_preview.yml", "service_control.yml", "recovery_check.yml", "access_inspect.yml",
     "admin_setup.yml",
     "bulk_password_reset.yml",
     "change_password.yml",
@@ -70,9 +76,41 @@ ALLOWED_PLAYBOOKS = {
 _PROCESS_LOCK = threading.Lock()
 _RUNNING_PROCS: dict[str, subprocess.Popen] = {}
 _CANCELLED_JOBS: set[str] = set()
-_HOST_LOCKS: dict[str, asyncio.Lock] = {}
-_HOST_LOCKS_GUARD = asyncio.Lock()
 _JOB_SEMAPHORE: asyncio.Semaphore | None = None
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
+_EXECUTOR_LEASE = None
+
+
+def set_executor_lease(handle):
+    global _EXECUTOR_LEASE
+    _EXECUTOR_LEASE = handle
+
+
+async def _execute(*args):
+    work = asyncio.create_task(asyncio.to_thread(_run_playbook_streaming, *args))
+    try:
+        return await asyncio.shield(work)
+    except asyncio.CancelledError:
+        cancel_job(args[4])
+        await asyncio.shield(work)
+        raise
+
+
+def track_task(coroutine):
+    task = asyncio.create_task(coroutine)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    return task
+
+
+async def shutdown_executor():
+    with _PROCESS_LOCK:
+        for proc in _RUNNING_PROCS.values():
+            proc.terminate()
+    for task in list(_BACKGROUND_TASKS):
+        task.cancel()
+    if _BACKGROUND_TASKS:
+        await asyncio.gather(*list(_BACKGROUND_TASKS), return_exceptions=True)
 
 
 class PlaybookRequestError(ValueError):
@@ -197,6 +235,7 @@ def _run_playbook_streaming(
     host_credentials: dict[str, dict[str, str]],
     job_id: str,
     timeout_seconds: int,
+    append: bool = False,
 ) -> int:
     """Run ansible-playbook, streaming output to a log file line by line. Returns rc."""
     ansible_dir = settings.ansible_dir
@@ -218,12 +257,15 @@ def _run_playbook_streaming(
     if os.environ.get("KUBECONFIG"):
         env_vars["KUBECONFIG"] = os.environ["KUBECONFIG"]
 
-    log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(log_fd, "w") as log_file:
+    log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | (os.O_APPEND if append else os.O_TRUNC), 0o600)
+    with os.fdopen(log_fd, "a" if append else "w") as log_file:
+        if append:
+            log_file.write("\n--- Post-operation facts ---\n")
+            log_file.flush()
         payload = dict(extra_vars or {})
         payload[FLEET_JOB_ID_VAR] = job_id
         payload[FLEET_RESULTS_DIR_VAR] = str(settings.data_dir / "job-results")
-        payload[FLEET_SCAN_DIR_VAR] = str(settings.data_dir / "scans")
+        payload[FLEET_SCAN_DIR_VAR] = str(settings.data_dir / "scans" / job_id)
         credentials = {
             target: host_credentials[target]
             for target in targets
@@ -252,63 +294,87 @@ def _run_playbook_streaming(
             "--limit",
             ",".join(targets),
         ]
-        extra_vars_dir = None
+        # The supervisor kills the entire Ansible/SSH group if this process exits.
+        parent_read, parent_write = os.pipe()
+        proc = None
+        reader = None
+        deadline = time.monotonic() + timeout_seconds
         try:
-            if payload:
-                extra_vars_dir = tempfile.TemporaryDirectory(prefix="fleet-extra-vars-")
-                extra_vars_path = Path(extra_vars_dir.name) / "payload.json"
+            with tempfile.TemporaryDirectory(prefix="fleet-extra-vars-") as secret_dir:
+                extra_vars_path = Path(secret_dir) / "payload.json"
                 os.mkfifo(extra_vars_path, 0o600)
                 cmd.extend(["--extra-vars", f"@{extra_vars_path}"])
+                supervisor = Path(__file__).with_name("process_supervisor.py")
+                proc = subprocess.Popen(
+                    [sys.executable, str(supervisor), str(parent_read), *cmd],
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                    bufsize=1, env=env_vars, cwd=str(ansible_dir), pass_fds=(parent_read,) + ((_EXECUTOR_LEASE.fileno(),) if _EXECUTOR_LEASE else ()),
+                )
+                os.close(parent_read)
+                parent_read = None
+                with _PROCESS_LOCK:
+                    _RUNNING_PROCS[job_id] = proc
+                    if job_id in _CANCELLED_JOBS:
+                        proc.terminate()
 
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                env=env_vars,
-                cwd=str(ansible_dir),
-            )
+                def _copy_output():
+                    for line in proc.stdout:
+                        log_file.write(_redact_output_line(line, secrets))
+                        log_file.flush()
 
-            if payload:
+                reader = threading.Thread(target=_copy_output, daemon=True)
+                reader.start()
+                # Never block indefinitely opening a FIFO when Ansible exits early.
+                pipe_fd = None
                 try:
-                    with extra_vars_path.open("w") as pipe:
-                        json.dump(payload, pipe, allow_nan=False)
-                except BrokenPipeError:
-                    pass
-        finally:
-            if extra_vars_dir is not None:
-                extra_vars_dir.cleanup()
-
-        with _PROCESS_LOCK:
-            _RUNNING_PROCS[job_id] = proc
-
-        def _copy_output():
-            assert proc.stdout is not None
-            for line in proc.stdout:
-                log_file.write(_redact_output_line(line, secrets))
-                log_file.flush()
-
-        reader = threading.Thread(target=_copy_output, daemon=True)
-        reader.start()
-        try:
-            proc.wait(timeout=timeout_seconds)
+                    handshake_deadline = min(deadline, time.monotonic() + 30)
+                    while proc.poll() is None and time.monotonic() < handshake_deadline:
+                        try:
+                            pipe_fd = os.open(extra_vars_path, os.O_WRONLY | os.O_NONBLOCK)
+                            break
+                        except OSError as exc:
+                            if exc.errno != errno.ENXIO:
+                                raise
+                            time.sleep(0.02)
+                    if pipe_fd is None and proc.poll() is None:
+                        raise subprocess.TimeoutExpired(cmd, timeout_seconds)
+                    if pipe_fd is not None:
+                        remaining = memoryview(json.dumps(payload, allow_nan=False).encode())
+                        while remaining and proc.poll() is None:
+                            if time.monotonic() >= deadline:
+                                raise subprocess.TimeoutExpired(cmd, timeout_seconds)
+                            try:
+                                remaining = remaining[os.write(pipe_fd, remaining):]
+                            except BlockingIOError:
+                                time.sleep(0.02)
+                            except BrokenPipeError:
+                                break
+                finally:
+                    if pipe_fd is not None:
+                        os.close(pipe_fd)
+                proc.wait(timeout=max(0.01, deadline - time.monotonic()))
+                return proc.returncode
         except subprocess.TimeoutExpired:
+            # Stop output writer before adding the terminal error to its log.
+            if proc:
+                proc.terminate()
+                proc.wait(timeout=15)
+            if reader:
+                reader.join(timeout=5)
             log_file.write(f"\nERROR: ansible-playbook timed out after {timeout_seconds} seconds\n")
             log_file.flush()
-            proc.terminate()
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
             return 124
         finally:
+            os.close(parent_write)
+            if parent_read is not None:
+                os.close(parent_read)
+            if proc and proc.poll() is None:
+                proc.terminate()
+                proc.wait(timeout=15)
             with _PROCESS_LOCK:
                 _RUNNING_PROCS.pop(job_id, None)
-            reader.join(timeout=5)
-
-        return proc.returncode
+            if reader:
+                reader.join(timeout=5)
 
 
 def cancel_job(job_id: str) -> bool:
@@ -369,32 +435,11 @@ def _apply_completion_action(action: dict | None) -> None:
                     ).first()
                     if not association:
                         db.add(UserHostAssociation(user_id=managed.id, host_id=host_id))
-        elif action_type == "update_users":
-            groups = action.get("groups")
-            if groups:
-                db.query(ManagedUser).filter(
-                    ManagedUser.username.in_(action.get("usernames") or [])
-                ).update({ManagedUser.groups: groups}, synchronize_session=False)
-        elif action_type == "set_sudoer":
-            managed = db.query(ManagedUser).filter(
-                ManagedUser.username == action.get("username")
-            ).first()
-            if managed:
-                managed.is_sudoer = bool(action.get("enabled"))
+        elif action_type in {"update_users", "set_sudoer"}:
+            # Observed per-host results below are authoritative, not requested values.
+            pass
         elif action_type == "remove_user":
-            managed = db.query(ManagedUser).filter(
-                ManagedUser.username == action.get("username")
-            ).first()
-            if managed:
-                db.query(UserHostAssociation).filter(
-                    UserHostAssociation.user_id == managed.id,
-                    UserHostAssociation.host_id.in_(host_ids),
-                ).delete(synchronize_session=False)
-                remaining = db.query(UserHostAssociation).filter(
-                    UserHostAssociation.user_id == managed.id
-                ).first()
-                if not remaining:
-                    db.delete(managed)
+            pass  # Keep per-device absence as an observed result.
         else:
             raise RuntimeError(f"unknown job completion action: {action_type}")
         db.commit()
@@ -408,11 +453,10 @@ def _apply_completion_action(action: dict | None) -> None:
 def _process_scan_results(
     target_hostnames: list[str] | None = None,
     unreachable_hosts: set[str] | None = None,
+    scan_dir: Path | None = None,
 ) -> list[str]:
     """Parse scan JSON files written by host_facts.yml and update Host records."""
-    scan_dir = settings.data_dir / "scans"
-    if not scan_dir.exists():
-        return []
+    scan_dir = scan_dir if scan_dir is not None else settings.data_dir / "scans"
 
     target_set = set(target_hostnames or [])
     unreachable_hosts = unreachable_hosts or set()
@@ -428,6 +472,8 @@ def _process_scan_results(
                 report = json.loads(scan_file.read_text())
                 hostname = report.get("hostname")
                 if not hostname:
+                    continue
+                if target_hostnames is not None and hostname not in target_set:
                     continue
 
                 host = db.query(Host).filter(Host.hostname == hostname).first()
@@ -493,6 +539,7 @@ def _process_scan_results(
             if not host:
                 continue
             host.status = "offline" if hostname in unreachable_hosts else "unknown"
+            host.facts_stale = True
         if target_set:
             db.commit()
         # Discovery can change capability groups (GPU, MIG, Fabric Manager,
@@ -504,32 +551,11 @@ def _process_scan_results(
     return warnings
 
 
-def _job_semaphore() -> asyncio.Semaphore:
+def job_semaphore() -> asyncio.Semaphore:
     global _JOB_SEMAPHORE
     if _JOB_SEMAPHORE is None:
         _JOB_SEMAPHORE = asyncio.Semaphore(max(1, settings.ansible_max_concurrent_jobs))
     return _JOB_SEMAPHORE
-
-
-async def _acquire_host_locks(targets: list[str]) -> list[asyncio.Lock]:
-    async with _HOST_LOCKS_GUARD:
-        locks = [_HOST_LOCKS.setdefault(host, asyncio.Lock()) for host in sorted(set(targets))]
-    acquired = []
-    try:
-        for lock in locks:
-            await lock.acquire()
-            acquired.append(lock)
-        return acquired
-    except Exception:
-        for lock in reversed(acquired):
-            lock.release()
-        raise
-
-
-def _release_host_locks(locks: list[asyncio.Lock]) -> None:
-    for lock in reversed(locks):
-        if lock.locked():
-            lock.release()
 
 
 def _resolve_targets(
@@ -580,178 +606,176 @@ def _resolve_targets(
     return deduped, deduped
 
 
+def _invalidate_devices(targets, *, recovery_reason=None):
+    with SessionLocal() as db:
+        for host in db.query(Host).filter(Host.hostname.in_(targets)).all():
+            host.facts_stale = True
+            for association in db.query(UserHostAssociation).filter_by(host_id=host.id).all():
+                association.state = "unverified"
+            if recovery_reason:
+                host.recovery_required = True
+                host.recovery_reason = recovery_reason
+        db.commit()
+
+
+def _reconcile_accounts(job_id, targets):
+    from backend.services.account_state import reconcile_accounts
+    with SessionLocal() as db:
+        reconcile_accounts(db, get_job_results(job_id), targets)
+
+
 async def run_playbook(
-    db,
-    playbook: str,
-    hosts: list[str] | None = None,
-    all_hosts: bool = False,
-    extra_vars: dict | None = None,
-    triggered_by: str = "admin",
-    completion_action: dict | None = None,
+    db, playbook: str, hosts: list[str] | None = None, all_hosts: bool = False,
+    extra_vars: dict | None = None, triggered_by: str = "admin",
+    completion_action: dict | None = None, request_key: str | None = None,
 ) -> str:
-    """Queue and run an Ansible playbook. Returns the job_id."""
+    """Reserve exact devices durably before accepting any execution request."""
     if playbook not in ALLOWED_PLAYBOOKS:
         raise PlaybookRequestError(f"Unsupported playbook: {playbook}")
     _validate_extra_vars(extra_vars or {})
-
-    hosts, lock_targets = _resolve_targets(db, hosts, all_hosts, playbook)
-    registered_hosts = {
-        host.hostname: host
-        for host in db.query(Host).filter(Host.hostname.in_(lock_targets)).all()
-    }
+    hosts, targets = _resolve_targets(db, hosts, all_hosts, playbook)
+    fingerprint = request_fingerprint(playbook, targets, extra_vars)
+    if request_key:
+        previous = db.query(Job).filter_by(request_key=request_key).first()
+        if previous:
+            if previous.request_fingerprint != fingerprint:
+                raise PlaybookRequestError("Request key already used for a different operation", 409)
+            return previous.job_id
+    devices = db.query(Host).filter(Host.hostname.in_(targets)).all()
     host_credentials = {}
-    for hostname in lock_targets:
-        host = registered_hosts[hostname]
+    for host in devices:
         credentials = {}
-        ansible_password = decrypt_secret(host.encrypted_ansible_password)
-        become_password = decrypt_secret(host.encrypted_ansible_become_password)
-        if ansible_password:
-            credentials["ansible_password"] = ansible_password
-        if become_password:
-            credentials["ansible_become_password"] = become_password
-        host_credentials[hostname] = credentials
-
+        for key, encrypted in (("ansible_password", host.encrypted_ansible_password), ("ansible_become_password", host.encrypted_ansible_become_password)):
+            if encrypted:
+                credentials[key] = decrypt_secret(encrypted)
+        host_credentials[host.hostname] = credentials
+    daemon_targets = {host.hostname: (host.endpoint or host.hostname, host.daemon_port or 8000) for host in devices if host.transport == "reachy_daemon"}
+    readonly = is_read_only(playbook, extra_vars)
+    recovery = playbook == "recovery_check.yml" or (playbook == "host_drain.yml" and (extra_vars or {}).get("drain_action") == "resume")
     job_id = str(uuid.uuid4())
-    limit = ",".join(lock_targets)
-    started_at = datetime.now(timezone.utc)
-    scan_targets = None
-    if playbook == "host_facts.yml":
-        if hosts is not None:
-            scan_targets = list(hosts)
-        else:
-            scan_targets = list(lock_targets)
-
-    job = Job(
-        job_id=job_id,
-        playbook=playbook,
-        target_hosts=limit,
-        status="pending",
-        started_at=started_at,
-        triggered_by=triggered_by,
-        extra_vars=redact_extra_vars(extra_vars or {}),
-    )
-    db.add(job)
-    db.commit()
+    job = Job(job_id=job_id, playbook=playbook, target_hosts=",".join(targets),
+              status="pending", phase="queued", execution_kind="read_only" if readonly else "mutation",
+              triggered_by=triggered_by, extra_vars=redact_extra_vars(extra_vars or {}),
+              request_key=request_key, request_fingerprint=fingerprint)
+    try:
+        reserve_devices(db, job, devices, recovery=recovery)
+    except ExecutionConflict as exc:
+        raise PlaybookRequestError(str(exc), 409) from exc
 
     async def _run():
         log_path = get_log_path(job_id)
-        locks: list[asyncio.Lock] = []
+        started = False
         try:
-            if job_id in _CANCELLED_JOBS:
-                _update_job(
-                    job_id,
-                    status="cancelled",
-                    finished_at=datetime.now(timezone.utc),
-                    error_summary="Cancellation requested before job started",
-                )
-                return
-            async with _job_semaphore():
+            async with job_semaphore():
                 if job_id in _CANCELLED_JOBS:
-                    _update_job(
-                        job_id,
-                        status="cancelled",
-                        finished_at=datetime.now(timezone.utc),
-                        error_summary="Cancellation requested before job started",
-                    )
+                    _update_job(job_id, status="cancelled", phase="cancelled", finished_at=datetime.now(timezone.utc))
                     return
-                locks = await _acquire_host_locks(lock_targets)
-                if job_id in _CANCELLED_JOBS:
-                    _update_job(
-                        job_id,
-                        status="cancelled",
-                        finished_at=datetime.now(timezone.utc),
-                        error_summary="Cancellation requested before job started",
-                    )
-                    return
-                _update_job(job_id, status="running")
-                rc = await asyncio.to_thread(
-                    _run_playbook_streaming,
-                    playbook,
-                    lock_targets,
-                    extra_vars,
-                    host_credentials,
-                    job_id,
-                    settings.ansible_job_timeout_seconds,
-                )
-            finished = datetime.now(timezone.utc)
-            duration = int((finished - started_at).total_seconds())
-
-            output = log_path.read_text() if log_path.exists() else ""
-
-            recap = _extract_recap(output)
-            was_cancelled = job_id in _CANCELLED_JOBS
-
-            update_kwargs = {
-                "status": "cancelled" if was_cancelled else ("success" if rc == 0 else "failed"),
-                "finished_at": finished,
-                "duration_seconds": duration,
-                "output_log": output,
-                "recap": recap,
-            }
-            if was_cancelled:
-                update_kwargs["error_summary"] = "Cancellation requested by operator"
-            elif rc == 124:
-                update_kwargs["error_summary"] = f"Timed out after {settings.ansible_job_timeout_seconds} seconds"
-            elif rc != 0:
-                update_kwargs["error_summary"] = output[-2000:] if output else "Unknown error"
-
-            _update_job(job_id, **update_kwargs)
-
-            if not was_cancelled and rc == 0 and completion_action:
-                try:
-                    _apply_completion_action(completion_action)
-                except Exception:
-                    logger.exception("Could not apply completion state for job %s", job_id)
-                    _update_job(
-                        job_id,
-                        status="failed",
-                        error_summary="Remote changes completed, but Fleet Manager could not reconcile its local state",
-                    )
-
-            # Parse scan results after host scans. For all-host scans, keep
-            # partial successes and mark explicit unreachable hosts offline.
-            if playbook == "host_facts.yml":
-                try:
-                    warnings = _process_scan_results(
-                        target_hostnames=scan_targets,
-                        unreachable_hosts=_extract_unreachable_hosts(output),
-                    )
-                    if warnings:
-                        _update_job(job_id, error_summary="\n".join(warnings[:10]))
-                except Exception:
-                    logger.exception("Failed to update host scan results for job %s", job_id)
-                    _update_job(job_id, error_summary="Failed to update host scan results; see server logs")
-            elif playbook == "host_bootstrap.yml" and rc == 0:
-                try:
-                    warnings = _process_scan_results()
-                    if warnings:
-                        _update_job(job_id, error_summary="\n".join(warnings[:10]))
-                except Exception:
-                    logger.exception("Failed to update bootstrap scan results for job %s", job_id)
-                    _update_job(job_id, error_summary="Failed to update bootstrap scan results; see server logs")
-
-        except Exception as e:
-            # Read whatever was written so far
-            output = log_path.read_text() if log_path.exists() else ""
-            logger.exception("Ansible job %s failed before completion", job_id)
-            _update_job(
-                job_id,
-                status="failed",
-                finished_at=datetime.now(timezone.utc),
-                error_summary=str(e)[:2000],
-                output_log=output or str(e),
-            )
+                started_at = datetime.now(timezone.utc)
+                _update_job(job_id, status="running", phase="executing", started_at=started_at)
+                started = True
+                if not readonly:
+                    _invalidate_devices(targets)
+                rc = await _execute(playbook, targets, extra_vars,
+                                              host_credentials, job_id, settings.ansible_job_timeout_seconds)
+                output = log_path.read_text() if log_path.exists() else ""
+                outcomes = parse_host_outcomes(output, targets)
+                successful = [item["hostname"] for item in outcomes if item["status"] == "success"]
+                failed = [name for name in targets if name not in successful]
+                cancelled = job_id in _CANCELLED_JOBS
+                errors = []
+                if rc or failed:
+                    errors.append("One or more devices did not complete. Review per-device outcomes and the log.")
+                if rc == 124:
+                    errors.append(f"Timed out after {settings.ansible_job_timeout_seconds} seconds.")
+                if completion_action and successful:
+                    _apply_completion_action({**completion_action, "hostnames": successful})
+                # Access reports are collected even when other hosts fail.
+                _reconcile_accounts(job_id, targets)
+                if playbook == "host_facts.yml":
+                    errors.extend(_process_scan_results(targets, _extract_unreachable_hosts(output), settings.data_dir / "scans" / job_id))
+                    with SessionLocal() as state_db:
+                        for host in state_db.query(Host).filter(Host.hostname.in_(successful)).all():
+                            if host.facts_stale:
+                                failed.append(host.hostname)
+                                errors.append(f"{host.hostname}: scan report missing or invalid")
+                elif playbook == "reachy_app_reset.yml" and successful:
+                    from backend.services.device_discovery import probe_reachy
+                    for name in successful:
+                        result = await asyncio.to_thread(probe_reachy, *daemon_targets[name]) if name in daemon_targets else None
+                        if result and result["reachable"]:
+                            with SessionLocal() as state_db:
+                                host = state_db.query(Host).filter_by(hostname=name).one()
+                                host.facts = result.get("facts", {})
+                                host.facts_stale = False
+                                host.discovered_at = datetime.now(timezone.utc)
+                                host.last_seen = host.discovered_at
+                                state_db.commit()
+                        else:
+                            failed.append(name)
+                            errors.append(f"{name}: refresh daemon health after app reset")
+                elif (not readonly or recovery) and successful:
+                    _update_job(job_id, phase="refreshing_facts")
+                    for name in successful:
+                        (settings.data_dir / "scans" / job_id / f"{name}.json").unlink(missing_ok=True)
+                    # Append the follow-up scan output without replacing the action log.
+                    scan_rc = await _execute("host_facts.yml", successful, None,
+                                                       host_credentials, job_id, settings.ansible_job_timeout_seconds, True)
+                    scan_output = log_path.read_text() if log_path.exists() else ""
+                    output = scan_output
+                    errors.extend(_process_scan_results(successful, _extract_unreachable_hosts(scan_output.split("--- Post-operation facts ---")[-1]), settings.data_dir / "scans" / job_id))
+                    with SessionLocal() as state_db:
+                        unverified = {host.hostname for host in state_db.query(Host).filter(Host.hostname.in_(successful)).all() if host.facts_stale}
+                    if scan_rc or unverified:
+                        errors.append("Post-operation facts could not be fully verified. Scan and verify recovery before further changes.")
+                        for item in outcomes:
+                            if item["hostname"] in unverified:
+                                item["status"] = "verification_failed"
+                                failed.append(item["hostname"])
+                if not readonly and (failed or rc):
+                    _invalidate_devices(failed or targets, recovery_reason=f"Incomplete job {job_id} ({playbook})")
+                if recovery:
+                    with SessionLocal() as state_db:
+                        verified = [item["hostname"] for item in outcomes if item["status"] == "success"]
+                        for host in state_db.query(Host).filter(Host.hostname.in_(verified)).all():
+                            if not host.facts_stale:
+                                host.recovery_required = False
+                                host.recovery_reason = None
+                        state_db.commit()
+                finished = datetime.now(timezone.utc)
+                status = "success" if rc == 0 and not failed and not errors else "failed"
+                if not readonly and (failed or rc):
+                    status = "recovery_required"
+                elif cancelled:
+                    status = "cancelled"
+                _update_job(job_id, status=status, phase="complete", finished_at=finished,
+                            duration_seconds=int((finished - started_at).total_seconds()), output_log=output,
+                            recap=_extract_recap(output), outcomes_json=json.dumps(outcomes),
+                            error_summary="\n".join(errors) or None)
+        except (Exception, asyncio.CancelledError) as exc:
+            uncertain = started and not readonly
+            if uncertain:
+                _invalidate_devices(targets, recovery_reason=f"Interrupted job {job_id} ({playbook})")
+            logger.warning("Job %s interrupted: %s", job_id, exc, exc_info=True)
+            _update_job(job_id, status="recovery_required" if uncertain else ("cancelled" if not started or job_id in _CANCELLED_JOBS else "failed"), phase="interrupted",
+                        finished_at=datetime.now(timezone.utc), error_summary="Execution interrupted; inspect remote state and verify recovery." if uncertain else ("Executor stopped before this queued job began" if not started else str(exc)[:2000]),
+                        output_log=log_path.read_text() if log_path.exists() else "")
         finally:
+            # Wait for a thread-backed process to stop before releasing its devices.
+            with _PROCESS_LOCK:
+                proc = _RUNNING_PROCS.get(job_id)
+                if proc:
+                    proc.terminate()
+            if proc:
+                await asyncio.to_thread(proc.wait, timeout=15)
             _CANCELLED_JOBS.discard(job_id)
-            _release_host_locks(locks)
+            with SessionLocal() as state_db:
+                release_devices(state_db, job_id)
+                state_db.commit()
             try:
-                # Job-log retrieval is derived state. Index every terminal
-                # outcome after releasing host locks, and never let an
-                # embedding/Milvus outage change the recorded job result.
                 await asyncio.to_thread(job_log_indexer.ingest_completed_job, job_id)
             except Exception:
-                logger.exception("Failed to index completed Ansible job %s", job_id)
+                logger.exception("Failed to index completed job %s", job_id)
                 job_log_indexer.start_reconcile()
 
-    asyncio.create_task(_run())
+    track_task(_run())
     return job_id

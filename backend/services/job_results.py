@@ -11,7 +11,7 @@ from backend.config import settings
 logger = logging.getLogger(__name__)
 
 JOB_ID_RE = re.compile(r"^[0-9a-f-]{36}$")
-ALLOWED_REPORT_TYPES = {"assessment", "driver", "gpu", "storage"}
+ALLOWED_REPORT_TYPES = {"assessment", "driver", "gpu", "storage", "accounts", "packages", "services", "recovery", "kubernetes"}
 MAX_ARTIFACTS_PER_JOB = 200
 MAX_ARTIFACT_BYTES = 2 * 1024 * 1024
 

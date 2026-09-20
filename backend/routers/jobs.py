@@ -1,4 +1,6 @@
 import asyncio
+import json
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -11,6 +13,7 @@ from backend.models import Job
 from backend.schemas import JobResponse
 from backend.services.ansible_runner import cancel_job, get_log_path
 from backend.services.job_results import get_job_results
+from backend.services.execution_state import TERMINAL_STATUSES, release_devices
 from backend.services.tokens import TokenError, decode_token
 
 router = APIRouter(prefix="/api/v2/jobs", tags=["activity"])
@@ -26,11 +29,18 @@ def list_jobs(
     user: str = Depends(get_current_user),
 ):
     query = db.query(Job)
-    if status:
+    if status == "active":
+        query = query.filter(Job.status.in_(("pending", "running", "cancelling")))
+    elif status:
         query = query.filter(Job.status == status)
     if playbook:
         query = query.filter(Job.playbook == playbook)
     return query.order_by(Job.created_at.desc()).offset(offset).limit(limit).all()
+
+
+@router.get("/summary")
+def job_summary(db: Session = Depends(get_db), user: str = Depends(get_current_user)):
+    return {"active_count": db.query(Job).filter(Job.status.in_(("pending", "running", "cancelling"))).count()}
 
 
 @router.get("/{job_id}", response_model=JobResponse)
@@ -57,13 +67,18 @@ async def cancel_job_output(
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
     if job.status not in ("pending", "running"):
         raise HTTPException(status_code=400, detail=f"Job {job_id} is not running")
-    if job.playbook in {"reachy.daemon.restart", "reachy.software.update"}:
+    if job.playbook.startswith("reachy.") or (job.status == "running" and job.execution_kind != "read_only"):
         raise HTTPException(
             status_code=400,
-            detail="This Reachy operation cannot be cancelled after the daemon accepts it",
+            detail="A running change cannot be safely cancelled. Monitor completion; interrupted changes require recovery verification.",
         )
+    if job.status == "pending":
+        release_devices(db, job_id)
+        job.finished_at = datetime.now(timezone.utc)
+        job.phase = "cancelled"
+        job.outcomes_json = json.dumps([{"hostname":name, "status":"cancelled"} for name in (job.target_hosts or "").split(",") if name])
     cancel_job(job_id)
-    job.status = "cancelled"
+    job.status = "cancelled" if job.status == "pending" else "cancelling"
     job.error_summary = f"Cancellation requested by {user}"
     db.commit()
     return {"detail": f"Cancellation requested for {job_id}"}
@@ -120,7 +135,7 @@ async def stream_job_output(
                     yield "\n"
 
             # If job is done, send final event and stop
-            if job_status in ("success", "failed", "cancelled"):
+            if job_status in TERMINAL_STATUSES:
                 yield f"event: done\ndata: {job_status}\n\n"
                 break
 

@@ -106,7 +106,7 @@ def log_excerpt(output: str, query: str, max_chars: int = 6_000) -> str:
 
 
 def _read_output(job: Job) -> tuple[str, str]:
-    if job.status not in ("pending", "running") and job.output_log:
+    if job.status not in ("pending", "running", "cancelling") and job.output_log:
         return job.output_log, "Stored completed output"
     # A database lookup precedes this call; never accept arbitrary file paths.
     if not SAFE_JOB_ID.fullmatch(job.job_id):
@@ -220,7 +220,7 @@ def get_job_context(messages: list[dict], *, job_id: str | None = None, device_i
             if matched:
                 query = query.filter(Job.playbook.in_(matched))
                 scope_note += "; matching playbooks: " + ", ".join(matched)
-            for status in ("failed", "cancelled", "running", "pending", "success"):
+            for status in ("recovery_required", "failed", "cancelled", "cancelling", "running", "pending", "success"):
                 if _mentions(status_question, status):
                     query = query.filter(Job.status == status)
                     scope_note += f"; status={status}"

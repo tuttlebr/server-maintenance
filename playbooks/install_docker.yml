@@ -3,7 +3,6 @@
   hosts: managed_hosts
   become: true
   serial: "{{ maintenance_batch_size | default(1) }}"
-  force_handlers: true
   vars:
     docker_group_users: []
   tasks:

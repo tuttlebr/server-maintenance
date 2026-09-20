@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Iterable
 
 
@@ -27,6 +29,7 @@ REACHY_DAEMON_RESTART = "reachy.daemon.restart"
 REACHY_SOFTWARE_UPDATE = "reachy.software.update"
 REACHY_LOGS_READ = "reachy.logs.read"
 REACHY_APP_RESET = "reachy.apps.reset"
+SERVICES_MANAGE = "services.manage"
 
 BASE_LINUX_CAPABILITIES = {
     SYSTEM_SCAN,
@@ -113,6 +116,34 @@ class OperationDefinition:
 
 OPERATIONS = (
     OperationDefinition(
+        "reachy.recover", "Verify Reachy recovery", "Check the recorded remote job and daemon health after an interrupted update or restart. Never repeats the change.",
+        "Recovery", REACHY_HEALTH, "low", "none", None, "fa-stethoscope",
+    ),
+    OperationDefinition(
+        "system.packages.preview", "Preview package updates", "Review proposed package changes without installing them. Required before applying updates.",
+        "System", SYSTEM_UPDATE, "low", "none", "package_preview.yml", "fa-list-check",
+    ),
+    OperationDefinition(
+        "services.inspect", "Inspect services", "List system services and their observed state.",
+        "System", SERVICES_MANAGE, "low", "none", "service_control.yml", "fa-gears",
+    ),
+    OperationDefinition(
+        "services.manage", "Change service state", "Start, stop, or restart one existing service and verify its state. Critical infrastructure services are protected.",
+        "System", SERVICES_MANAGE, "high", "typed-target", "service_control.yml", "fa-gears",
+    ),
+    OperationDefinition(
+        "system.recover", "Verify recovery", "Verify host health and refresh facts after interrupted maintenance. Does not roll back changes or uncordon nodes.",
+        "Recovery", SYSTEM_SCAN, "low", "none", "recovery_check.yml", "fa-stethoscope",
+    ),
+    OperationDefinition(
+        "kubernetes.drain.execute", "Drain Kubernetes node", "Cordon and evict workloads while respecting disruption budgets. Leaves the node cordoned.",
+        "Orchestration", KUBERNETES_DRAIN, "high", "typed-target", "host_drain.yml", "fa-pause",
+    ),
+    OperationDefinition(
+        "kubernetes.resume", "Resume Kubernetes node", "Verify host health and Kubernetes Ready before allowing workloads to be scheduled again.",
+        "Orchestration", KUBERNETES_DRAIN, "high", "typed-target", "host_drain.yml", "fa-play",
+    ),
+    OperationDefinition(
         "system.scan", "Scan device", "Refresh hardware, software, storage, and health facts.",
         "Observe", SYSTEM_SCAN, "low", "none", "host_facts.yml", "fa-satellite-dish",
     ),
@@ -137,7 +168,7 @@ OPERATIONS = (
         "System", SYSTEM_UPDATE, "high", "confirm", "system_update.yml", "fa-arrows-rotate",
     ),
     OperationDefinition(
-        "system.bootstrap", "Bootstrap device", "Configure baseline groups, administrator access, container tooling, and scan facts.",
+        "system.bootstrap", "Bootstrap device", "Configure groups, passwordless administrator sudo, Docker access, and container tooling on Ubuntu. Container services may restart.",
         "System", SYSTEM_BOOTSTRAP, "high", "typed-target", "host_bootstrap.yml", "fa-wand-magic-sparkles",
     ),
     OperationDefinition(
@@ -145,7 +176,7 @@ OPERATIONS = (
         "System", CONTAINERS_CLEANUP, "medium", "confirm", "docker_cleanup.yml", "fa-box",
     ),
     OperationDefinition(
-        "nvidia.driver.manage", "Update NVIDIA drivers", "Apply a patch-level NVIDIA driver update.",
+        "nvidia.driver.manage", "Update NVIDIA drivers", "Update the installed NVIDIA driver branch on Debian-family devices. May reboot the device and interrupt workloads.",
         "NVIDIA", NVIDIA_DRIVER_MANAGE, "high", "confirm", "driver_upgrade.yml", "fa-microchip",
     ),
     OperationDefinition(
@@ -191,3 +222,50 @@ OPERATIONS = (
 )
 
 OPERATION_BY_ID = {operation.id: operation for operation in OPERATIONS}
+
+MAINTENANCE_OPERATIONS = {
+    "system.reboot", "system.update", "system.bootstrap", "nvidia.driver.manage",
+    "firmware.update", "services.manage", "kubernetes.drain.execute", "kubernetes.resume",
+}
+RECOVERY_OPERATIONS = {"system.recover", "kubernetes.resume"}
+
+
+def facts_are_stale(device) -> bool:
+    observed = device.discovered_at
+    if observed and observed.tzinfo is None:
+        observed = observed.replace(tzinfo=timezone.utc)
+    return bool(device.facts_stale or not observed or (datetime.now(timezone.utc) - observed).total_seconds() > 3600)
+
+
+def operation_ineligibility(device, operation) -> str | None:
+    if not has_capability(device, operation.required_capability):
+        return "Required capability has not been discovered"
+    if device.recovery_required and operation.risk != "low" and operation.id not in RECOVERY_OPERATIONS:
+        return "Verify recovery before making another change"
+    if operation.id.startswith("reachy."):
+        return None
+    if (device.transport or "ssh") != "ssh":
+        return "Requires verified SSH access"
+    facts = device.facts
+    family = device.os_family or facts.get("os_family")
+    if operation.risk != "low" and family not in {"Debian", "RedHat", "Suse", "Archlinux", "Alpine", "Gentoo"}:
+        return "Requires a discovered supported Linux platform"
+    if operation.id in {"system.update", "system.packages.preview"} and family not in {"Debian", "RedHat"}:
+        return "Package updates support discovered Debian and Red Hat family devices"
+    if operation.id == "system.bootstrap" and facts.get("distribution") != "Ubuntu":
+        return "Bootstrap supports discovered Ubuntu devices only"
+    if operation.id == "nvidia.driver.manage":
+        package = facts.get("nvidia_driver_package") or ""
+        if family != "Debian" or not re.fullmatch(r"nvidia-driver-\d+(?:-server)?(?:-open)?", package):
+            return "Requires a discovered supported Debian NVIDIA driver metapackage"
+    if operation.id.startswith("services.") and facts.get("service_manager") != "systemd":
+        return "Requires discovered systemd services"
+    if operation.id in MAINTENANCE_OPERATIONS:
+        if device.maintenance_mode not in {"standalone", "kubernetes"}:
+            return "Configure standalone or Kubernetes maintenance mode on the device"
+        if operation.id.startswith("kubernetes.") and device.maintenance_mode != "kubernetes":
+            return "Configure the device's Kubernetes context and node"
+    if operation.risk != "low" and operation.id not in RECOVERY_OPERATIONS:
+        if facts_are_stale(device):
+            return "Run a fresh scan before changing this device (facts must be under one hour old)"
+    return None

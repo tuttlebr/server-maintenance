@@ -1,0 +1,23 @@
+---
+- name: Verify host health before permitting workloads
+  ansible.builtin.include_tasks: verify_host_health.yml
+
+- name: Require Kubernetes Ready and no pressure conditions
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Node
+    name: "{{ kubernetes_resolved_node_name }}"
+    kubeconfig: "{{ kubernetes_effective_kubeconfig | default(omit, true) }}"
+    context: "{{ kubernetes_context | default(omit, true) }}"
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_python_interpreter: "{{ ansible_playbook_python }}"
+  register: fleet_ready_node
+  retries: "{{ kubernetes_ready_retries | default(12) }}"
+  delay: "{{ kubernetes_ready_delay | default(5) }}"
+  until:
+    - fleet_ready_node.resources | default([]) | length == 1
+    - fleet_ready_node.resources[0].metadata.uid == kubernetes_node_uid
+    - fleet_ready_node.resources[0].status.conditions | selectattr('type', 'equalto', 'Ready') | selectattr('status', 'equalto', 'True') | list | length == 1
+    - fleet_ready_node.resources[0].status.conditions | rejectattr('type', 'equalto', 'Ready') | rejectattr('status', 'equalto', 'False') | list | length == 0

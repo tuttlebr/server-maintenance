@@ -142,7 +142,7 @@ const draft = reactive(emptyDraft());
 const availableKinds = computed(() => [...new Set(devices.value.map((device) => device.kind))].sort());
 const availableCapabilities = computed(() => [...new Set(devices.value.flatMap((device) => device.capabilities || []))].sort());
 const filteredDevices = computed(() => devices.value.filter((device) => {
-  const attention = device.status !== "online" || device.reboot_required || (device.disk_root_percent || 0) >= 85;
+  const attention = device.recovery_required || device.facts_stale || device.status !== "online" || device.reboot_required || (device.disk_root_percent || 0) >= 85;
   return deviceMatchesSearch(device, search.value) && (!kindFilter.value || device.kind === kindFilter.value) && (!capabilityFilter.value || device.capabilities.includes(capabilityFilter.value)) && (!statusFilter.value || (statusFilter.value === "attention" ? attention : device.status === statusFilter.value));
 }));
 const canAdd = computed(() => discovery.value.reachable && (!discovery.value.fingerprint || fingerprintConfirmed.value));

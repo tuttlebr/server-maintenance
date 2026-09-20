@@ -12,18 +12,20 @@
         <button class="btn btn-primary btn-sm" :disabled="scanning" @click="scan"><i :class="['fas', scanning ? 'fa-spinner fa-spin' : 'fa-satellite-dish']" aria-hidden="true"></i>{{ scanning ? 'Scanning…' : 'Scan' }}</button>
         <router-link :to="`/operations?device=${device.id}`" class="btn btn-ghost btn-sm">Operations</router-link>
         <button v-if="device.transport === 'reachy_daemon'" class="btn btn-ghost btn-sm" @click="openSshSetup">{{ device.ssh_user ? 'Update app reset SSH' : 'Enable app reset' }}</button>
-        <button class="btn btn-ghost btn-sm" @click="showEdit = true">Edit connection</button>
+        <button class="btn btn-ghost btn-sm" @click="showEdit = true">Edit device</button>
         <button class="btn btn-ghost btn-sm remove-action" @click="showRemove = true">Remove</button>
       </div>
     </div>
 
+    <p v-if="device.recovery_required" class="callout callout-danger" role="status">Recovery required: {{ device.recovery_reason }} <router-link :to="`/operations?device=${device.id}`">Verify recovery</router-link></p>
+    <p v-if="device.facts_stale" class="callout callout-warn" role="status">Displayed facts need verification after a change, a failed scan, or more than one hour. Scan to refresh them before further maintenance.</p>
     <nav class="detail-tabs" aria-label="Device sections">
       <button v-for="tab in tabs" :key="tab" :class="{ active: activeTab === tab }" @click="activeTab = tab">{{ tab }}</button>
     </nav>
 
     <section v-if="activeTab === 'Summary'" class="detail-grid">
       <article class="card"><div class="card-body"><h3>Identity</h3><dl class="facts-list"><template v-for="item in identityFacts" :key="item.label"><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></template></dl></div></article>
-      <article class="card"><div class="card-body"><h3>Health</h3><dl class="facts-list"><dt>Status</dt><dd><StatusBadge :status="device.status" /></dd><dt>Last seen</dt><dd>{{ formatLongTime(device.last_seen) }}</dd><dt>Last discovery</dt><dd>{{ formatLongTime(device.discovered_at) }}</dd><template v-if="device.transport === 'ssh'"><dt>Reboot</dt><dd>{{ device.reboot_required ? 'Required' : 'Not required' }}</dd></template></dl></div></article>
+      <article class="card"><div class="card-body"><h3>Health</h3><dl class="facts-list"><dt>Status</dt><dd><StatusBadge :status="device.status" /></dd><dt>Last seen</dt><dd>{{ formatLongTime(device.last_seen) }}</dd><dt>Last discovery</dt><dd>{{ formatLongTime(device.discovered_at) }}</dd><template v-if="device.transport === 'ssh'"><dt>Maintenance mode</dt><dd>{{ device.maintenance_mode }}</dd><dt v-if="device.maintenance_mode === 'kubernetes'">Scheduling</dt><dd v-if="device.maintenance_mode === 'kubernetes'">{{ device.facts.kubernetes_unschedulable ? 'Cordoned' : device.facts.kubernetes_available ? 'Schedulable' : 'Unverified' }}</dd><dt>Reboot</dt><dd>{{ device.reboot_required ? 'Required' : 'Not required' }}</dd></template></dl></div></article>
       <article v-if="hardwareFacts.length" class="card full"><div class="card-body"><h3>Hardware</h3><div class="hardware-grid"><div v-for="item in hardwareFacts" :key="item.label"><span>{{ item.label }}</span><strong>{{ item.value }}</strong></div></div></div></article>
     </section>
 
@@ -38,11 +40,12 @@
 
     <section v-else class="card"><div class="card-body"><div class="section-header"><div><h3>Available operations</h3><p>These actions are derived from discovered capabilities.</p></div><router-link :to="`/operations?device=${device.id}`" class="btn btn-primary btn-sm">Open Operations</router-link></div><div class="capability-grid"><span v-for="capability in device.capabilities" :key="capability"><i class="fas fa-check" aria-hidden="true"></i>{{ capability }}</span></div></div></section>
 
-    <BaseModal :visible="showEdit" title="Edit device connection" @cancel="showEdit = false">
+    <BaseModal :visible="showEdit" title="Edit device and maintenance settings" @cancel="showEdit = false">
       <form id="edit-device-form" @submit.prevent="save">
         <div class="form-group"><label class="form-label" for="edit-name">Display name</label><input id="edit-name" v-model="edit.display_name" class="form-input" required /></div>
         <div class="form-group"><label class="form-label" for="edit-endpoint">Endpoint</label><input id="edit-endpoint" v-model="edit.endpoint" class="form-input" required /></div>
         <div v-if="device.transport === 'ssh'" class="form-group"><label class="form-label" for="edit-user">SSH user</label><input id="edit-user" v-model="edit.ssh_user" class="form-input" /></div>
+        <template v-if="device.transport === 'ssh'"><div class="form-group"><label class="form-label" for="maintenance-mode">Maintenance mode</label><select id="maintenance-mode" v-model="edit.maintenance_mode" class="form-select"><option value="unknown">Not configured (disruptive actions blocked)</option><option value="standalone">Standalone host</option><option value="kubernetes">Kubernetes node</option></select></div><template v-if="edit.maintenance_mode === 'kubernetes'"><div class="form-group"><label class="form-label" for="cluster-context">Controller Kubernetes context</label><input id="cluster-context" v-model.trim="edit.kubernetes_context" class="form-input" placeholder="Use controller's current context" /></div><div class="form-group"><label class="form-label" for="cluster-node">Kubernetes node name</label><input id="cluster-node" v-model.trim="edit.kubernetes_node_name" class="form-input" placeholder="Match discovered host identity" /></div></template><p class="muted">Standalone mode is rejected when local Kubernetes membership is detected. Kubernetes maintenance respects disruption budgets and verifies readiness before resuming workloads.</p></template>
       </form>
       <template #actions><button class="btn btn-ghost" @click="showEdit = false">Cancel</button><button class="btn btn-primary" type="submit" form="edit-device-form">Save</button></template>
     </BaseModal>
@@ -86,7 +89,7 @@ import { deviceKind, devicePlatformName } from "../utils/devices.js";
 import { formatLongTime } from "../utils/time.js";
 const props = defineProps({ id: { type: String, required: true } });
 const router = useRouter(); const device = ref(null); const loading = ref(true); const scanning = ref(false); const showEdit = ref(false); const showRemove = ref(false); const showSshSetup = ref(false); const sshPreviewing = ref(false); const sshSaving = ref(false); const sshPreview = ref(null); const sshFingerprintConfirmed = ref(false); const activeTab = ref("Summary"); const tabs = ["Summary", "Hardware", "Software", "Context", "Operations"]; const savingAnnotations = ref(false); const annotationRows = ref([]); let nextAnnotationId = 1;
-const edit = reactive({ display_name: "", endpoint: "", ssh_user: "" });
+const edit = reactive({ display_name: "", endpoint: "", ssh_user: "", maintenance_mode: "unknown", kubernetes_context: "", kubernetes_node_name: "" });
 const sshSetup = reactive({ ssh_user: "pollen", passwordless_ssh: true, ssh_password: "", bootstrap_password: "", become_password: "" });
 const kind = computed(() => deviceKind(device.value?.kind));
 const platformName = computed(() => devicePlatformName(device.value));
@@ -111,9 +114,9 @@ const reachySoftwareFacts = computed(() => {
 });
 function resetAnnotationRows() { annotationRows.value = Object.entries(device.value?.annotations || {}).map(([key, value]) => ({ id: nextAnnotationId++, key, value })); }
 function addAnnotation() { annotationRows.value.push({ id: nextAnnotationId++, key: "", value: "" }); }
-async function load() { loading.value = true; try { device.value = await getDevice(props.id); Object.assign(edit, { display_name: device.value.name, endpoint: device.value.endpoint, ssh_user: device.value.ssh_user || "" }); resetAnnotationRows(); } catch (error) { device.value = null; } finally { loading.value = false; } }
-async function scan() { scanning.value = true; try { const result = await scanDevice(props.id); window.$toast?.success(result.detail || "Scan started"); if (!result.job_id) await load(); } catch (error) { window.$toast?.error("Couldn't scan device", error); } finally { scanning.value = false; } }
-async function save() { const payload = { display_name: edit.display_name, endpoint: edit.endpoint }; if (device.value.transport === "ssh") payload.ssh_user = edit.ssh_user; try { device.value = await updateDevice(props.id, payload); showEdit.value = false; window.$toast?.success("Device updated"); } catch (error) { window.$toast?.error("Couldn't update device", error); } }
+async function load() { loading.value = true; try { device.value = await getDevice(props.id); Object.assign(edit, { display_name: device.value.name, endpoint: device.value.endpoint, ssh_user: device.value.ssh_user || "", maintenance_mode:device.value.maintenance_mode || "unknown", kubernetes_context:device.value.kubernetes_context || "", kubernetes_node_name:device.value.kubernetes_node_name || "" }); resetAnnotationRows(); } catch (error) { device.value = null; } finally { loading.value = false; } }
+async function scan() { scanning.value = true; try { const result = await scanDevice(props.id); window.$toast?.success(result.detail || "Scan started"); if (result.job_id) await router.push({path:"/activity", query:{job:result.job_id}}); else await load(); } catch (error) { window.$toast?.error("Couldn't scan device", error); } finally { scanning.value = false; } }
+async function save() { const payload = { display_name: edit.display_name, endpoint: edit.endpoint }; if (device.value.transport === "ssh") Object.assign(payload, {ssh_user:edit.ssh_user, maintenance_mode:edit.maintenance_mode, kubernetes_context:edit.kubernetes_context, kubernetes_node_name:edit.kubernetes_node_name}); try { device.value = await updateDevice(props.id, payload); showEdit.value = false; window.$toast?.success("Device updated"); } catch (error) { window.$toast?.error("Couldn't update device", error); } }
 async function saveAnnotations() { const annotations = {}; for (const item of annotationRows.value) { const key = item.key.trim(); const value = item.value.trim(); if (!key && !value) continue; if (!key || !value) { window.$toast?.error("Each manual attribute needs both a name and value"); return; } if (Object.hasOwn(annotations, key)) { window.$toast?.error(`Duplicate attribute: ${key}`); return; } annotations[key] = value; } savingAnnotations.value = true; try { device.value = await updateDeviceAnnotations(props.id, annotations); resetAnnotationRows(); window.$toast?.success("Manual attributes saved. Re-index context to publish them to search."); } catch (error) { window.$toast?.error("Couldn't save manual attributes", error); } finally { savingAnnotations.value = false; } }
 async function openSshSetup() { Object.assign(sshSetup, { ssh_user: device.value.ssh_user || "pollen", passwordless_ssh: device.value.passwordless_ssh ?? true, ssh_password: "", bootstrap_password: "", become_password: "" }); sshPreview.value = null; sshFingerprintConfirmed.value = false; showSshSetup.value = true; await previewSshSetup(); }
 function closeSshSetup() { showSshSetup.value = false; sshPreview.value = null; sshFingerprintConfirmed.value = false; }

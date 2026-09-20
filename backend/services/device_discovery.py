@@ -124,7 +124,12 @@ def reachy_websocket_url(endpoint: str, port: int, path: str) -> str:
 def enrich_from_scan(device, report: dict) -> None:
     """Update identity and capabilities from portable scan facts."""
     capabilities = set(BASE_LINUX_CAPABILITIES)
-    capabilities.update({SYSTEM_UPDATE, CONTAINERS_CLEANUP})
+    if report.get("os_family") in {"Debian", "RedHat"}:
+        capabilities.add(SYSTEM_UPDATE)
+    if report.get("docker_available") is True or report.get("containerd_available") is True:
+        capabilities.add(CONTAINERS_CLEANUP)
+    if report.get("service_manager") == "systemd":
+        capabilities.add("services.manage")
     if report.get("kubernetes_available") is True:
         capabilities.add(KUBERNETES_DRAIN)
 
@@ -188,6 +193,16 @@ def enrich_from_scan(device, report: dict) -> None:
         device.machine_type = "gpu_node" if GPU_INSPECT in capabilities else "cpu_node"
     device.capabilities = normalize_capabilities(capabilities)
     facts = {
+        "distribution": _clean_fact(report.get("distribution")),
+        "service_manager": _clean_fact(report.get("service_manager")),
+        "package_manager": _clean_fact(report.get("package_manager")),
+        "nvidia_driver_package": _clean_fact(report.get("nvidia_driver_package")),
+        "gpu_vendor": _clean_fact(report.get("gpu_vendor")),
+        "kubernetes_membership_detected": report.get("kubernetes_membership_expected") is True,
+        "kubernetes_node_name": report.get("kubernetes_node_name"),
+        "kubernetes_available": report.get("kubernetes_available") is True,
+        "kubernetes_api_accessible": report.get("kubernetes_api_accessible") is True,
+        "kubernetes_unschedulable": report.get("kubernetes_unschedulable"),
         "system_vendor": vendor,
         "product_name": model,
         "product_version": _clean_fact(report.get("product_version")),
@@ -232,6 +247,7 @@ def enrich_from_scan(device, report: dict) -> None:
         facts["dgx"] = dgx_facts
     device.facts = facts
     device.discovered_at = datetime.now(timezone.utc)
+    device.facts_stale = False
 
 
 def _is_dgx_spark(

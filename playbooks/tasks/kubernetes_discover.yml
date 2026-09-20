@@ -29,6 +29,8 @@
       }}
     kubernetes_api_accessible: false
     kubernetes_api_error: ""
+    kubernetes_matched_nodes: []
+    kubernetes_node_uid: ""
     kubernetes_node_found: false
     kubernetes_resolved_node_name: ""
     kubernetes_node_was_unschedulable: false
@@ -56,6 +58,8 @@
 
 - name: Match the managed host to a Kubernetes node
   ansible.builtin.set_fact:
+    kubernetes_matched_nodes: "{{ kubernetes_matched_nodes + [item.metadata.name] }}"
+    kubernetes_node_uid: "{{ item.metadata.uid }}"
     kubernetes_node_found: true
     kubernetes_resolved_node_name: "{{ item.metadata.name }}"
     kubernetes_node_was_unschedulable: >-
@@ -77,3 +81,8 @@
       | length
     ) > 0
   changed_when: false
+
+- name: Reject ambiguous node identity
+  ansible.builtin.assert:
+    that: kubernetes_matched_nodes | length <= 1
+    fail_msg: "Multiple nodes match this device. Set an explicit Kubernetes node name."
