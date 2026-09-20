@@ -172,9 +172,8 @@
     - name: Inspect local Kubernetes membership indicators
       ansible.builtin.include_tasks: tasks/kubernetes_indicators.yml
 
-    - name: Read installed package inventory
-      ansible.builtin.package_facts:
-        manager: auto
+    - name: Discover the supported NVIDIA driver package
+      ansible.builtin.include_tasks: tasks/discover_driver_package.yml
 
     - name: Discover Kubernetes membership from the controller
       ansible.builtin.include_tasks: tasks/kubernetes_discover.yml
@@ -217,7 +216,7 @@
           distribution: "{{ ansible_facts.distribution }}"
           service_manager: "{{ ansible_facts.service_mgr }}"
           package_manager: "{{ ansible_facts.pkg_mgr }}"
-          nvidia_driver_package: "{{ ansible_facts.packages.keys() | select('match', '^nvidia-driver-[0-9]+(-server)?(-open)?$') | sort | first | default('') }}"
+          nvidia_driver_package: "{{ fleet_nvidia_driver_package }}"
           kubernetes_membership_expected: "{{ kubernetes_membership_expected }}"
           architecture: "{{ ansible_facts['architecture'] | default('unknown') }}"
           system_vendor: "{{ ansible_facts['system_vendor'] | default('unknown') }}"

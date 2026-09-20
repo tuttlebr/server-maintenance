@@ -1,0 +1,26 @@
+---
+# package_facts requires Python APT bindings for the selected interpreter. Edge
+# devices can use a newer Ansible interpreter than their distro's python3-apt.
+# The native package database provides everything needed for driver eligibility.
+- name: Read NVIDIA driver package names and installation states
+  ansible.builtin.command:
+    argv:
+      - dpkg-query
+      - --show
+      - '--showformat=${Package} ${db:Status-Status}\n'
+      - 'nvidia-driver-*'
+    expand_argument_vars: false
+  when: ansible_facts.os_family == 'Debian'
+  register: fleet_driver_packages
+  changed_when: false
+  # Exit 1 means no matching package; Jetson L4T uses different driver packages.
+  failed_when: fleet_driver_packages.rc not in [0, 1]
+  check_mode: false
+
+- name: Select an installed supported NVIDIA driver metapackage
+  ansible.builtin.set_fact:
+    fleet_nvidia_driver_package: >-
+      {{ fleet_driver_packages.stdout_lines | default([])
+         | select('match', '^nvidia-driver-[0-9]+(-server)?(-open)? installed$')
+         | map('regex_replace', ' installed$', '')
+         | sort | first | default('') }}
