@@ -121,7 +121,7 @@
                           type="button"
                           :class="['log-toggle', { active: autoScroll }]"
                           :aria-pressed="autoScroll"
-                          @click="autoScroll = !autoScroll"
+                          @click="toggleAutoScroll"
                         >
                           Auto-scroll
                         </button>
@@ -136,12 +136,12 @@
                       </div>
                     </div>
                     <div
-                      ref="logContainer"
+                      ref="logContainers"
                       class="log-output"
                       :style="{ whiteSpace: wrapLines ? 'pre-wrap' : 'pre' }"
                       tabindex="0"
                       @scroll="onLogScroll"
-                      v-html="renderedLog || (expandedJob && expandedJob.output_log ? colorizeAnsible(expandedJob.output_log) : '<span style=\'opacity:.5\'>No output available</span>')"
+                      v-html="renderedLog || '<span style=\'opacity:.5\'>No output available</span>'"
                     ></div>
                   </div>
                 </div>
@@ -162,7 +162,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted, nextTick, computed } from "vue";
+import { ref, watch, onMounted, onUnmounted, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AnsiToHtml from "ansi-to-html";
 import { getJobs, getJob, streamJobOutput, cancelJob } from "../api.js";
@@ -182,10 +182,14 @@ const expanded = ref(null);
 const expandedJob = ref(null);
 const liveOutput = ref("");
 const streaming = ref(false);
-const logContainer = ref(null);
+// Template refs inside v-for are arrays, even with only one expanded job.
+const logContainers = ref([]);
+const logContainer = computed(() => logContainers.value[0]);
 
 const autoScroll = ref(true);
 const wrapLines = ref(true);
+let autoScrollDisabled = false;
+let lastScrollTop = 0;
 
 let streamController = null;
 const ansiConverter = new AnsiToHtml({
@@ -217,7 +221,10 @@ function colorizeAnsible(text) {
     .join("");
 }
 
-const renderedLog = computed(() => (liveOutput.value ? colorizeAnsible(liveOutput.value) : ""));
+const renderedLog = computed(() => colorizeAnsible(liveOutput.value || expandedJob.value?.output_log || ""));
+
+// Follow after the DOM update, including saved output, wrapping, and resuming.
+watch([renderedLog, logContainer, autoScroll, wrapLines], scrollIfNeeded, { flush: "post" });
 
 async function load() {
   try {
@@ -237,22 +244,25 @@ function stopStream() {
   streaming.value = false;
 }
 
-function onLogScroll() {
-  const el = logContainer.value;
-  if (!el) return;
+function toggleAutoScroll() {
+  autoScroll.value = !autoScroll.value;
+  autoScrollDisabled = !autoScroll.value;
+}
+
+function onLogScroll(event) {
+  const el = event.currentTarget;
   const distanceFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight);
-  // If user scrolls up more than ~40px, disable auto-scroll; if they snap back, re-enable.
-  if (distanceFromBottom > 40) autoScroll.value = false;
-  else if (distanceFromBottom < 4) autoScroll.value = true;
+  // Content growth alone must not pause following. Only upward movement does.
+  if (el.scrollTop < lastScrollTop && distanceFromBottom > 40) autoScroll.value = false;
+  else if (distanceFromBottom < 4 && !autoScrollDisabled) autoScroll.value = true;
+  lastScrollTop = el.scrollTop;
 }
 
 function scrollIfNeeded() {
-  if (!autoScroll.value) return;
-  nextTick(() => {
-    if (logContainer.value) {
-      logContainer.value.scrollTop = logContainer.value.scrollHeight;
-    }
-  });
+  const el = logContainer.value;
+  if (!autoScroll.value || !el) return;
+  el.scrollTop = el.scrollHeight;
+  lastScrollTop = el.scrollTop;
 }
 
 async function startStream(jobId) {
@@ -266,7 +276,6 @@ async function startStream(jobId) {
     onLine: (line) => {
       if (expanded.value !== jobId) return;
       liveOutput.value += line + "\n";
-      scrollIfNeeded();
     },
     onDone: async () => {
       if (expanded.value !== jobId) return;
@@ -298,6 +307,8 @@ async function showJob(jobId) {
   expandedJob.value = null;
   liveOutput.value = "";
   autoScroll.value = true;
+  autoScrollDisabled = false;
+  lastScrollTop = 0;
   if (!expanded.value) return;
   try {
     const job = await getJob(jobId);
@@ -305,7 +316,6 @@ async function showJob(jobId) {
     expandedJob.value = job;
     if (!jobs.value.some((item) => item.job_id === jobId)) jobs.value.unshift(job);
     if (['running', 'pending', 'cancelling'].includes(job.status)) startStream(jobId);
-    else nextTick(scrollIfNeeded);
   } catch (e) {
     if (expanded.value === jobId) {
       window.$toast?.error("Couldn't load job details", e);
