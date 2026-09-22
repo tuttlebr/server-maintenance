@@ -21,8 +21,9 @@
     fail_msg: "Required mounts are missing: {{ fleet_required_mounts.stdout_lines | difference(fleet_current_mounts.stdout_lines) | join(', ') }}"
 
 - name: Read failed systemd units
-  ansible.builtin.command: systemctl --failed --no-pager --plain
+  ansible.builtin.command: systemctl list-units --failed --no-legend --no-pager --plain
   register: fleet_failed_units
+  failed_when: false
   changed_when: false
   when: ansible_facts.service_mgr == 'systemd'
 
@@ -33,10 +34,33 @@
   changed_when: false
   when: ansible_facts.service_mgr == 'systemd'
 
+- name: Read pending systemd jobs when the system is not running
+  ansible.builtin.command: systemctl list-jobs --no-legend --no-pager --plain
+  register: fleet_systemd_jobs
+  failed_when: false
+  changed_when: false
+  when:
+    - ansible_facts.service_mgr == 'systemd'
+    - fleet_systemd_health.rc != 0 or fleet_systemd_health.stdout | trim != 'running'
+
 - name: Require healthy system services
   ansible.builtin.assert:
-    that: fleet_systemd_health.rc == 0 and fleet_systemd_health.stdout | trim == 'running'
-    fail_msg: "System services need recovery: {{ fleet_failed_units.stdout }}"
+    that:
+      - fleet_systemd_health.rc == 0
+      - fleet_systemd_health.stdout | trim == 'running'
+      - fleet_failed_units.rc == 0
+      - fleet_failed_units.stdout | trim | length == 0
+    fail_msg: |-
+      System services need recovery.
+      System state: {{ fleet_systemd_health.stdout | trim | default('unknown', true) }} (rc={{ fleet_systemd_health.rc }}).
+      State check stderr: {{ fleet_systemd_health.stderr | default('') | trim | default('none', true) }}
+      Failed units (rc={{ fleet_failed_units.rc }}):
+      {{ fleet_failed_units.stdout | trim | default('none listed', true) }}
+      Failed-unit query stderr: {{ fleet_failed_units.stderr | default('') | trim | default('none', true) }}
+      Pending jobs (rc={{ fleet_systemd_jobs.rc | default('not queried') }}):
+      {{ fleet_systemd_jobs.stdout | default('') | trim | default('none listed or not queried', true) }}
+      Pending-job query stderr: {{ fleet_systemd_jobs.stderr | default('') | trim | default('none', true) }}
+      If the state is starting, inspect pending jobs with systemctl list-jobs; SSH can be available before boot completes.
   when: ansible_facts.service_mgr == 'systemd'
 
 - name: Verify Debian package configuration is complete

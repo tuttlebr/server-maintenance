@@ -23,6 +23,8 @@ A capability-driven fleet operations platform for Linux compute, edge devices, a
 
 ## Startup
 
+Before the first start, complete [Create the `.env` secrets](#create-the-env-secrets).
+
 Use the idempotent startup target for both first-time setup and normal restarts:
 
 ```bash
@@ -150,13 +152,149 @@ export SSH_AUTH_SOCK_PATH="$PWD/.fleet-ssh/agent.sock"
 docker compose up -d --build --force-recreate ssh-agent-proxy
 ```
 
-## Quick Start
+## Create the `.env` secrets
+
+Run the setup commands from the repository root. Keep real values in the ignored `.env` file and your password manager. Do not put them in `.env.example`, source control, chat, or issue reports.
+
+### 1. Generate the five required local secrets
+
+These credentials are created locally. No external account or API key is needed for them.
+
+| Variable | Purpose and required format | Generated value |
+|----------|-----------------------------|-----------------|
+| `SECRET_KEY` | Signs Fleet Manager login tokens; at least 32 characters | 64 random hexadecimal characters |
+| `ADMIN_PASSWORD` | Password for the default `admin` web account; at least 12 characters | 32 random URL-safe characters |
+| `HOST_SECRET_KEY` | Encrypts stored SSH and sudo passwords; a URL-safe Base64 encoding of exactly 32 random bytes | 44 characters, including the final `=` |
+| `MINIO_ACCESS_KEY` | Root username for the bundled MinIO server | `fleet_` followed by 24 random hexadecimal characters |
+| `MINIO_SECRET_KEY` | Root password for the bundled MinIO server | 43 random URL-safe characters |
+
+Run this complete script with Python 3.6 or later. It uses only the Python standard library. It creates `.env` from `.env.example` if needed, fills blank local secrets, and sets file permissions to `0600`. Existing nonempty values remain unchanged. It prints variable names only.
 
 ```bash
-# Clone and configure
-cp .env.example .env
-# Edit .env and set every required secret
+python3 - <<'PY'
+import base64
+import os
+from pathlib import Path
+import secrets
 
+os.umask(0o077)
+env_path = Path(".env")
+if env_path.is_symlink() or (env_path.exists() and not env_path.is_file()):
+    raise SystemExit(".env must be a regular file, not a symbolic link")
+
+source = env_path if env_path.exists() else Path(".env.example")
+lines = source.read_text(encoding="utf-8").splitlines()
+generators = {
+    "SECRET_KEY": lambda: secrets.token_hex(32),
+    "ADMIN_PASSWORD": lambda: secrets.token_urlsafe(24),
+    "HOST_SECRET_KEY": lambda: base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii"),
+    "MINIO_ACCESS_KEY": lambda: "fleet_" + secrets.token_hex(12),
+    "MINIO_SECRET_KEY": lambda: secrets.token_urlsafe(32),
+}
+updated = []
+for name, generate in generators.items():
+    matches = [i for i, line in enumerate(lines) if line.startswith(name + "=")]
+    if len(matches) != 1:
+        raise SystemExit(f"Expected exactly one {name}= line; fix .env before retrying")
+    index = matches[0]
+    value = lines[index].partition("=")[2].strip()
+    if value in ("", "''", '\"\"'):
+        lines[index] = name + "=" + generate()
+        updated.append(name)
+
+if env_path.exists():
+    env_path.chmod(0o600)
+env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+env_path.chmod(0o600)
+print("Generated: " + (", ".join(updated) if updated else "none; existing values retained"))
+print("Saved .env with permissions 0600. Secret values were not printed.")
+PY
+```
+
+Open `.env` in a local editor. Save the generated `ADMIN_PASSWORD` in your password manager; use it with username `admin`. The application expects the password itself, not a password hash. The script preserves nonempty placeholder values too, so replace any placeholders before startup.
+
+Back up `HOST_SECRET_KEY` with the Fleet Manager database. If restoring an existing database, restore its original key before running the script. A new key cannot decrypt passwords encrypted with the old key. The generated value follows the [Fernet key format](https://cryptography.io/en/latest/fernet/); preserve its final `=`.
+
+Compose passes `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` to MinIO as `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD`. It passes the same pair to Milvus for object-storage access. Starting the stack provisions these MinIO credentials; no MinIO console setup or AWS account is required. Use distinct values for each secret and avoid defaults such as `minioadmin`.
+
+### 2. Create `AI_HELPER_API_KEY`
+
+The default `AI_HELPER_BASE_URL=https://inference-api.nvidia.com/v1` uses NVIDIA's internal Inference Hub. Create its key through the service:
+
+1. Open [Inference Hub](https://inference.nvidia.com/) and sign in with NVIDIA SSO.
+2. Select **Profile**, then **Key Management**, then **Generate API Key**.
+3. Select **Personal Key** for experiments, **Non-Prod Service** for application development, or **Prod Service** for production.
+4. Complete the required service details and select an expiration period.
+5. Generate the key and save it in your password manager.
+6. In your local `.env`, paste the key after `AI_HELPER_API_KEY=`. Do not include the `Bearer ` prefix.
+7. In the model catalog's **Developer Tools**, confirm the model ID for your selected model and set `AI_HELPER_MODEL`.
+
+The template selects `aws/anthropic/bedrock-claude-sonnet-4-6`. Model access and availability depend on the service. Keep the base URL at `/v1`; Fleet Manager appends `/chat/completions`. These steps follow the internal [Inference Hub Getting Started guide](https://nvidia.atlassian.net/wiki/spaces/ITBU/pages/2814902879/Getting+Started), which requires NVIDIA access.
+
+If you use public NVIDIA hosted inference, create a key through [NVIDIA API Catalog](https://build.nvidia.com/): sign in, open a model, select **Get API Key**, then **Generate Key**. Set `AI_HELPER_BASE_URL=https://integrate.api.nvidia.com/v1` and copy that model's API ID into `AI_HELPER_MODEL`. Use the public key with this public endpoint. See NVIDIA's [hosted inference setup instructions](https://docs.nvidia.com/vss/2.2.0/content/installation-remote.html#using-nims-from-build-nvidia-com).
+
+For another OpenAI-compatible provider, create the key in that provider's console. Set the matching base URL and model ID. Random strings generated locally cannot authenticate to a hosted provider.
+
+`AI_HELPER_API_KEY` is needed for Fleet Help chat. Core fleet operations do not use it. Without an AI key or a separate embedding key, document and job-log embedding also remain unavailable.
+
+### 3. Set `EMBED_API_KEY` only when needed
+
+If chat and embeddings use the same provider and credential, leave `EMBED_API_KEY` and `EMBED_BASE_URL` commented out. The embedding clients fall back to `AI_HELPER_API_KEY` and `AI_HELPER_BASE_URL`. For the standalone Rust ingester, an uncommented empty override prevents that fallback.
+
+If embeddings use a different provider or credential:
+
+1. Create a key through that provider's console, using the applicable process in step 2.
+2. Enable access to the chosen embedding model where the provider requires it.
+3. Uncomment `EMBED_API_KEY` and paste the issued key after `=`.
+4. Uncomment `EMBED_BASE_URL` and set the provider's OpenAI-compatible base URL, usually ending in `/v1`.
+5. Set `EMBED_MODEL` to the embedding model's API ID and `EMBED_DIM` to its output dimension.
+
+The template uses `nvidia/qwen/qwen3-embedding-0.6b` with dimension `1024`. Confirm both values for your provider. A chat model ID cannot be used as an embedding model ID. Rebuild the documentation and job-log indexes if you change embedding models or dimensions.
+
+### 4. Prepare SSH and optional Kubernetes credentials
+
+`SSH_AUTH_SOCK_PATH` is the path to an agent socket. The SSH private key and its passphrase do not belong in `.env`.
+
+```bash
+make prepare
+```
+
+This creates or reuses the dedicated SSH key, prompts for its passphrase when needed, and prepares the agent and `known_hosts` seed. Follow [Dedicated SSH Key and Agent Setup](#dedicated-ssh-key-and-agent-setup) to install the public key on managed hosts. Choose the passphrase locally and keep it in your password manager.
+
+`make start` supplies the socket and seed paths to Compose automatically. For direct `docker compose` commands, set `SSH_AUTH_SOCK_PATH` to the absolute socket path, normally `/absolute/path/to/server-maintenance/.fleet-ssh/agent.sock`. `SSH_KNOWN_HOSTS_PATH` contains verified server public keys and needs no password.
+
+For Kubernetes-aware maintenance, obtain a kubeconfig for an authorized controller identity from your cluster administrator or provider's login tooling. Follow [Kubernetes-aware maintenance](#kubernetes-aware-maintenance) for permissions and configuration. Set `FLEET_KUBECONFIG_PATH` to its absolute host path and protect the file with `chmod 600`. A kubeconfig can contain tokens or private keys. Leave this variable empty if Kubernetes integration is unused.
+
+### 5. Leave `MILVUS_TOKEN` unset for the bundled stack
+
+The supplied Compose stack does not enable Milvus user authentication. Leave `# MILVUS_TOKEN=root:Milvus` commented out. `root:Milvus` is the upstream initial username/password pair, not a newly generated secret. MinIO credentials control Milvus's storage access; they do not authenticate clients to Milvus.
+
+For the standalone Rust ingester against a separate, authenticated Milvus server, obtain an authorized account from its administrator. `MILVUS_TOKEN` is the literal `username:password` pair. For example, after the administrator creates `fleet_ingester`, store its assigned password locally as `MILVUS_TOKEN='fleet_ingester:the-assigned-password'`. Replace the example password. The account needs permission to create, drop, index, load, and write the target collection.
+
+If you administer that server, use the [Milvus 2.4 authentication guide](https://milvus.io/docs/v2.4.x/authenticate.md) to enable `common.security.authorizationEnabled` in `milvus.yaml`. Use its `MilvusClient.create_user(user_name=..., password=...)` procedure to create the account, then [assign its roles and privileges](https://milvus.io/docs/v2.4.x/users_and_roles.md). Generate the account password in your password manager. Change the initial root password with `MilvusClient.update_password(user_name="root", old_password=..., new_password=...)` before using the server. Creating a `MILVUS_TOKEN` entry alone does not create an account or enable authentication.
+
+Current integration limit: only the Rust ingester reads `MILVUS_TOKEN`. The Python documentation and job-log clients and NAT do not pass it to Milvus. Enabling authentication for the bundled server requires changes to those clients and Compose before the full application can use it.
+
+### 6. Check the configuration and start
+
+Keep secrets on one line in `.env`. If a provider-issued value contains `$` or `#`, surround the value with single quotes. Compose treats single-quoted values literally; see its [`.env` syntax rules](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/#env-file-syntax). The locally generated values above need no quotes.
+
+After SSH preparation, validate Compose without printing the resolved secrets:
+
+```bash
+SSH_AUTH_SOCK_PATH="$PWD/.fleet-ssh/agent.sock" docker compose config --quiet
+make start
+```
+
+If you used a custom `FLEET_SSH_DIR`, substitute its absolute agent socket path in the validation command. Compose validation checks configuration, not provider access. After startup, log in as `admin`, ask Fleet Help a question, and use the Context page's re-index action to check embedding access. A successful web login alone does not verify the AI or embedding key.
+
+After changing `.env`, run `make start` so Compose recreates affected containers. Changing `SECRET_KEY` invalidates existing login tokens. Changing `ADMIN_PASSWORD` changes future logins but does not revoke issued tokens. Preserve `HOST_SECRET_KEY` unless you also migrate the encrypted credentials; the application has no automatic key-rotation migration.
+
+## Quick Start
+
+Complete [Create the `.env` secrets](#create-the-env-secrets), then run:
+
+```bash
 # Prepare SSH, build, run, wait for health, and sync hosts.csv if present
 make start
 
@@ -164,7 +302,7 @@ make start
 open http://localhost:8080
 ```
 
-Startup fails if authentication, host-encryption, or MinIO secrets are missing or use known placeholder values.
+Startup validates the admin password, JWT signing key, and host-encryption key. Compose requires nonempty MinIO credentials; it does not reject every weak or placeholder MinIO value.
 
 ## Configuration
 
@@ -173,6 +311,8 @@ Startup fails if authentication, host-encryption, or MinIO secrets are missing o
 | `FLEET_PORT` | `8080` | Port the web UI listens on |
 | `SSH_AUTH_SOCK_PATH` | required | Dedicated host SSH agent socket bridged to the non-root web container |
 | `SSH_KNOWN_HOSTS_PATH` | `./.fleet-ssh/known_hosts` | Optional seed file copied into the UI-managed persistent trust database |
+| `FLEET_KUBECONFIG_PATH` | empty | Absolute host path to the controller kubeconfig; required for Kubernetes-aware maintenance in Docker |
+| `APP_ENV` | `development` | Application environment; required secrets are validated in every environment |
 | `SECRET_KEY` | required | JWT signing key with at least 32 characters |
 | `ADMIN_PASSWORD` | required | Web UI admin password with at least 12 characters |
 | `HOST_SECRET_KEY` | required | Fernet key used to encrypt stored SSH and sudo passwords |
@@ -182,7 +322,19 @@ Startup fails if authentication, host-encryption, or MinIO secrets are missing o
 | `ANSIBLE_FORKS` | `10` | Maximum hosts Ansible may operate on concurrently inside one fleet-scoped job; playbook `serial` still takes precedence |
 | `MINIO_ACCESS_KEY` | required | Non-default MinIO root user shared with Milvus |
 | `MINIO_SECRET_KEY` | required | Non-default MinIO root password shared with Milvus |
+| `AI_HELPER_API_KEY` | empty | Provider-issued credential for Fleet Help; see secret setup above |
+| `AI_HELPER_MODEL` | `aws/anthropic/bedrock-claude-sonnet-4-6` | Chat model API ID in `.env.example` |
+| `AI_HELPER_BASE_URL` | `https://inference-api.nvidia.com/v1` | Chat API base URL in `.env.example`; use the endpoint matching the key |
 | `EMBED_MODEL` | `nvidia/qwen/qwen3-embedding-0.6b` | Embedding model shared by documentation and completed-job retrieval |
+| `EMBED_DIM` | `1024` | Embedding output dimension in `.env.example`; must match the selected model |
+| `EMBED_API_KEY` | unset | Optional embedding credential; omit to reuse `AI_HELPER_API_KEY` |
+| `EMBED_BASE_URL` | unset | Optional embedding endpoint; omit to reuse `AI_HELPER_BASE_URL` |
+| `MILVUS_URI` | `http://localhost:19530` | Host-facing URI in `.env.example`; Compose sets `http://milvus:19530` inside containers |
+| `MILVUS_TOKEN` | unset | Optional `username:password` for the Rust ingester only; leave commented for the bundled stack |
+| `DOCS_URLS_FILE` | `/app/docs/urls.txt` | URL-prefix list used by the web container's documentation indexer |
+| `DOCS_MARKDOWN_DIR` | `/app/data/docs-crawled` | Directory for crawled Markdown |
+| `DOCS_INGESTER_BIN` | `/usr/local/bin/fleet-doc-ingester` | Rust documentation ingester executable |
+| `NAT_BASE_URL` | `http://nat:8000` | Internal NeMo Agent Toolkit endpoint in `.env.example`; no secret is required for this URL |
 
 ## Adding Devices to the Fleet
 
