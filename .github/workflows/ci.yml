@@ -77,7 +77,7 @@ jobs:
         run: npm audit --audit-level=moderate
 
       - name: Rust tests
-        run: cargo test --manifest-path tools/dgx-doc-ingester/Cargo.toml
+        run: cargo test --locked --manifest-path tools/dgx-doc-ingester/Cargo.toml
 
       - name: Rust vulnerability audit
         run: |
