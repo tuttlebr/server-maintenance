@@ -51,7 +51,14 @@ jobs:
         run: python -m pip_audit -r backend/requirements.txt
 
       - name: Compose config
-        run: docker compose config --quiet
+        # Validation only: these placeholders are never used to start services.
+        env:
+          SSH_AUTH_SOCK_PATH: /tmp/fleet-ci-agent.sock
+          MINIO_ACCESS_KEY: ci-validation-only
+          MINIO_SECRET_KEY: ci-validation-only-password
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
 
       - name: Frontend dependencies
         working-directory: frontend
