@@ -1369,6 +1369,6 @@ mod tests {
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].source, "Fleet Manager UI Guide");
         assert!(chunks[0].text.contains("docs/fleet-manager-ui.md"));
-        assert!(chunks[0].heading.contains("Maintenance"));
+        assert_eq!(chunks[0].heading, "Fleet Manager UI Guide: Operations");
     }
 }
