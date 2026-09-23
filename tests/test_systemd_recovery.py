@@ -14,25 +14,38 @@ ROOT = Path(__file__).parents[1]
 ANSIBLE = shutil.which("ansible-playbook")
 PLYMOUTH_JOB = "193 plymouth-quit-wait.service start running\n2 multi-user.target start waiting\n"
 FAILED_UNIT = "example.service loaded failed failed Example service\n"
+MOTD_UNIT = "motd-news.service loaded failed failed Message of the Day\n"
 
 
 @pytest.mark.skipif(not ANSIBLE, reason="ansible-playbook is required")
-@pytest.mark.parametrize("state,health_rc,failed_units,failed_rc,query_stderr,jobs_rc,service_mgr,expected_rc", [
-    ("running\n", 0, "", 0, "", 0, "systemd", 0),
-    ("  running \n", 0, " \n", 0, "", 0, "systemd", 0),
-    ("starting\n", 1, "", 0, "", 0, "systemd", 2),
-    ("starting\n", 1, "", 0, "Failed to list jobs", 1, "systemd", 2),
-    ("degraded\n", 1, FAILED_UNIT, 0, "", 0, "systemd", 2),
-    ("maintenance\n", 1, "", 0, "", 0, "systemd", 2),
-    ("offline\n", 1, "", 0, "", 0, "systemd", 2),
-    ("", 1, "", 1, "Failed to connect to bus", 1, "systemd", 2),
-    ("running\n", 1, "", 0, "", 0, "systemd", 2),
-    ("running\n", 0, FAILED_UNIT, 0, "", 0, "systemd", 2),
-    ("running\n", 0, "", 1, "Failed to list units", 0, "systemd", 2),
-    ("", 1, "", 1, "", 1, "openrc", 0),
+@pytest.mark.parametrize("state,health_rc,failed_units,failed_rc,query_stderr,jobs_rc,service_mgr,ignored_units,expected_rc", [
+    ("running\n", 0, "", 0, "", 0, "systemd", None, 0),
+    ("  running \n", 0, " \n", 0, "", 0, "systemd", None, 0),
+    ("starting\n", 1, "", 0, "", 0, "systemd", None, 2),
+    ("starting\n", 1, "", 0, "Failed to list jobs", 1, "systemd", None, 2),
+    ("degraded\n", 1, FAILED_UNIT, 0, "", 0, "systemd", None, 2),
+    ("maintenance\n", 1, "", 0, "", 0, "systemd", None, 2),
+    ("offline\n", 1, "", 0, "", 0, "systemd", None, 2),
+    ("", 1, "", 1, "Failed to connect to bus", 1, "systemd", None, 2),
+    ("running\n", 1, "", 0, "", 0, "systemd", None, 2),
+    ("running\n", 0, FAILED_UNIT, 0, "", 0, "systemd", None, 2),
+    ("running\n", 0, "", 1, "Failed to list units", 0, "systemd", None, 2),
+    ("", 1, "", 1, "", 1, "openrc", None, 0),
+    ("degraded\n", 1, MOTD_UNIT, 0, "", 0, "systemd", None, 0),
+    ("degraded\n", 1, "  " + MOTD_UNIT + "\n", 0, "", 0, "systemd", None, 0),
+    ("running\n", 0, MOTD_UNIT, 0, "", 0, "systemd", None, 0),
+    ("degraded\n", 1, MOTD_UNIT + FAILED_UNIT, 0, "", 0, "systemd", None, 2),
+    ("degraded\n", 1, "", 0, "", 0, "systemd", None, 2),
+    ("degraded\n", 2, MOTD_UNIT, 0, "Failed to read state", 0, "systemd", None, 2),
+    ("starting\n", 1, MOTD_UNIT, 0, "", 0, "systemd", None, 2),
+    ("maintenance\n", 1, MOTD_UNIT, 0, "", 0, "systemd", None, 2),
+    ("degraded\n", 1, MOTD_UNIT, 1, "Failed to list units", 0, "systemd", None, 2),
+    ("degraded\n", 1, MOTD_UNIT.replace(".service", ".service-extra"), 0, "", 0, "systemd", None, 2),
+    ("degraded\n", 1, MOTD_UNIT, 0, "", 0, "systemd", [], 2),
+    ("degraded\n", 1, FAILED_UNIT, 0, "", 0, "systemd", ["example.service"], 0),
 ])
 def test_systemd_health_diagnostics(
-    tmp_path, state, health_rc, failed_units, failed_rc, query_stderr, jobs_rc, service_mgr, expected_rc,
+    tmp_path, state, health_rc, failed_units, failed_rc, query_stderr, jobs_rc, service_mgr, ignored_units, expected_rc,
 ):
     fakebin = tmp_path / "bin"
     fakebin.mkdir()
@@ -66,6 +79,7 @@ def test_systemd_health_diagnostics(
         "vars": {
             "ansible_python_interpreter": sys.executable,
             "ansible_facts": {"service_mgr": service_mgr, "os_family": "test"},
+            **({"fleet_systemd_ignored_units": ignored_units} if ignored_units is not None else {}),
         },
         "environment": {"PATH": f"{fakebin}:{os.environ.get('PATH', '')}"},
         "tasks": [{
@@ -91,10 +105,14 @@ def test_systemd_health_diagnostics(
     if expected_rc:
         assert f"System state: {state.strip() or 'unknown'} (rc={health_rc})" in output
         assert f"Failed units (rc={failed_rc})" in output
-        if failed_units:
-            assert "example.service" in output
+        for line in failed_units.splitlines():
+            if line.strip():
+                assert line.split()[0] in output
         if state.strip() == "starting" and not jobs_rc:
             assert "plymouth-quit-wait.service" in output
             assert "multi-user.target" in output
         if query_stderr:
             assert query_stderr in output
+    elif failed_units.strip():
+        assert "Recovery permits non-critical failed units:" in output
+        assert failed_units.split()[0] in output

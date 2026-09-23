@@ -4,9 +4,15 @@
   changed_when: false
 
 - name: Read required fstab mount targets
-  ansible.builtin.shell: >-
-    awk '$1 !~ /^[[:space:]]*#/ && $1 != "" && $3 != "swap" && NF >= 4
-    && $4 !~ /(^|,)(noauto|nofail|x-systemd[.]automount)(,|$)/ {print $2}' /etc/fstab
+  # Awk already strips leading whitespace from $1. Avoid POSIX character
+  # classes here: older mawk on Jetson can otherwise include comment lines.
+  ansible.builtin.command:
+    argv:
+      - awk
+      - >-
+        $1 !~ /^#/ && NF >= 4 && $3 != "swap"
+        && $4 !~ /(^|,)(noauto|nofail|x-systemd[.]automount)(,|$)/ {print $2}
+      - /etc/fstab
   register: fleet_required_mounts
   changed_when: false
 
@@ -34,6 +40,14 @@
   changed_when: false
   when: ansible_facts.service_mgr == 'systemd'
 
+- name: Classify failed systemd units
+  ansible.builtin.set_fact:
+    fleet_blocking_failed_unit_names: "{{ failed_unit_names | difference(fleet_systemd_ignored_units | default(['motd-news.service'])) }}"
+    fleet_ignored_failed_unit_names: "{{ failed_unit_names | intersect(fleet_systemd_ignored_units | default(['motd-news.service'])) }}"
+  vars:
+    failed_unit_names: "{{ fleet_failed_units.stdout_lines | map('trim') | reject('equalto', '') | map('split') | map('first') | list }}"
+  when: ansible_facts.service_mgr == 'systemd'
+
 - name: Read pending systemd jobs when the system is not running
   ansible.builtin.command: systemctl list-jobs --no-legend --no-pager --plain
   register: fleet_systemd_jobs
@@ -46,22 +60,33 @@
 - name: Require healthy system services
   ansible.builtin.assert:
     that:
-      - fleet_systemd_health.rc == 0
-      - fleet_systemd_health.stdout | trim == 'running'
       - fleet_failed_units.rc == 0
-      - fleet_failed_units.stdout | trim | length == 0
+      - fleet_blocking_failed_unit_names | length == 0
+      - >-
+        (fleet_systemd_health.rc == 0 and fleet_systemd_health.stdout | trim == 'running')
+        or (fleet_systemd_health.rc == 1 and fleet_systemd_health.stdout | trim == 'degraded'
+        and fleet_ignored_failed_unit_names | length > 0)
     fail_msg: |-
       System services need recovery.
       System state: {{ fleet_systemd_health.stdout | trim | default('unknown', true) }} (rc={{ fleet_systemd_health.rc }}).
       State check stderr: {{ fleet_systemd_health.stderr | default('') | trim | default('none', true) }}
       Failed units (rc={{ fleet_failed_units.rc }}):
       {{ fleet_failed_units.stdout | trim | default('none listed', true) }}
+      Blocking failed units: {{ fleet_blocking_failed_unit_names | join(', ') | default('none', true) }}
+      Ignored non-critical failed units: {{ fleet_ignored_failed_unit_names | join(', ') | default('none', true) }}
       Failed-unit query stderr: {{ fleet_failed_units.stderr | default('') | trim | default('none', true) }}
       Pending jobs (rc={{ fleet_systemd_jobs.rc | default('not queried') }}):
       {{ fleet_systemd_jobs.stdout | default('') | trim | default('none listed or not queried', true) }}
       Pending-job query stderr: {{ fleet_systemd_jobs.stderr | default('') | trim | default('none', true) }}
       If the state is starting, inspect pending jobs with systemctl list-jobs; SSH can be available before boot completes.
   when: ansible_facts.service_mgr == 'systemd'
+
+- name: Report ignored non-critical systemd failures
+  ansible.builtin.debug:
+    msg: "Recovery permits non-critical failed units: {{ fleet_ignored_failed_unit_names | join(', ') }}. System state: {{ fleet_systemd_health.stdout | trim }}."
+  when:
+    - ansible_facts.service_mgr == 'systemd'
+    - fleet_ignored_failed_unit_names | length > 0
 
 - name: Verify Debian package configuration is complete
   ansible.builtin.command: dpkg --audit
