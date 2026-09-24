@@ -51,7 +51,7 @@ Basis: the service performs privileged fleet administration, handles SSH and sud
 - The web container receives a dedicated SSH agent socket and a read-only verified `known_hosts` file.
 - Reachy Mini adapters use the robot daemon's local HTTP and WebSocket endpoints. That transport doesn't provide the SSH fingerprint trust flow and must remain on a trusted, segmented management network.
 - The web container runs as a non-root user with a read-only root filesystem, all Linux capabilities dropped, and `no-new-privileges` enabled.
-- Milvus, MinIO, etcd, and the NeMo Agent Toolkit service communicate over the Docker network. Milvus host ports are bound to loopback; the other auxiliary services aren't published by the Compose configuration.
+- Milvus, etcd, and the NeMo Agent Toolkit service communicate over the Docker network. Milvus host ports are bound to loopback; the other auxiliary services aren't published by the Compose configuration. Milvus stores vector data in a local Docker volume without an object-storage service.
 - The documentation indexer crawls configured integration documentation URL prefixes, sends document chunks to an embedding service, and rebuilds the `fleet_docs` Milvus collection.
 - The help-chat path can send prompts and retrieved documentation to configured LLM, embedding, and documentation services.
 - Direct command-line use of the Ansible playbooks is outside the web authentication boundary and depends on host operating-system access controls.
@@ -98,11 +98,11 @@ Basis: the service performs privileged fleet administration, handles SSH and sud
 - The forwarded SSH agent is dedicated to this service and contains only the keys required for managed fleet hosts.
 - Every SSH host key is verified through an independent trusted channel before being added to `known_hosts`.
 - Network segmentation or deployment policy limits which systems the management container can reach. The application itself doesn't enforce address allowlists.
-- `SECRET_KEY`, `ADMIN_PASSWORD`, `HOST_SECRET_KEY`, MinIO credentials, and external API keys are strong, unique, stored outside version control, and rotated after suspected exposure.
+- `SECRET_KEY`, `ADMIN_PASSWORD`, `HOST_SECRET_KEY`, and external API keys are strong, unique, stored outside version control, and rotated after suspected exposure.
 - Rotating `SECRET_KEY` is an acceptable mechanism for invalidating all existing bearer tokens. The service doesn't otherwise maintain a token-revocation list.
 - Ansible playbooks, roles, templates, and group variables are reviewed as privileged code before deployment.
 - Sensitive Ansible tasks use `no_log`, and future secret fields follow the runner's sensitive-key naming conventions so redaction recognizes them.
-- MinIO, Milvus, etcd, and the NeMo Agent Toolkit service remain inaccessible from untrusted networks.
+- Milvus, etcd, and the NeMo Agent Toolkit service remain inaccessible from untrusted networks.
 - Chat prompts and indexed documents are safe to send to the configured LLM and embedding providers. Operators don't submit credentials or confidential operational data to the help-chat interface.
 - Direct CLI access to the playbooks is limited through management-host operating-system permissions and is granted only to trusted fleet administrators.
 - SQLite and Docker volumes receive appropriate filesystem protection, backup, retention, and recovery handling. The application doesn't provide high availability or encrypted volume storage itself.
@@ -117,7 +117,7 @@ The principal trust boundaries are:
 - FastAPI API to SQLite and application data
 - FastAPI and Ansible runner to the SSH agent
 - Management container to managed fleet hosts
-- Web service to NAT, Milvus, MinIO, and etcd
+- Web service to NAT, Milvus, and etcd
 - Documentation indexer and chat services to external documentation, embedding, LLM, and MCP endpoints
 - Trusted management-host shell users to direct Ansible execution
 
@@ -127,7 +127,7 @@ Operators should:
 
 - Terminate TLS before traffic reaches the FastAPI service.
 - Restrict `FLEET_PORT` with host firewall rules or bind it only to an approved management interface.
-- Avoid exposing MinIO, etcd, Milvus, or NAT ports outside the trusted Docker network.
+- Avoid exposing etcd, Milvus, or NAT ports outside the trusted Docker network.
 - Use a dedicated SSH agent with minimal key scope.
 - Maintain a verified, read-only `known_hosts` file.
 - Restrict and monitor access to `.env`, the Docker daemon, named volumes, backups, and application logs.

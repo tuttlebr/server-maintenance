@@ -25,6 +25,8 @@ A capability-driven fleet operations platform for Linux compute, edge devices, a
 
 Before the first start, complete [Create the `.env` secrets](#create-the-env-secrets).
 
+If upgrading a stack that used MinIO, follow [Switching from MinIO](#switching-from-minio) before starting. The search indexes need a one-time rebuild.
+
 Use the idempotent startup target for both first-time setup and normal restarts:
 
 ```bash
@@ -156,7 +158,7 @@ docker compose up -d --build --force-recreate ssh-agent-proxy
 
 Run the setup commands from the repository root. Keep real values in the ignored `.env` file and your password manager. Do not put them in `.env.example`, source control, chat, or issue reports.
 
-### 1. Generate the five required local secrets
+### 1. Generate the three required local secrets
 
 These credentials are created locally. No external account or API key is needed for them.
 
@@ -165,8 +167,6 @@ These credentials are created locally. No external account or API key is needed 
 | `SECRET_KEY` | Signs Fleet Manager login tokens; at least 32 characters | 64 random hexadecimal characters |
 | `ADMIN_PASSWORD` | Password for the default `admin` web account; at least 12 characters | 32 random URL-safe characters |
 | `HOST_SECRET_KEY` | Encrypts stored SSH and sudo passwords; a URL-safe Base64 encoding of exactly 32 random bytes | 44 characters, including the final `=` |
-| `MINIO_ACCESS_KEY` | Root username for the bundled MinIO server | `fleet_` followed by 24 random hexadecimal characters |
-| `MINIO_SECRET_KEY` | Root password for the bundled MinIO server | 43 random URL-safe characters |
 
 Run this complete script with Python 3.6 or later. It uses only the Python standard library. It creates `.env` from `.env.example` if needed, fills blank local secrets, and sets file permissions to `0600`. Existing nonempty values remain unchanged. It prints variable names only.
 
@@ -188,8 +188,6 @@ generators = {
     "SECRET_KEY": lambda: secrets.token_hex(32),
     "ADMIN_PASSWORD": lambda: secrets.token_urlsafe(24),
     "HOST_SECRET_KEY": lambda: base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii"),
-    "MINIO_ACCESS_KEY": lambda: "fleet_" + secrets.token_hex(12),
-    "MINIO_SECRET_KEY": lambda: secrets.token_urlsafe(32),
 }
 updated = []
 for name, generate in generators.items():
@@ -215,7 +213,7 @@ Open `.env` in a local editor. Save the generated `ADMIN_PASSWORD` in your passw
 
 Back up `HOST_SECRET_KEY` with the Fleet Manager database. If restoring an existing database, restore its original key before running the script. A new key cannot decrypt passwords encrypted with the old key. The generated value follows the [Fernet key format](https://cryptography.io/en/latest/fernet/); preserve its final `=`.
 
-Compose passes `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` to MinIO as `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD`. It passes the same pair to Milvus for object-storage access. Starting the stack provisions these MinIO credentials; no MinIO console setup or AWS account is required. Use distinct values for each secret and avoid defaults such as `minioadmin`.
+Milvus stores its search indexes in a local Docker volume. No object-storage service, storage credentials, or AWS account is required.
 
 ### 2. Create `AI_HELPER_API_KEY`
 
@@ -267,7 +265,7 @@ For Kubernetes-aware maintenance, obtain a kubeconfig for an authorized controll
 
 ### 5. Leave `MILVUS_TOKEN` unset for the bundled stack
 
-The supplied Compose stack does not enable Milvus user authentication. Leave `# MILVUS_TOKEN=root:Milvus` commented out. `root:Milvus` is the upstream initial username/password pair, not a newly generated secret. MinIO credentials control Milvus's storage access; they do not authenticate clients to Milvus.
+The supplied Compose stack does not enable Milvus user authentication. Leave `# MILVUS_TOKEN=root:Milvus` commented out. `root:Milvus` is the upstream initial username/password pair, not a newly generated secret. Milvus is reachable only from the Docker network and host loopback.
 
 For the standalone Rust ingester against a separate, authenticated Milvus server, obtain an authorized account from its administrator. `MILVUS_TOKEN` is the literal `username:password` pair. For example, after the administrator creates `fleet_ingester`, store its assigned password locally as `MILVUS_TOKEN='fleet_ingester:the-assigned-password'`. Replace the example password. The account needs permission to create, drop, index, load, and write the target collection.
 
@@ -302,7 +300,7 @@ make start
 open http://localhost:8080
 ```
 
-Startup validates the admin password, JWT signing key, and host-encryption key. Compose requires nonempty MinIO credentials; it does not reject every weak or placeholder MinIO value.
+Startup validates the admin password, JWT signing key, and host-encryption key.
 
 ## Configuration
 
@@ -320,8 +318,6 @@ Startup validates the admin password, JWT signing key, and host-encryption key. 
 | `ANSIBLE_JOB_TIMEOUT_SECONDS` | `3600` | Maximum runtime for one queued Ansible job |
 | `ANSIBLE_MAX_CONCURRENT_JOBS` | `4` | Maximum concurrent Ansible jobs |
 | `ANSIBLE_FORKS` | `10` | Maximum hosts Ansible may operate on concurrently inside one fleet-scoped job; playbook `serial` still takes precedence |
-| `MINIO_ACCESS_KEY` | required | Non-default MinIO root user shared with Milvus |
-| `MINIO_SECRET_KEY` | required | Non-default MinIO root password shared with Milvus |
 | `AI_HELPER_API_KEY` | empty | Provider-issued credential for Fleet Help; see secret setup above |
 | `AI_HELPER_MODEL` | `aws/anthropic/bedrock-claude-sonnet-4-6` | Chat model API ID in `.env.example` |
 | `AI_HELPER_BASE_URL` | `https://inference-api.nvidia.com/v1` | Chat API base URL in `.env.example`; use the endpoint matching the key |
@@ -518,13 +514,15 @@ The main controls are `maintenance_batch_size` (default `1`), `kubernetes_drain_
 
 ## Fleet Documentation Ingestion
 
+The bundled standalone Milvus uses `COMMON_STORAGETYPE=local`, as in the [upstream Milvus 2.4.21 standalone script](https://github.com/milvus-io/milvus/blob/v2.4.21/scripts/standalone_embed.sh). Vector data and the message queue persist in `milvus-local-data`; metadata persists in `etcd-local-data`. Back up and restore these volumes together. This configuration is for the single-container Milvus service, not a distributed Milvus cluster.
+
 The Rust doc ingester crawls every HTML page under each URL prefix in `docs/urls.txt`, includes local Markdown guidance from `docs/*.md`, converts content to Markdown, embeds the chunks with the `.env` embedding settings, and rebuilds the `fleet_docs` collection in Milvus. The Context UI also accepts UTF-8 `.txt`, `.md`, and `.markdown` uploads, optionally associates them with a device, and adds current discovery facts plus manual device attributes to the same rebuild. The included `docs/fleet-manager-ui.md` file teaches Fleet Help how to guide users through the UI.
 
 In Docker, the web image builds this tool into `/usr/local/bin/fleet-doc-ingester`. The Context page's re-index action runs that binary inside the web container and writes generated Markdown to `/app/data/docs-crawled`. Uploaded source text and associations are stored in the Fleet Manager database; temporary Markdown index sources are generated for each rebuild.
 
 ```bash
 # Start Milvus first
-docker compose up -d etcd minio milvus
+docker compose up -d etcd milvus
 
 # Crawl, convert, embed, and ingest
 cargo run --release --manifest-path tools/dgx-doc-ingester/Cargo.toml -- \
@@ -548,6 +546,22 @@ Completed operations are indexed separately in `fleet_job_logs`. Every terminal 
 Both Fleet Help chat modes also read fresh job evidence directly from the activity database for every question, independently of embeddings or Milvus. Expand a run in Activity and choose **Ask Fleet Help** to discuss that exact job. Chat on a device page scopes recent runs to that device; explicit job IDs or device names in a question take precedence. Follow-ups refresh the evidence. The supplied context includes job metadata, per-host recaps, structured results, and bounded log excerpts that prioritize failed tasks, matching output and the log tail. Running logs are marked partial, and omitted output is identified. These records describe observed operation results, not live device health.
 
 NAT uses `tool_calling_agent` to preserve conversation history, the system prompt and streamed tool calls. Optional Kubernetes and UniFi MCP definitions are omitted at startup unless both their server URL and token are configured; missing optional settings no longer prevent Fleet Help from starting. Embedding failures can still limit historical semantic search, but do not prevent fresh job evidence from reaching either chat mode.
+
+### Switching from MinIO
+
+Existing installations start with empty search indexes in the new `etcd-local-data` and `milvus-local-data` volumes. Both volumes are new because the old etcd metadata points to objects stored in MinIO. Changing only the storage backend would leave those objects unavailable. This is a rebuild of derived indexes, not an in-place conversion of MinIO data.
+
+1. Finish any running fleet operations, then stop the stack using the updated Compose file. Keep the same Compose project name used by your existing deployment:
+
+   ```bash
+   SSH_AUTH_SOCK_PATH="$PWD/.fleet-ssh/agent.sock" docker compose down --remove-orphans
+   ```
+
+   Substitute your dedicated socket path if customized. This removes the retired MinIO container too. Do not add `--volumes` or `-v`. Back up `fleet-data`, the old `etcd-data`, `milvus-data`, and `minio-data` volumes, and `.env` while the services are stopped. Docker prefixes volume names with the Compose project name.
+2. Remove the unused `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` entries from `.env`, then run `make start`. Fleet Manager's database, uploaded context, credentials, and job history remain in the existing `fleet-data` volume.
+3. Open **Context** and run its re-index action to rebuild documentation and uploaded-context search. Completed-job search backfills from the activity database at web startup. Both rebuilds require working embedding credentials and can incur provider usage. Check re-index status and web logs before relying on semantic search; restart `web` to retry the job backfill if the embedding service was unavailable.
+
+The old storage volumes remain available for rollback. To roll back, stop the updated stack without deleting volumes, restore the previous Compose file and its storage credentials, and start with the same project name. Keep the old three storage volumes together; they do not contain indexing changes made after the switch. Delete them only after verifying the new indexes and your backups. Custom Milvus collections outside Fleet Manager are not rebuilt by these steps; export them before switching if you need them.
 
 ## Project Structure
 
