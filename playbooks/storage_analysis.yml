@@ -8,12 +8,7 @@
       ansible.builtin.include_tasks: tasks/discover_storage.yml
       vars:
         storage_scan_entries: true
-
-    - name: Require successful storage discovery
-      ansible.builtin.assert:
-        that:
-          - storage_discovery_raw.rc | default(1) == 0
-        fail_msg: "Storage discovery failed on {{ inventory_hostname }}"
+        storage_discovery_required: true
 
     - name: Compile storage report
       ansible.builtin.set_fact:

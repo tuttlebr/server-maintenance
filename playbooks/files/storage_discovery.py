@@ -83,7 +83,8 @@ def _run(argv, timeout):
             argv,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            text=True,
+            # JetPack 4's system Python is 3.6; the text alias requires 3.7.
+            universal_newlines=True,
             timeout=timeout,
             check=False,
         )

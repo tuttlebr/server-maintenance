@@ -119,7 +119,7 @@
           summary:
             blocker_count: >-
               {{
-                (1 if (storage_discovery_raw.rc | default(1)) != 0 else 0)
+                (0 if (storage_discovery_ok | bool) else 1)
                 + (1 if not (kubernetes_api_accessible | bool) else 0)
               }}
             warning_count: >-
@@ -147,7 +147,7 @@
             kubernetes_api_accessible: "{{ kubernetes_api_accessible }}"
             kubernetes_node: "{{ kubernetes_resolved_node_name | default('') }}"
             kubernetes_unschedulable: "{{ kubernetes_node_was_unschedulable if kubernetes_node_found else false }}"
-            storage_discovery_ok: "{{ storage_discovery_raw.rc | default(1) == 0 }}"
+            storage_discovery_ok: "{{ storage_discovery_ok }}"
 
     - name: Write maintenance assessment as JSON
       ansible.builtin.copy:

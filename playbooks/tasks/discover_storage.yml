@@ -1,27 +1,64 @@
 ---
+- name: Select storage discovery interpreter
+  ansible.builtin.set_fact:
+    storage_discovery_executable: >-
+      {{
+        ansible_python_interpreter
+        if (ansible_python_interpreter is defined
+            and ansible_python_interpreter not in ['auto', 'auto_silent', 'auto_legacy', 'auto_legacy_silent'])
+        else (ansible_facts.python.executable
+              | default(ansible_facts.discovered_interpreter_python | default('/usr/bin/python3')))
+      }}
+
 - name: Discover unique mounted storage filesystems
   ansible.builtin.script:
     cmd: >-
       files/storage_discovery.py
       {{ '--scan-entries' if (storage_scan_entries | default(false) | bool) else '' }}
-    executable: "{{ ansible_facts.python.executable | default('/usr/bin/python3') }}"
+    executable: "{{ storage_discovery_executable }}"
   register: storage_discovery_raw
   failed_when: false
   changed_when: false
 
+- name: Describe storage discovery outcome
+  ansible.builtin.set_fact:
+    storage_discovery_ok: >-
+      {{ storage_discovery_raw is defined
+         and storage_discovery_raw.rc is defined
+         and storage_discovery_raw.rc == 0 }}
+    # The script action can merge stderr into stdout over SSH. Preserve both,
+    # plus msg for errors that occur before the command starts.
+    storage_discovery_diagnostics: |-
+      Storage discovery {{
+        'result is missing' if storage_discovery_raw is not defined
+        else 'did not return an exit code' if storage_discovery_raw.rc is not defined
+        else 'command failed' if storage_discovery_raw.rc != 0
+        else 'command completed'
+      }} on {{ inventory_hostname }}.
+      Interpreter: {{ storage_discovery_executable }}
+      rc: {{ storage_discovery_raw.rc | default('missing') }}
+      msg: {{ storage_discovery_raw.msg | default('(none)', true) }}
+      stderr: {{ storage_discovery_raw.stderr | default('(empty)', true) }}
+      stdout: {{ storage_discovery_raw.stdout | default('(empty)', true) }}
+
+- name: Require successful storage discovery
+  ansible.builtin.fail:
+    msg: "{{ storage_discovery_diagnostics }}"
+  when:
+    - storage_discovery_required | default(false) | bool
+    - not storage_discovery_ok | bool
+
 - name: Report storage discovery failure
   ansible.builtin.debug:
-    msg: >-
-      Storage discovery failed on {{ inventory_hostname }}:
-      {{ storage_discovery_raw.stderr | default('unknown error') | trim }}
-  when: storage_discovery_raw.rc | default(1) != 0
+    msg: "{{ storage_discovery_diagnostics }}"
+  when: not storage_discovery_ok | bool
 
 - name: Parse mounted storage inventory
   ansible.builtin.set_fact:
     storage_mounts: >-
       {{
         (storage_discovery_raw.stdout_lines | default(['[]']) | last | from_json)
-        if (storage_discovery_raw.rc | default(1) == 0)
+        if (storage_discovery_ok | bool)
         else []
       }}
 

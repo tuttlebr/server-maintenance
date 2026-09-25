@@ -41,6 +41,16 @@ The initial reliability release added `package_facts` to identify supported NVID
 
 After the fix, the targeted Jetson scan `1496d9fd-7559-41db-bec5-d3e1933ae43f` completed successfully with 39 successful tasks and zero failed or unreachable tasks. No host packages were installed or upgraded. The mounted playbooks made the fix active without restarting the web service.
 
+### Storage discovery compatibility
+
+Storage analysis skips fact gathering. Its discovery helper previously fell back to `/usr/bin/python3`, ignoring the configured Ansible interpreter, and used the Python 3.7+ `subprocess` argument `text=True`. Running that helper under Python 3.6 reproduces `__init__() got an unexpected keyword argument 'text'`. This is separate from the APT binding issue: storage discovery uses only Python's standard library.
+
+Discovery now honors an explicit `ansible_python_interpreter`, then gathered or discovered interpreter facts, then `/usr/bin/python3`. The helper uses the Python 3.6-compatible `universal_newlines` argument. Existing `/proc/self/mountinfo` and portable `df` fallbacks support older or missing block-device tooling without architecture-specific branches.
+
+Storage analysis fails only the affected host and reports the selected interpreter, exit code, action message, stderr, and stdout. It distinguishes a missing result, a result without an exit code, and a failed command. Both streams are included because SSH can merge script stderr into stdout. Other discovery consumers retain their optional behavior and emit the same diagnostics; preflight still counts failed discovery as a blocker.
+
+Regression coverage includes Python 3.6 subprocess compatibility, MMC storage with legacy tooling, interpreter selection, missing results, separate and merged error streams, optional discovery, and report completion on a healthy host alongside a failed host. Validation uses isolated containers, including Python 3.6; the reported Jetson job has not been rerun as part of this fix.
+
 ## Recovery verification follow-up (2026-09-25)
 
 Operations allowed recovery on devices whose maintenance mode was `unknown`, but the playbook rejected every such device before checking health. Recovery now determines its checks from local membership files, controller node discovery, prior scan evidence, and explicit Kubernetes mode. Known cluster members still require API access, unique identity, and readiness. Verification leaves maintenance policy and scheduling unchanged; disruptive operations still require a configured policy.
