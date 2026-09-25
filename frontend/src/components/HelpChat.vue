@@ -25,9 +25,19 @@
           <button
             class="chat-icon-btn"
             type="button"
+            :aria-label="copiedKey === 'conversation' ? 'Conversation copied' : 'Copy conversation'"
+            title="Copy conversation"
+            :disabled="isStreaming || messages.length === 0 || copyPending"
+            @click="copyConversation"
+          >
+            <i :class="['fas', copiedKey === 'conversation' ? 'fa-check' : 'fa-copy']" aria-hidden="true"></i>
+          </button>
+          <button
+            class="chat-icon-btn"
+            type="button"
             aria-label="Clear chat history"
             title="Clear history"
-            :disabled="isStreaming || messages.length === 0"
+            :disabled="isStreaming || messages.length === 0 || copyPending"
             @click="clearHistory"
           >
             <i class="fas fa-trash-alt" aria-hidden="true"></i>
@@ -45,6 +55,17 @@
         <template v-for="(msg, i) in messages" :key="i">
           <div :class="['chat-msg', `chat-msg-${msg.role}`]">
             <div class="chat-msg-content chat-msg-markdown" v-html="renderMarkdown(msg.content)"></div>
+            <button
+              v-if="msg.content"
+              class="chat-copy-btn"
+              type="button"
+              :aria-label="`Copy ${msg.role === 'assistant' ? 'Fleet Help response' : 'your message'}`"
+              :disabled="copyPending"
+              @click="copyChatText(msg.content, i)"
+            >
+              <i :class="['fas', copiedKey === i ? 'fa-check' : 'fa-copy']" aria-hidden="true"></i>
+              {{ copiedKey === i ? 'Copied' : 'Copy' }}
+            </button>
             <button
               v-if="msg.steps && msg.steps.length"
               type="button"
@@ -121,6 +142,7 @@ import { marked } from "marked";
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { getChatStatus, streamChat } from "../api";
+import { copyText } from "../utils/clipboard.js";
 
 const MARKDOWN_TAGS = [
   "a", "blockquote", "br", "code", "del", "em", "h1", "h2", "h3",
@@ -151,6 +173,9 @@ const currentTurnPriorAssistantAnswers = ref([]);
 const stepsOpen = reactive({});
 const messagesEl = ref(null);
 const inputEl = ref(null);
+const copiedKey = ref(null);
+const copyPending = ref(false);
+let copyTimer = null;
 
 let streamController = null;
 
@@ -235,7 +260,32 @@ function onExternalOpen(e) {
 onUnmounted(() => {
   window.removeEventListener("helpchat:open", onExternalOpen);
   clearTimeout(coachTimer);
+  clearTimeout(copyTimer);
 });
+
+async function copyChatText(text, key) {
+  if (copyPending.value) return;
+  copyPending.value = true;
+  copiedKey.value = null;
+  clearTimeout(copyTimer);
+  try {
+    await copyText(text);
+    copiedKey.value = key;
+    copyTimer = setTimeout(() => { copiedKey.value = null; }, 2000);
+    window.$toast?.success(key === "conversation" ? "Conversation copied" : "Message copied", { duration: 2000 });
+  } catch {
+    window.$toast?.error("Couldn't copy. Select the message text and copy it manually.");
+  } finally {
+    copyPending.value = false;
+  }
+}
+
+function copyConversation() {
+  const transcript = messages.value
+    .map((message) => `${message.role === "assistant" ? "Fleet Help" : "You"}:\n${message.content}`)
+    .join("\n\n");
+  return copyChatText(transcript, "conversation");
+}
 
 function dismissCoach() {
   showCoach.value = false;
@@ -260,6 +310,8 @@ function clearHistory() {
   currentSteps.value = [];
   currentTurnPriorAssistantAnswers.value = [];
   streamingContent.value = "";
+  copiedKey.value = null;
+  clearTimeout(copyTimer);
   Object.keys(stepsOpen).forEach((key) => delete stepsOpen[key]);
   nextTick(() => inputEl.value?.focus());
 }
@@ -587,6 +639,25 @@ function leadingWhitespaceInsensitiveMatchEnd(text, prefix) {
 
 .chat-msg-user { align-self: flex-end; }
 .chat-msg-assistant { align-self: flex-start; }
+
+.chat-copy-btn {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.chat-msg-user .chat-copy-btn { align-self: flex-end; }
+.chat-copy-btn:hover { background: var(--surface-white); color: var(--text-primary); }
+.chat-copy-btn:disabled { cursor: wait; opacity: 0.6; }
 
 /* While streaming, the wrapper can be wider so the steps list reads well. */
 .chat-msg-streaming { max-width: 95%; width: 95%; }

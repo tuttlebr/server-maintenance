@@ -3,7 +3,18 @@
     <div class="page-header"><div><h2>Operations</h2><p class="page-subtitle">Choose an action and review its eligible targets. Blocked devices include a reason.</p></div><button class="btn btn-ghost btn-sm" :disabled="loading" @click="load"><i :class="['fas', loading ? 'fa-spinner fa-spin' : 'fa-sync-alt']" aria-hidden="true"></i>Refresh</button></div>
     <p v-if="route.query.reason" class="operation-origin"><router-link to="/">Overview</router-link> / {{ reasonLabel }}</p>
     <div v-if="loadError" class="callout callout-danger" role="alert">Operations could not be refreshed. Target eligibility must be refreshed before starting work.</div>
-    <div class="operation-filter"><label for="operation-filter">Operation</label><select id="operation-filter" v-model="operationFilter" class="form-select"><option value="">Browse all operations</option><option v-for="operation in operations" :key="operation.id" :value="operation.id">{{ operation.label }}</option><option v-if="operationFilter && !focusedOperation" :value="operationFilter">Requested operation unavailable</option></select><router-link v-if="scopeRequested" :to="{ path: '/operations' }">Clear target scope and browse catalog</router-link></div>
+    <div class="operation-filter">
+      <label for="operation-filter">Operation (A–Z)</label>
+      <div class="operation-picker">
+        <select id="operation-filter" v-model="operationFilter" class="form-select" :aria-describedby="focusedOperation ? 'operation-hint' : undefined">
+          <option value="">Browse all operations</option>
+          <option v-for="operation in operationOptions" :key="operation.id" :value="operation.id">{{ operationOptionLabel(operation) }}</option>
+          <option v-if="operationFilter && !focusedOperation" :value="operationFilter">Requested operation unavailable</option>
+        </select>
+        <p v-if="focusedOperation" id="operation-hint" class="operation-hint">{{ focusedOperation.description }}</p>
+      </div>
+      <router-link v-if="scopeRequested" :to="{ path: '/operations' }">Clear target scope and browse catalog</router-link>
+    </div>
     <div v-if="unmatchedTargets.length" class="callout callout-warn"><div>These job targets could not be matched to current devices: {{ unmatchedTargets.join(', ') }}. Review the remaining names before proceeding.<button class="btn btn-ghost btn-sm" @click="useMatchedTargets">Use only matched devices</button></div></div>
     <div v-if="operationFilter && !focusedOperation && !loading && !loadError" class="callout callout-warn">This operation is not available for the discovered fleet. <router-link to="/devices">Review device capabilities</router-link>.</div>
     <div v-if="operations.length" class="operation-layout">
@@ -43,7 +54,7 @@ import { getDevices, getOperations, runOperation, getJobs } from "../api.js";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
 import { deviceKind } from "../utils/devices.js";
 import { ATTENTION_GROUPS, parseDeviceIds, targetNames } from "../utils/fleetOverview.js";
-import { selectedOperationTargets } from "../utils/operations.js";
+import { operationOptionLabel, selectedOperationTargets, sortOperationsByLabel } from "../utils/operations.js";
 import { exactPreviewTargets } from "../utils/access.js";
 import { formatLongTime } from "../utils/time.js";
 const previews = ref([]), previewId = ref(""), previewReviewed = ref(false), serviceName = ref(""), serviceAction = ref("restarted");
@@ -56,6 +67,7 @@ const groupedOperations = computed(() => { const groups = []; visibleOperations.
 const targetSummary = computed(() => selectedIds.value.length ? `${selectedIds.value.length} selected` : "Choose devices");
 const operationFilter = computed({ get: () => String(route.query.operation || (route.query.preview ? 'system.update' : '')), set: operation => router.replace({ query: { ...route.query, operation: operation || undefined, preview: undefined } }) });
 const focusedOperation = computed(() => operations.value.find(operation => operation.id === operationFilter.value));
+const operationOptions = computed(() => sortOperationsByLabel(operations.value));
 const visibleOperations = computed(() => operationFilter.value ? operations.value.filter(operation => operation.id === operationFilter.value) : operations.value);
 const scopeRequested = computed(() => route.query.devices !== undefined || route.query.device !== undefined || route.query.targets !== undefined);
 const requestedNames = computed(() => targetNames({ target_devices: route.query.targets }));
@@ -90,6 +102,9 @@ onMounted(async () => { await load(); if (route.query.preview) { await nextTick(
 </script>
 
 <style scoped>
+.operation-picker { flex: 1 1 320px; min-width: 0; max-width: 640px; }
+.operation-filter .operation-picker select { width: 100%; }
+.operation-hint { margin: 6px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
 .operation-origin { margin-bottom: 14px; color: var(--text-secondary); font-size: 13px; }.operation-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 18px; }.operation-filter select { width: min(100%, 360px); }.operation-filter label { font-size: 13px; font-weight: 650; }.selected-targets { list-style: none; max-height: 330px; overflow-y: auto; margin: 12px 0; }.selected-targets li { display: grid; gap: 4px; padding: 10px 0; border-bottom: 1px solid var(--border-subtle); font-size: 12px; overflow-wrap: anywhere; }.selected-targets span { color: var(--text-secondary); }.target-remove { color: var(--link-text); background: none; border: 0; padding: 2px 0; width: fit-content; font: inherit; cursor: pointer; }.scope-warning { color: var(--status-warning-text) !important; font-size: 12px; }.operation-catalog { min-width: 0; }
 
 .excluded { margin-bottom:14px; font-size:12px; }.excluded p { margin:8px 0; min-height:0; }.operation-params { display:grid; gap:8px; margin-bottom:14px; font-size:12px; }.operation-params p { min-height:0; }summary { cursor:pointer; }.page-subtitle { margin: 4px 0 0; color: var(--text-secondary); }.operation-layout { display: grid; grid-template-columns: 220px 1fr; gap: 18px; align-items: start; }.target-panel { position: sticky; top: 82px; }.target-panel h3 { margin: 4px 0; }.target-panel p { color: var(--text-secondary); font-size: 12px; }.target-panel .btn { width: 100%; margin-top: 8px; }.eyebrow { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .7px; }.operation-group { margin-bottom: 22px; }.operation-group > h3 { margin: 0 0 10px; }.operation-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(285px, 1fr)); gap: 12px; }.operation-card .card-body { height: 100%; display: flex; flex-direction: column; }.operation-header { display: flex; align-items: center; justify-content: space-between; }.operation-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 10px; color: var(--color-accent); background: var(--surface-info-soft); }.impact { padding: 4px 7px; border-radius: 12px; font-size: 10px; text-transform: uppercase; }.impact-low { background: var(--surface-success-soft); color: var(--text-primary); }.impact-medium { background: var(--surface-warning-soft); color: var(--text-primary); }.impact-high { background: var(--surface-danger-soft); color: var(--status-danger-text); }.operation-card h4 { margin: 13px 0 5px; }.operation-card p { margin: 0 0 12px; color: var(--text-secondary); font-size: 12px; min-height: 34px; }.eligible-list { max-height: 145px; overflow: auto; padding: 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); margin-bottom: 12px; }.eligible-list .checkbox-label { padding: 5px 3px; }.eligible-list .checkbox-label span { flex: 1; overflow: hidden; text-overflow: ellipsis; }.eligible-list small { color: var(--text-secondary); }.operation-run { margin-top: auto; width: 100%; }
