@@ -1,67 +1,46 @@
-import { defineStore } from "pinia";
-import { ref } from "vue";
-import { useDocumentVisibility, useIntervalFn } from "@vueuse/core";
-import { getDevices, getJobs, getJobSummary } from "../api.js";
+import { defineStore } from 'pinia';
+import { computed, ref } from 'vue';
+import { useDocumentVisibility, useIntervalFn } from '@vueuse/core';
+import { getDevices, getJobs, getJobSummary } from '../api.js';
 
-// Shared fleet state. Poll only while the tab is visible so navigation stays
-// current without multiplying requests across screens.
-export const useDevicesStore = defineStore("devices", () => {
-  const devices = ref([]);
-  const recentJobs = ref([]);
-  const activeJobs = ref([]);
-  const activeJobCount = ref(null);
-  const lastUpdated = ref(null);
-  const loading = ref(false);
-  const hasLoadedOnce = ref(false);
-  const error = ref(null);
+// Independent observations: a failed resource never erases a successful one.
+export const useDevicesStore = defineStore('devices', () => {
+  const devices = ref([]), recentJobs = ref([]), activeJobs = ref([]), adverseJobs = ref([]);
+  const activeJobCount = ref(null), lastUpdated = ref(null), jobsUpdated = ref(null), activeUpdated = ref(null), adverseUpdated = ref(null);
+  const loading = ref(false), hasLoadedOnce = ref(false);
+  const deviceError = ref(null), jobsError = ref(null), activeError = ref(null), adverseError = ref(null);
+  const error = computed(() => deviceError.value || jobsError.value || activeError.value || adverseError.value);
   let inFlight = null;
 
-  async function refresh({ force = false } = {}) {
-    if (inFlight && !force) return inFlight;
+  async function refresh() {
+    // Explicit refreshes share the request, so older responses cannot win.
+    if (inFlight) return inFlight;
     loading.value = true;
-    error.value = null;
-    inFlight = (async () => {
-      try {
-        const [deviceRows, jobs, active, summary] = await Promise.all([
-          getDevices(),
-          getJobs({ limit: 10 }),
-          getJobs({ status: "active", limit: 200 }),
-          getJobSummary(),
-        ]);
-        devices.value = deviceRows;
-        recentJobs.value = jobs;
-        activeJobs.value = active;
-        activeJobCount.value = summary.active_count;
-        lastUpdated.value = new Date();
-        hasLoadedOnce.value = true;
-      } catch (caught) {
-        error.value = caught;
-      } finally {
-        loading.value = false;
-        inFlight = null;
-      }
-    })();
+    async function observe(fetchRows, apply, failure) {
+      try { apply(await fetchRows()); failure.value = null; }
+      catch (caught) { failure.value = caught; }
+    }
+    inFlight = Promise.all([
+      observe(getDevices, rows => { devices.value = rows; lastUpdated.value = new Date().toISOString(); hasLoadedOnce.value = true; }, deviceError),
+      observe(() => getJobs({ limit: 50 }), rows => { recentJobs.value = rows; jobsUpdated.value = new Date().toISOString(); }, jobsError),
+      observe(async () => {
+        const [rows, summary] = await Promise.all([getJobs({ status: 'active', limit: 200 }), getJobSummary()]);
+        return { rows, summary };
+      }, ({ rows, summary }) => { activeJobs.value = rows; activeJobCount.value = summary.active_count; activeUpdated.value = new Date().toISOString(); }, activeError),
+      observe(async () => {
+        const [failed, recovery] = await Promise.all([getJobs({ status: 'failed', limit: 5 }), getJobs({ status: 'recovery_required', limit: 5 })]);
+        return [...failed, ...recovery].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+      }, rows => { adverseJobs.value = rows; adverseUpdated.value = new Date().toISOString(); }, adverseError),
+    ]).finally(() => { loading.value = false; inFlight = null; });
     return inFlight;
   }
 
   const visibility = useDocumentVisibility();
-  const { pause, resume } = useIntervalFn(
-    () => {
-      if (visibility.value === "visible") refresh();
-    },
-    30_000,
-    { immediate: false }
-  );
-
-  function start() {
-    if (!hasLoadedOnce.value) refresh();
-    resume();
-  }
+  const { pause, resume } = useIntervalFn(() => {
+    if (visibility.value === 'visible') refresh();
+  }, 30_000, { immediate: false });
+  function start() { refresh(); resume(); }
   function stop() { pause(); }
-
-
-  return {
-    devices, recentJobs, activeJobs, activeJobCount, lastUpdated, loading, hasLoadedOnce,
-    error, refresh, start, stop,
-  };
+  return { devices, recentJobs, activeJobs, adverseJobs, activeJobCount, lastUpdated, jobsUpdated, activeUpdated, adverseUpdated,
+    loading, hasLoadedOnce, deviceError, jobsError, activeError, adverseError, error, refresh, start, stop };
 });

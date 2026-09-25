@@ -1,116 +1,52 @@
 <template>
   <nav class="navbar" aria-label="Main navigation">
     <div class="navbar-inner">
-      <router-link to="/" class="navbar-brand" aria-label="Fleet Manager overview">
-        <span class="brand-mark" aria-hidden="true"><i class="fas fa-layer-group"></i></span>
-        <span class="brand-text">Fleet Manager</span>
-      </router-link>
-
-      <div class="navbar-links">
-        <router-link v-for="item in navigation" :key="item.to" :to="item.to" :aria-label="item.label" :title="item.label" class="nav-link">
-          <i :class="['fas', item.icon]" aria-hidden="true"></i>
-          <span>{{ item.label }}</span>
-        </router-link>
-      </div>
-
+      <router-link to="/" class="navbar-brand" aria-label="Fleet Manager overview"><i class="fas fa-layer-group" aria-hidden="true"></i><span>Fleet Manager</span></router-link>
+      <div class="navbar-links"><router-link v-for="item in navigation" :key="item.to" :to="item.to" :aria-current="route.path === item.to || (item.to !== '/' && route.path.startsWith(item.to + '/')) ? 'page' : undefined" class="nav-link">{{ item.label }}</router-link></div>
       <div class="navbar-user">
-        <div class="active-jobs" :class="{ open: showJobs }">
-          <button
-            type="button"
-            class="nav-link active-jobs-trigger"
-            :aria-expanded="showJobs"
-            aria-haspopup="true"
-            :aria-label="store.activeJobCount == null ? 'Activity state unavailable' : `Active jobs: ${store.activeJobCount}`"
-            @click.stop="showJobs = !showJobs"
-          >
-            <span class="active-jobs-icon">
-              <i class="fas fa-bolt" aria-hidden="true"></i>
-              <span v-if="store.activeJobCount" class="active-jobs-badge" aria-hidden="true">{{ store.activeJobCount }}</span>
-            </span>
-            <span>Active</span>
-          </button>
-          <div v-if="showJobs" class="active-jobs-dropdown" @click.stop>
-            <div class="active-jobs-header">
-              <strong>Active jobs</strong>
-              <button class="active-jobs-close" type="button" aria-label="Close" @click="showJobs = false">&times;</button>
-            </div>
-            <router-link
-              v-for="job in activeJobs"
-              :key="job.job_id"
-              :to="`/activity?job=${job.job_id}`"
-              class="active-jobs-item"
-              @click="showJobs = false"
-            >
-              <span class="dot dot-blue dot-pulse" aria-hidden="true"></span>
-              <span class="active-jobs-item-text">
-                <strong>{{ operationLabel(job.playbook) }}</strong>
-                <small>{{ formatTargetList(job.target_devices) }} · {{ relativeTime(job.created_at) }}</small>
-              </span>
-            </router-link>
-            <div v-if="store.error" class="active-jobs-empty">Activity could not be refreshed. {{ store.activeJobCount == null ? 'State is unavailable.' : 'Showing the last observation.' }}</div><div v-else-if="store.activeJobCount == null" class="active-jobs-empty">Loading activity…</div><div v-else-if="store.activeJobCount === 0" class="active-jobs-empty">No jobs running.</div>
-            <router-link to="/activity" class="active-jobs-footer" @click="showJobs = false">
-              View all activity
-            </router-link>
+        <details ref="management" class="management" @keydown.esc.prevent="closeManagement(true)">
+          <summary class="nav-link">Manage</summary>
+          <div class="management-links"><router-link to="/access" @click="closeManagement()">Device access</router-link><router-link to="/context" @click="closeManagement()">Knowledge sources</router-link><button type="button" @click="openHelp">Fleet Help</button></div>
+        </details>
+        <div ref="jobsContainer" class="active-jobs" @keydown.esc.prevent="closeJobs(true)" @focusout="onJobsFocusOut">
+          <button ref="jobsTrigger" type="button" class="nav-link" :aria-expanded="showJobs" aria-controls="active-jobs-list" :aria-label="store.activeJobCount == null ? 'Jobs: activity state unavailable' : `Active jobs: ${store.activeJobCount}`" @click="showJobs = !showJobs"><i class="fas fa-bolt" aria-hidden="true"></i>Jobs<span class="jobs-count">{{ store.activeJobCount ?? '–' }}</span></button>
+          <div v-if="showJobs" id="active-jobs-list" class="active-jobs-dropdown">
+            <div class="active-jobs-header"><strong>Active jobs</strong><button type="button" aria-label="Close active jobs" @click="closeJobs(true)"><i class="fas fa-xmark" aria-hidden="true"></i></button></div>
+            <p v-if="store.activeError" class="active-jobs-empty">Activity could not be refreshed. {{ store.activeUpdated ? `Last observed ${formatLongTime(store.activeUpdated)}.` : 'State is unavailable.' }}</p>
+            <p v-else-if="store.activeJobCount == null" class="active-jobs-empty">Loading activity…</p>
+            <p v-else-if="store.activeJobCount === 0" class="active-jobs-empty">No active jobs.</p>
+            <router-link v-for="job in store.activeJobs.slice(0, 8)" :key="job.job_id" :to="{ path: '/activity', query: { job: job.job_id } }" class="active-jobs-item" @click="closeJobs()"><strong>{{ operationLabel(job.playbook) }}</strong><small>{{ job.status.replaceAll('_', ' ') }} · {{ formatTargetList(job.target_devices) }} · {{ relativeTime(job.created_at) }}</small></router-link>
+            <router-link to="/activity?status=active" class="active-jobs-footer" @click="closeJobs()">View all active jobs</router-link>
           </div>
         </div>
-        <button type="button" class="nav-link" aria-label="Sign out" @click="logout">
-          <i class="fas fa-sign-out-alt" aria-hidden="true"></i><span>Sign Out</span>
-        </button>
+        <button type="button" class="nav-link sign-out" aria-label="Sign out" title="Sign out" @click="logout"><i class="fas fa-sign-out-alt" aria-hidden="true"></i></button>
       </div>
     </div>
   </nav>
 </template>
-
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from "vue";
-import { useRouter } from "vue-router";
-import { clearToken } from "../api.js";
-import { useDevicesStore } from "../stores/devices.js";
-import { relativeTime } from "../utils/time.js";
-import { formatTargetList, operationLabel } from "../utils/devices.js";
-
-const navigation = [
-  { to: "/", label: "Overview", icon: "fa-chart-line" },
-  { to: "/devices", label: "Devices", icon: "fa-server" },
-  { to: "/operations", label: "Operations", icon: "fa-bolt" },
-  { to: "/access", label: "Access", icon: "fa-users" },
-  { to: "/activity", label: "Activity", icon: "fa-list-check" },
-  { to: "/context", label: "Context", icon: "fa-book-open" },
-];
-const router = useRouter();
-const store = useDevicesStore();
-const showJobs = ref(false);
-const activeJobs = computed(() => store.activeJobs);
-
-function logout() { clearToken(); router.push("/login"); }
-function closeOnOutsideClick() { showJobs.value = false; }
-onMounted(() => document.addEventListener("click", closeOnOutsideClick));
-onUnmounted(() => document.removeEventListener("click", closeOnOutsideClick));
+import { onMounted, onUnmounted, ref } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
+import { clearToken } from '../api.js';
+import { useDevicesStore } from '../stores/devices.js';
+import { relativeTime, formatLongTime } from '../utils/time.js';
+import { formatTargetList, operationLabel } from '../utils/devices.js';
+const navigation = [{ to: '/', label: 'Overview' }, { to: '/devices', label: 'Devices' }, { to: '/operations', label: 'Operations' }, { to: '/activity', label: 'Activity' }];
+const router = useRouter(), route = useRoute(), store = useDevicesStore();
+const showJobs = ref(false), jobsContainer = ref(null), jobsTrigger = ref(null), management = ref(null);
+function logout() { clearToken(); router.push('/login'); }
+function closeJobs(focus = false) { showJobs.value = false; if (focus) jobsTrigger.value?.focus(); }
+function closeManagement(focus = false) { if (management.value) management.value.open = false; if (focus) management.value?.querySelector('summary')?.focus(); }
+function openHelp() { closeManagement(); window.dispatchEvent(new CustomEvent('helpchat:open')); }
+function outside(event) { if (!jobsContainer.value?.contains(event.target)) closeJobs(); if (!management.value?.contains(event.target)) closeManagement(); }
+function onJobsFocusOut(event) { if (!jobsContainer.value?.contains(event.relatedTarget)) closeJobs(); }
+onMounted(() => document.addEventListener('click', outside));
+onUnmounted(() => document.removeEventListener('click', outside));
 </script>
-
 <style scoped>
-.navbar { background: var(--surface-dark); height: 64px; position: sticky; top: 0; z-index: 100; }
-.navbar-inner { max-width: 1380px; margin: 0 auto; padding: 0 var(--space-sm); height: 100%; display: flex; align-items: center; justify-content: space-between; }
-.navbar-brand { display: flex; align-items: center; gap: 10px; color: var(--text-on-dark); text-decoration: none; }
-.brand-mark { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: white; background: var(--color-accent); }
-.brand-text { font-size: 15px; font-weight: 650; letter-spacing: .1px; }
-.navbar-links, .navbar-user { display: flex; align-items: center; height: 100%; }
-.navbar-links { gap: 3px; }
-.nav-link { display: flex; align-items: center; gap: 7px; padding: 0 13px; height: 64px; color: rgba(255,255,255,.72); border: 0; border-bottom: 2px solid transparent; background: none; font: inherit; font-size: 13px; text-decoration: none; cursor: pointer; }
-.nav-link:hover, .nav-link:focus-visible, .nav-link.router-link-exact-active { color: #fff; }
-.nav-link.router-link-exact-active { border-bottom-color: var(--color-accent); }
-.nav-link:focus-visible { outline: 2px solid #fff; outline-offset: -4px; }
-.active-jobs { position: relative; height: 100%; }
-.active-jobs-icon { position: relative; display: inline-flex; }
-.active-jobs-badge { position: absolute; top: -9px; right: -11px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; display: grid; place-items: center; background: var(--color-danger); color: #fff; font-size: 10px; font-weight: 700; }
-.active-jobs-dropdown { position: absolute; top: 56px; right: 0; width: 330px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface-white); color: var(--text-primary); box-shadow: var(--shadow-dropdown); overflow: hidden; }
-.active-jobs-header { display: flex; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--border-subtle); }
-.active-jobs-close { border: 0; background: none; color: var(--text-secondary); cursor: pointer; font-size: 18px; }
-.active-jobs-item { display: flex; gap: 10px; align-items: center; padding: 12px 14px; color: inherit; text-decoration: none; border-bottom: 1px solid var(--border-subtle); }
-.active-jobs-item:hover { background: var(--surface-light); }
-.active-jobs-item-text { display: flex; flex-direction: column; min-width: 0; }
-.active-jobs-item-text small { color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.active-jobs-empty, .active-jobs-footer { display: block; padding: 14px; color: var(--text-secondary); }
-.active-jobs-footer { color: var(--color-accent); text-decoration: none; border-top: 1px solid var(--border-subtle); }
-@media (max-width: 900px) { .nav-link span { display: none; } .brand-text { display: none; } .navbar-links { flex: 1; justify-content: center; } }
+.navbar { background: var(--surface-dark); position: sticky; top: 0; z-index: 100; }.navbar-inner { max-width: 1350px; margin: auto; padding: 0 var(--space-sm); display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 64px; }.navbar-brand { display: flex; align-items: center; gap: 10px; color: #fff; font-weight: 650; font-size: 15px; white-space: nowrap; text-decoration: none; }.navbar-links, .navbar-user { display: flex; align-items: center; gap: 4px; }.navbar-links { margin-right: auto; }.nav-link { display: flex; align-items: center; gap: 7px; min-height: 64px; padding: 0 12px; border: 0; border-bottom: 3px solid transparent; background: none; color: #c3cbd6; font: inherit; font-size: 13px; text-decoration: none; cursor: pointer; }.nav-link:hover, .nav-link[aria-current=page] { color: #fff; text-decoration: none; }.nav-link[aria-current=page] { border-bottom-color: #91bcff; }.nav-link:focus-visible { outline: 2px solid #fff; outline-offset: -4px; }.jobs-count { min-width: 19px; text-align: center; background: #253d60; color: #d9e8ff; border-radius: 4px; padding: 0 4px; font-size: 11px; }.active-jobs, .management { position: relative; }.management summary { list-style: none; }.management summary::-webkit-details-marker { display: none; }.management[open] summary { color: #fff; border-bottom-color: #91bcff; }.management-links, .active-jobs-dropdown { position: absolute; right: 0; top: calc(100% - 5px); width: 340px; max-width: calc(100vw - 32px); border: 1px solid var(--border-subtle); border-radius: 6px; background: var(--surface-white); color: var(--text-primary); box-shadow: var(--shadow-dropdown); overflow: auto; max-height: min(70vh, 600px); }.management-links { width: 210px; }.management-links a, .management-links button { display: block; padding: 12px 16px; font: inherit; font-size: 13px; background: none; border: 0; color: var(--link-text); cursor: pointer; text-align: left; width: 100%; }.active-jobs-header { padding: 12px 14px; display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); }.active-jobs-header button { background: none; border: 0; color: var(--text-secondary); padding: 3px 6px; cursor: pointer; }.active-jobs-item { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; color: var(--text-primary); font-size: 13px; border-bottom: 1px solid var(--border-subtle); }.active-jobs-item small { color: var(--text-secondary); overflow-wrap: anywhere; }.active-jobs-item:hover, .management-links a:hover, .management-links button:hover { background: var(--surface-light); }.active-jobs-empty, .active-jobs-footer { display: block; padding: 14px; font-size: 13px; }.active-jobs-empty { color: var(--text-secondary); }.active-jobs-footer { color: var(--link-text); }
+@media(max-width: 1000px) { .navbar-brand span { display: none; }.navbar-inner { gap: 12px; } }
+@media(max-width: 650px) { .navbar-inner { display: grid; grid-template-columns: 1fr auto; gap: 0 8px; }.navbar-brand { padding: 10px 0; }.navbar-brand span { display: inline; font-size: 13px; }.navbar-user { grid-column: 2; grid-row: 1; }.navbar-links { grid-row: 2; grid-column: 1/-1; margin: 0; justify-content: space-between; }.nav-link { min-height: 42px; padding: 0 10px; font-size: 12px; }.navbar-user .nav-link { padding: 0 7px; }.active-jobs-dropdown { right: -35px; }.management-links { right: -85px; } }
+@media(max-width: 370px) { .navbar-brand span { display: none; } }
+@media(max-height: 500px) { .navbar { position: relative; } }
 </style>

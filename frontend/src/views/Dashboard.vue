@@ -1,162 +1,120 @@
 <template>
-  <div>
-    <div class="page-header">
+  <div class="overview">
+    <header class="page-header overview-header">
       <div>
-        <h2>Fleet overview</h2>
-        <p class="page-subtitle">Availability, attention, and active work across every managed device.</p>
+        <h1>Overview</h1>
+        <p v-if="store.hasLoadedOnce" class="evidence-header">{{ devices.length }} {{ devices.length === 1 ? 'device' : 'devices' }} · View refreshed <time :datetime="store.lastUpdated" :title="formatLongTime(store.lastUpdated)">{{ relativeTime(store.lastUpdated) }}</time> · Device observation ages vary</p>
+        <p v-else class="evidence-header">{{ store.deviceError ? 'Device count unknown' : 'Retrieving fleet observations…' }}</p>
       </div>
-      <div class="flex gap-xs">
-        <button class="btn btn-ghost btn-sm" :disabled="store.loading" @click="refresh">
-          <i :class="['fas', store.loading ? 'fa-spinner fa-spin' : 'fa-sync-alt']" aria-hidden="true"></i>
-          {{ store.loading ? 'Refreshing…' : 'Refresh' }}
-        </button>
-        <button class="btn btn-primary btn-sm" @click="scanAll">
-          <i class="fas fa-satellite-dish" aria-hidden="true"></i> Scan fleet
-        </button>
-        <router-link to="/devices?add=1" class="btn btn-primary btn-sm">
-          <i class="fas fa-plus" aria-hidden="true"></i> Add device
-        </router-link>
+      <div class="header-actions">
+        <button class="btn btn-ghost btn-sm" :disabled="store.loading" @click="refresh"><i :class="['fas', store.loading ? 'fa-spinner fa-spin' : 'fa-sync-alt']" aria-hidden="true"></i>{{ store.loading ? 'Refreshing…' : 'Refresh view' }}</button>
+        <router-link to="/devices?add=1" class="btn btn-ghost btn-sm">Add device</router-link>
       </div>
+    </header>
+    <p class="visually-hidden" role="status" aria-live="polite">{{ announcement }}</p>
+    <div v-if="store.deviceError" class="observation-notice" role="status">
+      <strong>{{ store.hasLoadedOnce ? 'Device observations could not be refreshed' : 'Fleet state is unavailable' }}</strong>
+      <p>{{ store.hasLoadedOnce ? `Showing the last successful view from ${formatLongTime(store.lastUpdated)}. Conditions may have changed.` : 'Device data could not be retrieved. No health assessment is available.' }}</p>
+      <button class="btn btn-ghost btn-sm" :disabled="store.loading" @click="refresh">Retry</button>
     </div>
-
-    <section class="overview-hero" aria-labelledby="fleet-health-heading">
-      <div>
-        <span class="eyebrow">Fleet</span>
-        <h3 id="fleet-health-heading">{{ healthMessage }}</h3>
-        <p>{{ devices.length }} device{{ devices.length === 1 ? '' : 's' }} across {{ kindCount }} type{{ kindCount === 1 ? '' : 's' }}</p>
-      </div>
-      <div class="health-bar" :aria-label="`${online.length} online, ${offline.length} offline, ${unknown.length} unknown`">
-        <span v-if="online.length" class="health-online" :style="{ flex: online.length }"></span>
-        <span v-if="offline.length" class="health-offline" :style="{ flex: offline.length }"></span>
-        <span v-if="unknown.length || !devices.length" class="health-unknown" :style="{ flex: unknown.length || 1 }"></span>
-      </div>
-      <div class="health-legend">
-        <span><i class="dot dot-green"></i>{{ online.length }} online</span>
-        <span><i class="dot dot-red"></i>{{ offline.length }} offline</span>
-        <span><i class="dot dot-gray"></i>{{ unknown.length }} unknown</span>
-      </div>
+    <section v-if="!store.hasLoadedOnce && !store.deviceError" class="overview-panel loading-state" aria-busy="true" aria-label="Loading fleet observations"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i>Loading devices and current work…</section>
+    <section v-else-if="store.hasLoadedOnce && !devices.length && !store.deviceError" class="overview-panel onboarding">
+      <span class="eyebrow">Getting started</span><h2>Connect your first device</h2>
+      <p>Enroll a Linux device over SSH or a supported robot. Discovery determines which operations are available.</p>
+      <ol><li><strong>Connect and verify identity.</strong><span>Review the endpoint and SSH fingerprint where supported.</span></li><li><strong>Inspect the first observation.</strong><span>Confirm device type, facts, and capabilities.</span></li><li><strong>Choose an inspection.</strong><span>Review its targets and results before planning maintenance.</span></li></ol>
+      <div class="header-actions"><router-link class="btn btn-primary" to="/devices?add=1">Add first device</router-link><router-link class="btn btn-ghost" to="/devices?import=1">Import devices from CSV</router-link></div>
     </section>
 
-    <section class="metric-grid" aria-label="Fleet summary">
-      <router-link to="/devices" class="metric-card">
-        <i class="fas fa-server metric-icon" aria-hidden="true"></i>
-        <div><strong>{{ devices.length }}</strong><span>Devices</span></div>
-      </router-link>
-      <router-link to="/activity" class="metric-card">
-        <i class="fas fa-bolt metric-icon" aria-hidden="true"></i>
-        <div><strong>{{ store.activeJobCount ?? "--" }}</strong><span>Active jobs</span></div>
-      </router-link>
-      <router-link to="/devices?attention=1" class="metric-card" :class="{ warning: attentionCount }">
-        <i class="fas fa-triangle-exclamation metric-icon" aria-hidden="true"></i>
-        <div><strong>{{ attentionCount }}</strong><span>Need attention</span></div>
-      </router-link>
-      <router-link v-if="gpuDevices.length" to="/devices?capability=gpu.inspect" class="metric-card">
-        <i class="fas fa-microchip metric-icon" aria-hidden="true"></i>
-        <div><strong>{{ gpuDevices.length }}</strong><span>GPU devices</span></div>
-      </router-link>
-      <router-link v-if="robotDevices.length" to="/devices?kind=robot" class="metric-card">
-        <i class="fas fa-robot metric-icon" aria-hidden="true"></i>
-        <div><strong>{{ robotDevices.length }}</strong><span>Robots</span></div>
-      </router-link>
-    </section>
-
-    <div class="content-grid">
-      <section class="card">
-        <div class="card-body">
-          <div class="section-header">
-            <div><span class="eyebrow">Priorities</span><h3>Needs attention</h3></div>
-            <router-link to="/devices?attention=1">View devices</router-link>
-          </div>
-          <div v-if="attentionItems.length" class="attention-list">
-            <router-link v-for="item in attentionItems.slice(0, 7)" :key="`${item.device.id}-${item.reason}`" :to="`/devices/${item.device.id}`" class="attention-row">
-              <span :class="['status-symbol', item.severity]" aria-hidden="true"><i :class="['fas', item.icon]"></i></span>
-              <span><strong>{{ item.device.name }}</strong><small>{{ item.reason }}</small></span>
-              <i class="fas fa-chevron-right" aria-hidden="true"></i>
-            </router-link>
-          </div>
-          <div v-else class="empty-compact"><i class="fas fa-circle-check" aria-hidden="true"></i>No current device alerts.</div>
-        </div>
+    <template v-if="store.hasLoadedOnce && devices.length">
+      <section class="condition-brief" :class="{ 'has-attention': affectedCount }" aria-labelledby="fleet-condition">
+        <span class="eyebrow">{{ store.deviceError ? 'Last known conditions' : affectedCount ? 'Attention required' : 'Latest observations' }}</span>
+        <h2 id="fleet-condition">{{ conditionTitle }}</h2>
+        <p>{{ firstStep }}</p>
+        <div class="reachability"><span>Last known reachability: <strong>{{ onlineCount }} online · {{ offlineCount }} offline · {{ devices.length - onlineCount - offlineCount }} unknown</strong></span><router-link to="/devices">View inventory</router-link></div>
       </section>
-
-      <section class="card">
-        <div class="card-body">
-          <div class="section-header">
-            <div><span class="eyebrow">Recent</span><h3>Activity</h3></div>
-            <router-link to="/activity">View all</router-link>
-          </div>
-          <div v-if="recentJobs.length" class="activity-list">
-            <router-link v-for="job in recentJobs.slice(0, 6)" :key="job.job_id" :to="`/activity?job=${job.job_id}`" class="activity-row">
-              <StatusBadge :status="job.status" />
-              <span><strong>{{ operationLabel(job.playbook) }}</strong><small>{{ formatTargetList(job.target_devices) }}</small></span>
-              <time>{{ relativeTime(job.created_at) }}</time>
+      <div class="overview-columns">
+        <section ref="queueElement" class="overview-panel next-steps" aria-labelledby="next-steps-title">
+          <header class="panel-heading"><div><h2 id="next-steps-title" tabindex="-1">Next steps</h2><p>{{ affectedCount ? `Ranked by consequence. Groups overlap across ${affectedCount} ${affectedCount === 1 ? 'device' : 'devices'}.` : 'No conditions flagged in the latest observations.' }}</p></div><router-link v-if="affectedCount" to="/devices?attention=1">All affected devices</router-link></header>
+          <div v-if="pendingObservations" class="queue-update"><button class="btn btn-ghost btn-sm" @click="applyObservations">Update priorities with new observations</button><p>Your current view is held while you inspect this queue.</p></div>
+          <AttentionGroup v-for="group in groups" :key="group.id" :group="group" :jobs="store.activeJobs" />
+          <div v-if="!groups.length" class="panel-empty"><strong>No current device alerts</strong><p>This reflects the latest recorded facts, not continuous monitoring.</p><router-link :to="{ path: '/operations', query: { operation: 'system.scan' } }">Review a fresh scan</router-link></div>
+        </section>
+        <div class="work-column">
+          <section class="overview-panel" aria-labelledby="work-title">
+            <header class="panel-heading"><div><h2 id="work-title">Work in progress</h2><p>{{ activeSummary }}</p></div><router-link to="/activity?status=active">Activity</router-link></header>
+            <p v-if="store.activeError" class="panel-notice">Work could not be refreshed. {{ store.activeUpdated ? `Last observation: ${formatLongTime(store.activeUpdated)}.` : 'Active work is unknown.' }}</p>
+            <article v-for="job in store.activeJobs.slice(0, 4)" :key="job.job_id" class="work-item">
+              <div class="work-item-head"><StatusBadge :status="job.status" /><h3>{{ operationLabel(job.playbook) }}</h3></div>
+              <p class="job-targets" :title="job.target_devices">{{ formatTargetList(job.target_devices) }}<span v-if="job.phase && job.status !== 'pending'"> · {{ job.phase.replaceAll('_', ' ') }}</span></p>
+              <p><time :datetime="job.started_at || job.created_at" :title="formatLongTime(job.started_at || job.created_at)">{{ job.started_at ? 'Started' : 'Queued' }} {{ relativeTime(job.started_at || job.created_at) }}</time></p>
+              <router-link :to="{ path: '/activity', query: { job: job.job_id } }">{{ job.status === 'pending' ? 'Review queued job' : 'Open job output' }}</router-link>
+            </article>
+            <p v-if="store.activeJobCount === 0 && !store.activeError" class="panel-empty">No active jobs.</p>
+            <p v-if="store.activeJobCount > 4" class="panel-footer"><router-link to="/activity?status=active">View all {{ store.activeJobCount }} active jobs</router-link></p>
+          </section>
+          <section class="overview-panel" aria-labelledby="outcomes-title">
+            <header class="panel-heading"><div><h2 id="outcomes-title">Recent outcomes</h2><p v-if="store.jobsUpdated">{{ outcomes.total }} completed in the latest {{ store.recentJobs.length }} loaded jobs</p></div></header>
+            <p v-if="store.jobsError" class="panel-notice">Recent outcomes could not be refreshed. {{ store.jobsUpdated ? `Last observation: ${formatLongTime(store.jobsUpdated)}.` : 'Outcomes are unknown.' }}</p>
+            <div v-if="store.jobsUpdated" class="outcome-summary">
+              <div class="outcome-counts"><router-link to="/activity?status=success">{{ outcomes.counts.success }} succeeded</router-link><router-link to="/activity?status=failed">{{ outcomes.counts.failed }} failed</router-link><router-link to="/activity?status=recovery_required">{{ outcomes.counts.recovery_required }} recovery</router-link><router-link v-if="outcomes.counts.cancelled" to="/activity?status=cancelled">{{ outcomes.counts.cancelled }} cancelled</router-link></div>
+              <p>A sample of jobs, not a time-window success rate.</p>
+            </div>
+            <div class="adverse-heading"><h3>Latest adverse outcomes</h3><p>Historical results may already be addressed.</p></div>
+            <p v-if="store.adverseError" class="panel-notice">Adverse outcomes could not be refreshed. {{ store.adverseUpdated ? `Last observation: ${formatLongTime(store.adverseUpdated)}.` : 'History is unavailable.' }}</p>
+            <router-link v-for="job in store.adverseJobs.slice(0, 3)" :key="job.job_id" :to="{ path: '/activity', query: { job: job.job_id } }" class="adverse-item">
+              <span :class="['condition-tag', 'danger']">{{ job.status === 'recovery_required' ? 'Recovery required' : 'Failed' }}</span><strong>{{ operationLabel(job.playbook) }}</strong><span>{{ formatTargetList(job.target_devices) }}</span><time :datetime="job.finished_at || job.created_at" :title="formatLongTime(job.finished_at || job.created_at)">{{ relativeTime(job.finished_at || job.created_at) }}</time>
             </router-link>
-          </div>
-          <div v-else class="empty-compact">No operations have run yet.</div>
+            <p v-if="store.adverseUpdated && !store.adverseJobs.length && !store.adverseError" class="panel-empty">No failed or recovery-required jobs found.</p>
+            <p class="panel-footer"><router-link to="/activity?status=adverse">Review adverse outcomes</router-link></p>
+          </section>
         </div>
-      </section>
-    </div>
+      </div>
+      <div class="overview-secondary">
+        <section class="overview-panel secondary-panel"><h2>Observation coverage</h2><p>Root storage: <strong>{{ coverage.reported }} reported</strong> · {{ coverage.missing }} unreported · {{ coverage.stale }} stale or undated</p><p v-if="coverage.worst !== null">Worst recorded root storage: <strong>{{ coverage.worst }}%</strong></p><p>Missing readings stay unknown. Open device evidence for observation timestamps.</p><router-link to="/devices?reason=verification">Review stale or missing facts</router-link></section>
+        <section class="overview-panel secondary-panel"><h2>Fleet composition</h2><p><router-link v-if="coverage.gpu" to="/devices?capability=gpu.inspect">{{ coverage.gpu }} GPU capable</router-link><span v-else>0 GPU capable</span> · {{ coverage.other }} other devices · <router-link v-if="coverage.robots" to="/devices?kind=robot">{{ coverage.robots }} robots</router-link><span v-else>0 robots</span></p><p>Capabilities describe supported operations. They do not imply utilization or maintenance readiness.</p><router-link to="/operations">Review operation eligibility</router-link></section>
+      </div>
+    </template>
   </div>
 </template>
-
 <script setup>
-import { computed, onMounted, onUnmounted } from "vue";
-import { scanAllDevices } from "../api.js";
-import { useDevicesStore } from "../stores/devices.js";
-import StatusBadge from "../components/StatusBadge.vue";
-import { hasCapability, formatTargetList, operationLabel } from "../utils/devices.js";
-import { relativeTime } from "../utils/time.js";
-
+import { computed, ref, watch } from 'vue';
+import { useDevicesStore } from '../stores/devices.js';
+import AttentionGroup from '../components/AttentionGroup.vue';
+import StatusBadge from '../components/StatusBadge.vue';
+import { attentionGroups, completedSummary, fleetCoverage } from '../utils/fleetOverview.js';
+import { formatTargetList, operationLabel } from '../utils/devices.js';
+import { relativeTime, formatLongTime } from '../utils/time.js';
 const store = useDevicesStore();
 const devices = computed(() => store.devices);
-const recentJobs = computed(() => store.recentJobs);
-const online = computed(() => devices.value.filter((device) => device.status === "online"));
-const offline = computed(() => devices.value.filter((device) => device.status === "offline"));
-const unknown = computed(() => devices.value.filter((device) => !["online", "offline"].includes(device.status)));
-const kindCount = computed(() => new Set(devices.value.map((device) => device.kind)).size);
-const gpuDevices = computed(() => devices.value.filter((device) => hasCapability(device, "gpu.inspect")));
-const robotDevices = computed(() => devices.value.filter((device) => device.kind === "robot"));
-const healthMessage = computed(() => {
-  if (!devices.value.length) return "Build your mixed fleet";
-  if (offline.value.length) return `${offline.value.length} device${offline.value.length === 1 ? '' : 's'} offline`;
-  if (unknown.value.length) return `${unknown.value.length} device${unknown.value.length === 1 ? '' : 's'} need a scan`;
-  return "All devices are reachable";
+const queueElement = ref(null), queueDevices = ref(store.devices), pendingObservations = ref(false), announcement = ref('');
+watch(() => store.devices, rows => {
+  if (JSON.stringify(rows) === JSON.stringify(queueDevices.value)) { pendingObservations.value = false; return; }
+  if (queueElement.value?.contains(document.activeElement)) { pendingObservations.value = true; return; }
+  queueDevices.value = rows;
+  pendingObservations.value = false;
 });
-const attentionItems = computed(() => {
-  const items = [];
-  devices.value.forEach((device) => {
-    if (device.recovery_required) items.push({ device, reason: "Recovery verification required", severity: "danger", icon: "fa-triangle-exclamation" });
-    else if (device.facts_stale) items.push({ device, reason: "Facts need verification", severity: "warning", icon: "fa-satellite-dish" });
-    if (device.status === "offline") items.push({ device, reason: "Device is offline", severity: "danger", icon: "fa-link-slash" });
-    else if (device.status === "unknown") items.push({ device, reason: "No successful scan yet", severity: "muted", icon: "fa-circle-question" });
-    if (device.reboot_required) items.push({ device, reason: "Reboot required", severity: "warning", icon: "fa-power-off" });
-    if ((device.disk_root_percent || 0) >= 85) items.push({ device, reason: `Root storage is ${device.disk_root_percent}% full`, severity: "warning", icon: "fa-hard-drive" });
-  });
-  return items;
+function applyObservations() { queueDevices.value = store.devices; pendingObservations.value = false; queueElement.value?.querySelector('h2')?.focus(); }
+const groups = computed(() => attentionGroups(queueDevices.value));
+const affectedCount = computed(() => new Set(groups.value.flatMap(group => group.devices.map(device => device.id))).size);
+const onlineCount = computed(() => devices.value.filter(device => device.status === 'online').length);
+const offlineCount = computed(() => devices.value.filter(device => device.status === 'offline').length);
+const coverage = computed(() => fleetCoverage(devices.value));
+const outcomes = computed(() => completedSummary(store.recentJobs));
+const conditionTitle = computed(() => offlineCount.value === devices.value.length ? 'No devices currently reported reachable' : affectedCount.value ? `${affectedCount.value} ${affectedCount.value === 1 ? 'device needs' : 'devices need'} attention` : 'No current device alerts');
+const firstStep = computed(() => {
+  const group = groups.value[0];
+  if (!group) return 'Review observation age before planning maintenance.';
+  return `${group.title}: ${group.devices.slice(0, 2).map(device => device.name).join(', ')}${group.devices.length > 2 ? ` and ${group.devices.length - 2} more` : ''}.`;
 });
-const attentionCount = computed(() => new Set(attentionItems.value.map((item) => item.device.id)).size);
-
-async function refresh() { await store.refresh({ force: true }); }
-async function scanAll() {
-  try { await scanAllDevices(); window.$toast?.success("Fleet scan started"); }
-  catch (error) { window.$toast?.error("Couldn't start fleet scan", error); }
-}
-onMounted(() => store.start());
-onUnmounted(() => store.stop());
+const activeSummary = computed(() => store.activeJobCount == null ? (store.activeError ? 'Work state unavailable' : 'Loading work…') : `${store.activeJobCount} active${store.activeJobCount > store.activeJobs.length ? ` · ${store.activeJobs.length} loaded` : ''}`);
+async function refresh() { await store.refresh(); applyObservations(); announcement.value = store.error ? 'Some observations could not be refreshed.' : 'Fleet view refreshed.'; }
 </script>
-
 <style scoped>
-.page-subtitle { margin: 4px 0 0; color: var(--text-secondary); }
-.overview-hero { padding: 24px 28px; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: linear-gradient(135deg, var(--surface-white), var(--surface-light)); box-shadow: var(--shadow-card); }
-.overview-hero h3 { margin: 4px 0; font-size: 26px; }.overview-hero p { margin: 0; color: var(--text-secondary); }
-.eyebrow { color: var(--text-secondary); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; }
-.health-bar { display: flex; height: 9px; margin-top: 22px; border-radius: 8px; overflow: hidden; background: var(--surface-lighter); }.health-online { background: var(--color-success); }.health-offline { background: var(--color-danger); }.health-unknown { background: var(--border-color); }
-.health-legend { display: flex; gap: 18px; margin-top: 10px; font-size: 12px; color: var(--text-secondary); }.health-legend span { display: flex; align-items: center; gap: 6px; }
-.metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 12px; margin: 18px 0; }
-.metric-card { display: flex; align-items: center; gap: 14px; padding: 16px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface-white); color: var(--text-primary); text-decoration: none; box-shadow: var(--shadow-card); }.metric-card:hover { border-color: var(--color-accent); text-decoration: none; }.metric-card.warning .metric-icon { color: var(--color-warning); }
-.metric-icon { width: 34px; color: var(--color-accent); font-size: 20px; text-align: center; }.metric-card div { display: flex; flex-direction: column; }.metric-card strong { font-size: 24px; line-height: 1; }.metric-card span { color: var(--text-secondary); font-size: 12px; margin-top: 5px; }
-.content-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }.section-header h3 { margin: 2px 0 0; }
-.attention-list, .activity-list { display: flex; flex-direction: column; }.attention-row, .activity-row { display: grid; align-items: center; gap: 12px; padding: 11px 4px; border-top: 1px solid var(--border-subtle); color: inherit; text-decoration: none; }.attention-row { grid-template-columns: auto 1fr auto; }.activity-row { grid-template-columns: auto 1fr auto; }.attention-row:hover, .activity-row:hover { text-decoration: none; background: var(--surface-light); }.attention-row span:nth-child(2), .activity-row span:nth-child(2) { display: flex; flex-direction: column; }.attention-row small, .activity-row small, .activity-row time { color: var(--text-secondary); font-size: 11px; }
-.status-symbol { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; }.status-symbol.danger { background: var(--surface-danger-soft); color: var(--color-danger); }.status-symbol.warning { background: var(--surface-warning-soft); color: var(--color-warning); }.status-symbol.muted { background: var(--surface-lighter); color: var(--text-secondary); }
-.empty-compact { padding: 30px 8px; color: var(--text-secondary); display: flex; align-items: center; justify-content: center; gap: 8px; }
-@media (max-width: 780px) { .content-grid { grid-template-columns: 1fr; }.page-header { align-items: flex-start; }.page-header > .flex { flex-wrap: wrap; justify-content: flex-end; } }
+.overview { font-size: 14px; }.overview h1 { font-size: 28px; letter-spacing: -.5px; }.overview-header { margin-bottom: 22px; }.evidence-header { color: var(--text-secondary); font-size: 12px; margin-top: 8px; }.header-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.overview-panel, .condition-brief { border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--surface-white); min-width: 0; overflow: hidden; }.condition-brief { padding: 16px 20px; margin-bottom: 20px; border-left: 4px solid var(--border-color); }.condition-brief.has-attention { border-left-color: var(--status-danger-text); }.condition-brief h2 { margin: 6px 0; font-size: 22px; letter-spacing: -.3px; }.eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; font-weight: 700; color: var(--text-secondary); }.has-attention .eyebrow { color: var(--status-danger-text); }.reachability { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; border-top: 1px solid var(--border-subtle); padding-top: 10px; margin-top: 14px; font-size: 12px; color: var(--text-secondary); }
+.overview-columns { display: grid; grid-template-columns: minmax(0,1.65fr) minmax(290px,1fr); gap: 20px; align-items: start; }.work-column { display: grid; gap: 20px; min-width: 0; }.panel-heading { padding: 16px 20px; display: flex; align-items: start; justify-content: space-between; gap: 12px; }.panel-heading h2 { font-size: 18px; }.panel-heading p { font-size: 12px; color: var(--text-secondary); margin-top: 5px; }.panel-heading > a { font-size: 12px; flex-shrink: 0; }.panel-empty { padding: 20px; color: var(--text-secondary); }.panel-empty p { margin: 6px 0; }.panel-footer { padding: 12px 20px; border-top: 1px solid var(--border-subtle); font-size: 13px; }
+.work-item { padding: 10px 20px; border-top: 1px solid var(--border-subtle); }.work-item-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }.work-item h3 { font-size: 14px; margin: 0; }.work-item p { font-size: 12px; color: var(--text-secondary); margin: 3px 0; }.job-targets { overflow-wrap: anywhere; }.work-item a { display: inline-block; margin-top: 5px; font-size: 13px; }.job-phase { font-size: 12px; color: var(--text-secondary); margin-left: 8px; }.outcome-summary { padding: 0 20px 16px; }.outcome-counts { display: flex; flex-wrap: wrap; gap: 8px 16px; font-weight: 650; }.outcome-summary p, .adverse-heading p { font-size: 12px; color: var(--text-secondary); margin-top: 6px; }.adverse-heading { padding: 12px 20px; border-top: 1px solid var(--border-subtle); }.adverse-heading h3 { font-size: 14px; }.adverse-item { padding: 12px 20px; display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; border-top: 1px solid var(--border-subtle); color: var(--text-primary); font-size: 13px; }.adverse-item .condition-tag { grid-column: 1/-1; width: fit-content; }.adverse-item strong { grid-column: 1/-1; }.adverse-item > span:not(.condition-tag), .adverse-item time { color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; }.adverse-item:hover { background: var(--surface-light); }
+.overview-secondary { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }.secondary-panel { padding: 16px 20px; }.secondary-panel h2 { font-size: 16px; }.secondary-panel p { color: var(--text-secondary); font-size: 13px; margin: 8px 0; }.secondary-panel a { font-size: 13px; }.observation-notice, .panel-notice { background: var(--surface-warning-soft); color: var(--text-primary); padding: 14px 20px; font-size: 13px; }.observation-notice { border-left: 4px solid var(--status-warning-text); margin-bottom: 20px; }.observation-notice p { margin: 5px 0 10px; }.queue-update { padding: 12px 20px; background: var(--surface-info-soft); }.queue-update p { font-size: 12px; margin-top: 5px; }.loading-state { padding: 48px 24px; color: var(--text-secondary); }.loading-state i { margin-right: 8px; }.onboarding { padding: 32px; }.onboarding h2 { font-size: 24px; margin: 8px 0 12px; }.onboarding > p { max-width: 62ch; color: var(--text-secondary); }.onboarding ol { padding-left: 22px; margin: 22px 0; }.onboarding li { padding: 8px 0; }.onboarding li span { display: block; color: var(--text-secondary); font-size: 13px; }
+@media (max-width: 900px) { .overview-columns { grid-template-columns: 1fr; }.work-column { grid-template-columns: 1fr 1fr; }.overview-header { align-items: start; } }
+@media (max-width: 620px) { .overview-header { flex-direction: column; gap: 14px; }.overview-secondary, .work-column { grid-template-columns: 1fr; }.panel-heading { flex-wrap: wrap; padding: 16px; }.condition-brief { padding: 16px; }.onboarding { padding: 24px 16px; }.adverse-item { grid-template-columns: 1fr; } }
 </style>

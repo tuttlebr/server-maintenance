@@ -705,3 +705,11 @@ textarea.form-input {
   0%   { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+/* Text and control roles stay distinct from filled action colors. */
+.condition-tag { display: inline-block; border: 1px solid var(--border-subtle); border-radius: 4px; padding: 2px 7px; font-size: 11px; font-weight: 550; color: var(--text-secondary); }
+.condition-tag.danger { color: var(--status-danger-text); background: var(--surface-danger-soft); }
+.condition-tag.warning { color: var(--status-warning-text); background: var(--surface-warning-soft); }
+.form-input, .form-select, .btn-ghost { border-color: var(--control-border); }
+.form-input:focus, .form-select:focus { border-color: var(--focus-ring); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }

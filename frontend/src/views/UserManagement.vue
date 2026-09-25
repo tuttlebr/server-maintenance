@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div class="page-header"><div><h2>Access</h2><p class="muted">Select devices and accounts. Every change uses the scope shown in its confirmation.</p></div><button class="btn btn-ghost btn-sm" :disabled="busy" @click="load">Refresh</button></div>
+    <div class="page-header"><div><h2>Device access</h2><p class="muted">Select devices and accounts. Every change uses the scope shown in its confirmation.</p></div><button class="btn btn-ghost btn-sm" :disabled="busy" @click="load">Refresh</button></div>
     <section class="card scope"><div class="card-body">
       <h3>Target devices <span class="badge badge-outline">{{ selectedDeviceIds.length }} selected</span></h3>
       <div class="device-options"><label v-for="device in devices" :key="device.id" class="checkbox-label"><input v-model="selectedDeviceIds" type="checkbox" :value="device.id" :disabled="busy" /><span>{{ device.name }}<small v-if="device.recovery_required">Recovery required</small><small v-else-if="device.facts_stale">Scan before changes</small></span><router-link :to="`/devices/${device.id}`">Details</router-link></label></div>

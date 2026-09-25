@@ -5,7 +5,7 @@
       <div class="flex gap-xs">
         <label class="visually-hidden" for="job-filter-status">Filter by status</label>
         <select id="job-filter-status" v-model="filterStatus" class="form-select" style="width: auto; min-width: 140px">
-          <option value="">All Statuses</option>
+          <option value="">All statuses</option><option value="active">Active work</option><option value="adverse">Adverse outcomes</option>
           <option value="success">Success</option>
           <option value="failed">Failed</option>
           <option value="running">Running</option>
@@ -18,7 +18,11 @@
       </div>
     </div>
 
-    <div v-if="jobs.length" class="table-wrapper">
+    <div class="activity-filters"><label>Operation<select v-model="filterPlaybook" class="form-select"><option value="">All operations</option><option v-for="playbook in operationOptions" :key="playbook" :value="playbook">{{ operationLabel(playbook) }}</option></select></label><label>Device in loaded jobs<input v-model="filterTarget" type="search" class="form-input" placeholder="Inventory name" /></label><label>Created within<select v-model="filterPeriod" class="form-select"><option value="">Any time</option><option value="24h">24 hours</option><option value="7d">7 days</option></select></label></div>
+    <p class="activity-coverage">{{ loading ? 'Refreshing activity…' : `Page ${page + 1}: ${visibleJobs.length} visible jobs` }}. <span v-if="filterStatus === 'adverse'">Each page loads up to 50 jobs per adverse status. </span>Device and time filters apply to this loaded page. <router-link to="/">Back to Overview</router-link></p>
+    <p v-if="loadError" class="callout callout-warn" role="status">Activity could not be refreshed. {{ jobs.length ? 'Showing the last loaded jobs.' : 'Job history is unavailable.' }}</p>
+    <p v-if="detailError" class="callout callout-danger" role="alert">The selected job could not be loaded. <button class="btn btn-ghost btn-sm" @click="showJob(route.query.job)">Retry job</button></p>
+    <div v-if="visibleJobs.length" class="table-wrapper">
       <table>
         <thead>
           <tr>
@@ -32,7 +36,7 @@
           </tr>
         </thead>
         <tbody>
-          <template v-for="job in jobs" :key="job.job_id">
+          <template v-for="job in visibleJobs" :key="job.job_id">
             <tr style="cursor: pointer" @click="toggleExpand(job.job_id)">
               <td><strong>{{ operationLabel(job.playbook) }}</strong></td>
               <td>{{ formatTargetList(job.target_devices) }}</td>
@@ -57,7 +61,7 @@
               <td colspan="7" style="padding: 0">
                 <div class="job-detail">
                   <p v-if="expandedJob?.error_summary" role="status" class="callout callout-danger">{{ expandedJob.error_summary }}</p>
-                  <p v-if="expandedJob?.status === 'recovery_required'" class="callout callout-warn">Remote state needs verification. Review the log and Kubernetes recovery details, repair the host if needed, then run Verify recovery in <router-link to="/operations">Operations</router-link>. Resume Kubernetes scheduling separately when ready.</p>
+                  <p v-if="expandedJob?.status === 'recovery_required'" class="callout callout-warn">Remote state needs verification. Review the log and Kubernetes recovery details, repair the host if needed, then run Verify recovery in <router-link :to="{ path: '/operations', query: { operation: 'system.recover', targets: expandedJob.target_devices, reason: 'recovery' } }">Operations with these targets</router-link>. Resume Kubernetes scheduling separately when ready.</p>
                   <p v-if="expandedJob && ['pending', 'running', 'cancelling'].includes(expandedJob.status)">Phase: {{ expandedJob.phase?.replaceAll('_', ' ') }}. <button v-if="canCancel(expandedJob)" class="btn btn-ghost btn-sm" :disabled="cancelling" @click="requestCancel(expandedJob)">Cancel {{ expandedJob.status === 'pending' ? 'queued job' : 'inspection' }}</button><span v-else>Running changes finish under supervision; they cannot be safely cancelled.</span></p>
                   <ul v-if="expandedJob?.device_results?.length" class="outcomes" aria-label="Per-device outcomes"><li v-for="result in expandedJob.device_results" :key="result.hostname"><strong>{{ result.hostname }}</strong>: {{ result.status.replaceAll('_', ' ') }}</li></ul>
                   <router-link v-if="expandedJob?.playbook === 'package_preview.yml' && expandedJob.status === 'success'" :to="`/operations?preview=${expandedJob.job_id}`" class="btn btn-primary btn-sm">Review and apply this preview</router-link>
@@ -151,13 +155,14 @@
         </tbody>
       </table>
     </div>
-    <div v-else class="empty-state">
+    <div v-else-if="!loading && !loadError" class="empty-state">
       <i class="fas fa-list-check" aria-hidden="true"></i>
       <p>No activity found</p>
       <router-link to="/" class="btn btn-primary btn-sm" style="display: inline-flex; margin-top: var(--space-sm)">
         <i class="fas fa-home" aria-hidden="true"></i> Back to overview
       </router-link>
     </div>
+    <nav class="activity-pagination" aria-label="Activity pages"><button class="btn btn-ghost btn-sm" :disabled="page === 0 || loading" @click="setPage(page - 1)">Previous</button><span>Page {{ page + 1 }}</span><button class="btn btn-ghost btn-sm" :disabled="!hasNextPage || loading" @click="setPage(page + 1)">Next</button></nav>
   </div>
 </template>
 
@@ -167,17 +172,31 @@ import { useRoute, useRouter } from "vue-router";
 import AnsiToHtml from "ansi-to-html";
 import { getJobs, getJob, streamJobOutput, cancelJob } from "../api.js";
 import StatusBadge from "../components/StatusBadge.vue";
-import { formatTargetList, operationLabel } from "../utils/devices.js";
-import { formatLongTime } from "../utils/time.js";
+import { formatTargetList, operationLabel, OPERATION_LABELS } from "../utils/devices.js";
+import { targetNames } from "../utils/fleetOverview.js";
+import { formatLongTime, ageInMs } from "../utils/time.js";
 
 const jobs = ref([]);
 const cancelling = ref(false);
-let refreshTimer;
+let refreshTimer; let disposed = false;
 function canCancel(job) { return !job.playbook.startsWith("reachy.") && (job.status === "pending" || (job.status === "running" && job.execution_kind === "read_only")); }
 async function requestCancel(job) { cancelling.value = true; try { await cancelJob(job.job_id); expandedJob.value = await getJob(job.job_id); await load(); } catch(e) { window.$toast?.error("Could not cancel job", e); } finally { cancelling.value = false; } }
 const route = useRoute();
 const router = useRouter();
-const filterStatus = ref("");
+const loading = ref(true), loadError = ref(null), detailError = ref(null), hasNextPage = ref(false);
+let loadSequence = 0;
+function routeFilter(key) { return computed({ get: () => String(route.query[key] || ''), set: value => router.replace({ query: { ...route.query, [key]: value || undefined, page: undefined, job: undefined } }) }); }
+const filterStatus = routeFilter('status'), filterPlaybook = routeFilter('playbook'), filterTarget = routeFilter('target'), filterPeriod = routeFilter('period');
+const page = computed(() => Math.max(0, Math.min(100000, Number.parseInt(route.query.page, 10) || 0)));
+function setPage(value) { router.replace({ query: { ...route.query, page: value || undefined, job: undefined } }); }
+const operationOptions = computed(() => [...new Set([...Object.keys(OPERATION_LABELS), ...jobs.value.map(job => job.playbook), filterPlaybook.value].filter(Boolean))].sort((a,b) => operationLabel(a).localeCompare(operationLabel(b))));
+const visibleJobs = computed(() => jobs.value.filter(job => {
+  if (job.job_id === expanded.value) return true;
+  const target = !filterTarget.value || targetNames(job).some(name => name.toLowerCase().includes(filterTarget.value.toLowerCase()));
+  const windowMs = ({ '24h': 86400000, '7d': 604800000 })[filterPeriod.value];
+  const age = ageInMs(job.created_at);
+  return target && (!windowMs || (age !== null && age >= 0 && age <= windowMs));
+}));
 const expanded = ref(null);
 const expandedJob = ref(null);
 const liveOutput = ref("");
@@ -227,13 +246,25 @@ const renderedLog = computed(() => colorizeAnsible(liveOutput.value || expandedJ
 watch([renderedLog, logContainer, autoScroll, wrapLines], scrollIfNeeded, { flush: "post" });
 
 async function load() {
+  const sequence = ++loadSequence;
+  loading.value = true;
   try {
-    const params = { limit: 50 };
-    if (filterStatus.value) params.status = filterStatus.value;
-    jobs.value = await getJobs(params);
-  } catch (e) {
-    window.$toast?.error("Couldn't load jobs", e);
-  }
+    const params = { limit: 50, offset: page.value * 50 };
+    if (filterPlaybook.value) params.playbook = filterPlaybook.value;
+    let rows, more;
+    if (filterStatus.value === 'adverse') {
+      const [failed, recovery] = await Promise.all([getJobs({ ...params, status: 'failed' }), getJobs({ ...params, status: 'recovery_required' })]);
+      rows = [...failed, ...recovery].sort((a,b) => String(b.created_at).localeCompare(String(a.created_at)));
+      more = failed.length === 50 || recovery.length === 50;
+    } else {
+      if (filterStatus.value) params.status = filterStatus.value;
+      rows = await getJobs(params); more = rows.length === 50;
+    }
+    if (sequence !== loadSequence) return;
+    if (expandedJob.value && !rows.some(job => job.job_id === expanded.value)) rows.unshift(expandedJob.value);
+    jobs.value = rows; hasNextPage.value = more; loadError.value = null;
+  } catch (error) { if (sequence === loadSequence) loadError.value = error; }
+  finally { if (sequence === loadSequence) loading.value = false; }
 }
 
 function stopStream() {
@@ -303,6 +334,7 @@ async function toggleExpand(jobId) {
 
 async function showJob(jobId) {
   stopStream();
+  detailError.value = null;
   expanded.value = typeof jobId === 'string' ? jobId : null;
   expandedJob.value = null;
   liveOutput.value = "";
@@ -318,6 +350,7 @@ async function showJob(jobId) {
     if (['running', 'pending', 'cancelling'].includes(job.status)) startStream(jobId);
   } catch (e) {
     if (expanded.value === jobId) {
+      detailError.value = e;
       window.$toast?.error("Couldn't load job details", e);
     }
   }
@@ -345,13 +378,15 @@ function topStorageOwners(result) {
   return (result?.mounts || []).flatMap((mount) => mount?.entries || []).sort((a, b) => Number(b.size_mb || 0) - Number(a.size_mb || 0)).slice(0, 3);
 }
 
-onUnmounted(() => { stopStream(); clearInterval(refreshTimer); });
-watch(filterStatus, load);
+onUnmounted(() => { disposed = true; loadSequence++; stopStream(); clearInterval(refreshTimer); });
+watch(() => [filterStatus.value, filterPlaybook.value, page.value], load);
 watch(() => route.query.job, showJob);
-onMounted(async () => { await load(); await showJob(route.query.job); refreshTimer = setInterval(async () => { await load(); if (expanded.value) { const id = expanded.value; try { const job = await getJob(id); if (expanded.value === id) { expandedJob.value = job; if (!jobs.value.some(j => j.job_id === id)) jobs.value.unshift(job); } } catch { /* preserve the last observation on a transient failure */ } } }, 5000); });
+onMounted(async () => { await load(); if (disposed) return; await showJob(route.query.job); if (disposed) return; refreshTimer = setInterval(async () => { await load(); if (expanded.value) { const id = expanded.value; try { const job = await getJob(id); if (expanded.value === id) { expandedJob.value = job; if (!jobs.value.some(j => j.job_id === id)) jobs.value.unshift(job); } } catch { /* preserve the last observation on a transient failure */ } } }, 5000); });
 </script>
 
 <style scoped>
+.activity-filters { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }.activity-filters label { display: grid; gap: 5px; font-size: 12px; flex: 1; min-width: 180px; }.activity-coverage { color: var(--text-secondary); font-size: 12px; margin-bottom: 14px; }.activity-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 16px; margin-top: 16px; font-size: 13px; }
+
 .structured-text { white-space:pre-wrap; max-height:350px; overflow:auto; overflow-wrap:anywhere; }.service-results { max-height:350px; overflow:auto; }.outcomes { display:flex; flex-wrap:wrap; gap:8px 24px; }.job-detail {
   padding: var(--space-sm);
   background-color: var(--surface-light);

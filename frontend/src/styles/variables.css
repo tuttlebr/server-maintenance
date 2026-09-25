@@ -5,6 +5,11 @@
   --color-danger:  #d32f2f;
   --color-info:    #1769d2;
   --color-accent:  #1769d2;
+  --link-text: #175fbd;
+  --focus-ring: #175fbd;
+  --control-border: #767d88;
+  --status-danger-text: #b3262b;
+  --status-warning-text: #92500a;
 
   /* Surfaces (light theme default) */
   --surface-dark: #000000;
@@ -18,7 +23,7 @@
   --text-on-light: #000000;
   --text-primary: #000000;
   --text-secondary: #555555;
-  --text-muted: #777777;
+  --text-muted: #686868;
   --border-color: #999999;
   --border-subtle: #d4d4d4;
 
@@ -35,16 +40,16 @@
   --shadow-focus: 0 0 0 3px rgba(0, 116, 223, 0.30);
 
   /* Typography */
-  --font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", "Menlo", "Consolas",
     "Courier New", monospace;
 
   /* Spacing */
   --space-xs: 8px;
-  --space-sm: 15px;
-  --space-md: 30px;
-  --space-lg: 45px;
-  --space-xl: 60px;
+  --space-sm: 16px;
+  --space-md: 24px;
+  --space-lg: 32px;
+  --space-xl: 48px;
   --space-2xl: 75px;
   --space-3xl: 90px;
   --space-4xl: 120px;
@@ -61,6 +66,11 @@
 
 /* Dark theme. Activate with <html data-theme="dark"> OR prefers-color-scheme. */
 [data-theme="dark"] {
+  --link-text: #91bcff;
+  --focus-ring: #91bcff;
+  --control-border: #79879a;
+  --status-danger-text: #ff9a9d;
+  --status-warning-text: #f3bd77;
   --surface-dark: #0a0a0a;
   --surface-dark-secondary: #1c1c1c;
   --surface-lighter: #262626;
@@ -88,6 +98,11 @@
 /* Honor OS preference when no explicit theme set. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    --link-text: #91bcff;
+    --focus-ring: #91bcff;
+    --control-border: #79879a;
+    --status-danger-text: #ff9a9d;
+    --status-warning-text: #f3bd77;
     --surface-dark: #0a0a0a;
     --surface-dark-secondary: #1c1c1c;
     --surface-lighter: #262626;

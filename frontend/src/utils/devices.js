@@ -37,7 +37,7 @@ export function formatTargetList(value) {
   return `${items.slice(0, 2).join(", ")} +${items.length - 2}`;
 }
 
-const OPERATION_LABELS = {
+export const OPERATION_LABELS = {
   "package_preview.yml": "Preview package updates",
   "service_control.yml": "System services",
   "recovery_check.yml": "Verify recovery",

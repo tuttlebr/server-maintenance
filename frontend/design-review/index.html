@@ -1,0 +1,412 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Fleet Manager · Design review</title><style>
+:root{color-scheme:light dark;--bg:#f4f6f9;--surface:#fff;--text:#17212f;--muted:#526071;--line:#d4dce6;--blue:#175fbd}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.65 system-ui,sans-serif}header{padding:12px 28px;background:#111a26;color:white;display:flex;align-items:center;gap:26px;position:sticky;top:0;z-index:2}header a{color:#b7d5ff;text-decoration:none}header span{margin-right:auto}main{max-width:1150px;margin:32px auto 80px;padding:38px 48px;background:var(--surface);border:1px solid var(--line);border-radius:10px}h1{font-size:38px;line-height:1.16;letter-spacing:-1px;max-width:850px}h2{font-size:25px;line-height:1.3;margin-top:48px;border-top:1px solid var(--line);padding-top:28px}h3{font-size:19px;margin-top:32px}p{max-width:90ch}a{color:var(--blue);text-underline-offset:3px}strong{font-weight:650}img{width:100%;height:auto;border:1px solid var(--line);border-radius:7px}p:has(img){max-width:none}table{border-collapse:collapse;font-size:14px;width:100%;margin:22px 0;display:block;overflow-x:auto}td,th{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:12px 14px;min-width:100px}th{background:var(--bg)}td:first-child{font-weight:550}code{font-size:.88em;background:var(--bg);padding:2px 4px;border-radius:4px}li{margin:10px 0}a:focus-visible{outline:3px solid var(--blue);outline-offset:3px}h2,h3{scroll-margin-top:80px}.gallery{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin-top:20px}.gallery figure{margin:0}.gallery figcaption{font-size:13px;color:var(--muted)}summary{cursor:pointer;font-weight:600}:is(summary,select,button):focus-visible{outline:3px solid var(--blue);outline-offset:3px}.skip{position:absolute;left:-9999px}.skip:focus{left:10px;top:10px;background:var(--surface);padding:8px;z-index:4}footer{border-top:1px solid var(--line);margin-top:40px;padding-top:20px;color:var(--muted);font-size:13px}@media(prefers-color-scheme:dark){:root{--bg:#141a22;--surface:#1b232e;--text:#eaf0f7;--muted:#b0becf;--line:#46566a;--blue:#96c0ff}}@media(max-width:720px){.gallery{grid-template-columns:1fr}header{font-size:13px;flex-wrap:wrap;gap:12px;padding:12px 16px}main{padding:22px 18px;margin:0;border:0;border-radius:0}h1{font-size:29px}h2{font-size:22px}table{font-size:13px}td,th{padding:8px}}@media print{header{position:static}main{max-width:none;margin:0;border:0;padding:0}h2{break-before:auto}img{max-height:80vh;object-fit:contain}tr,img{break-inside:avoid}body{background:white;color:black}a{color:#174f8d}}
+</style></head><body><a class="skip" href="#report">Skip to report</a><header><span>DESIGN ENGINEERING / FLEET MANAGER</span><a href="proposal.html?theme=light">Annotated proposal</a><a href="REVIEW.md">Markdown source</a></header><main id="report" tabindex="-1"><h1>Fleet Manager: make the next decision obvious</h1>
+<p>Design Engineering review · 25 September 2026 · Source snapshot <code>e4155a7</code></p>
+<p><strong>Replace the reachability hero, count-card row, and chronological feed with a ranked operational work queue.</strong> Overview should tell an operator what matters, how current the evidence is, what is already being handled, and the next safe step. It currently makes the operator assemble that answer across several screens.</p>
+<p><a href="proposal.html?theme=light">Open the annotated proposal</a> · <a href="/?theme=light#/">Current mixed-fleet preview</a> · <a href="#priorities">Recommendation priorities</a></p>
+<p>This is a design review and a separate review artifact. Application source and backend behavior are unchanged. All device names, endpoints, jobs, and outcomes shown here are synthetic.</p>
+<h2>The ten-second contract</h2>
+<table>
+<thead>
+<tr>
+<th>Operator question</th>
+<th>Answer the redesigned Overview must give</th>
+<th>Today’s gap</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Can I trust this picture?</td>
+<td>API refresh state, observation coverage, stale or missing facts</td>
+<td>A failed initial load looks like an empty fleet. No observation time appears.</td>
+</tr>
+<tr>
+<td>What needs me first?</td>
+<td>Highest-consequence condition, affected devices, next safe step</td>
+<td>Alphabetical device order determines the first seven alerts.</td>
+</tr>
+<tr>
+<td>Is someone or something already handling it?</td>
+<td>Running/queued jobs, target overlap, current phase</td>
+<td>Count plus a chronological feed; work can be pushed out by newer jobs.</td>
+</tr>
+<tr>
+<td>What recently went wrong?</td>
+<td>Adverse job outcomes with device scope and a link to evidence</td>
+<td>Six newest jobs can all look benign while recovery is needed.</td>
+</tr>
+<tr>
+<td>Is the situation improving?</td>
+<td>New/resolved conditions over a defined, comparable period</td>
+<td>No device-state history is exposed. An honest “not measured” beats a fabricated trend.</td>
+</tr>
+<tr>
+<td>What can I safely do next?</td>
+<td>Review a specific investigation or operation with explicit scope</td>
+<td>Device links preserve identity, but often lose the reason and intended action.</td>
+</tr>
+</tbody></table>
+<p>Composition and utilization are secondary questions. They earn space when they change a decision. A count of GPUs should not outrank a machine left in an uncertain recovery state.</p>
+<h2>Evidence and scope</h2>
+<p>I ran the existing Vue screens in a local Vite harness with mocked API responses, then followed Overview → attention-filtered Devices → device detail → Operations → Activity → recovery evidence, visited Access and Context, and returned to Overview. I captured explicit light/dark themes, empty/one/five-device states, an offline-only fleet, 200 alerting devices, a failed initial load, and keyboard/zoom behavior.</p>
+<p>The suggested port, <code>localhost:8080</code>, is occupied by Docker Model Runner. The review therefore runs at <code>127.0.0.1:9012</code>, with no production proxy and all operation requests blocked. <code>make start</code> was not run because it would recreate infrastructure and synchronize real enrollment data. The harness renders existing components; it does not emulate Ansible or validate backend eligibility. Operations fixtures are intentionally small.</p>
+<p>Screenshots are original captures from this run, inspected after saving. Desktop captures are 3024 × 1898 pixels at native scale, approximately a 1512 CSS-pixel-wide browser. Exact image sizes are recorded by the files. Screenshot 20 uses 200% browser zoom. This is not a full screen-reader, mobile-device, or WCAG conformance audit. Automatic OS dark-mode switching was inspected in source; rendered dark-theme evidence uses <code>data-theme=&quot;dark&quot;</code>.</p>
+<h2>Current experience: findings in journey order</h2>
+<h3>1. Overview spends its strongest hierarchy on the least actionable fact</h3>
+<p><img src="screenshots/01-overview-mixed-light.jpg" alt="01. Current mixed-fleet Overview at initial scroll position"></p>
+<p><strong>Strength:</strong> the neutral identity, stable top navigation, familiar link styling, explicit status words, and modest visual vocabulary fit an operator tool. The components look related. Keep that foundation.</p>
+<p><strong>Finding F1, high:</strong> the broad hero, large headline, health bar, and five equal cards make reachability and inventory dominate. In this fixture, “3 devices offline” gets the largest treatment; interrupted maintenance on <code>worker-02</code> gets no visible treatment. The first useful action is below a large amount of repeated counting. Two primary header buttons compete without reference to the current problem.</p>
+<p><strong>Recommendation:</strong> remove the hero and all five metric cards. Use a compact condition brief and one dominant triage area. Keep “12 devices” as context. Put Add device in a secondary position after enrollment. Present Refresh as “Refresh view”; reserve “Review scan targets” for gathering new device evidence. Those are different tasks.</p>
+<p><strong>Pushback on the brief:</strong> the answer is not to add a sparkline to each existing card. Inventory growth is rarely an operational priority. Arbitrary deltas would add visual noise before the product has reliable time-window semantics.</p>
+<h3>2. “Priorities” is not actually prioritized</h3>
+<p><img src="screenshots/02-overview-mixed-lists.jpg" alt="02. Full current attention and activity lists"></p>
+<p><strong>Finding F2, critical:</strong> the seven attention rows cover only three of seven affected devices. <code>atlas-01</code> consumes three rows; stale facts precede the offline condition on <code>atlas-02</code>. The recovery-required device is missing entirely. Nothing says “showing 7 of 12 conditions.” The count and list use different units: unique devices versus individual reasons.</p>
+<p><strong>Recommendation:</strong> group by the next safe step and rank by consequence. Keep a deduplicated fleet count, label group overlap, show affected names, and expose all reasons within the group. Recovery must stay visible regardless of device name. The 200-device test makes this more obvious: 199 storage warnings crowd out recovery on <code>node-200</code> <a href="screenshots/15-overview-200-alerts.jpg">screenshot 15</a>.</p>
+<p>Hardcoded rules are not inherently a design failure. Transparent, deterministic rules are a good starting point. The failure is their presentation as an unranked, silently truncated list. Configurable policy, durable ownership, and alert suppression can follow later.</p>
+<h3>3. The handoff preserves the device but loses the problem</h3>
+<p><img src="screenshots/03-devices-attention.jpg" alt="03. Attention-filtered Devices"></p>
+<p><strong>Strength:</strong> the Overview link correctly selects “Needs attention” and returns seven devices.</p>
+<p><strong>Finding F3, high:</strong> hardware cards replace the reason-based queue. A device can appear Online in this filtered set without explaining that it needs recovery verification or has stale facts. Operators have to rediscover why they arrived. Capabilities are summarized as a number rather than the operation they enable.</p>
+<p><strong>Recommendation:</strong> when arriving from a triage group, default Devices to a compact table with device, condition, evidence age, relevant capability, and next step. Display an explicit filter chip such as “Recovery required”; retain it through detail and Back. Keep cards as an optional inventory view. The current filter deep link is useful, but its explanation must survive navigation.</p>
+<p><img src="screenshots/04-device-offline.jpg" alt="04. Offline-device detail"></p>
+<p><strong>Strength:</strong> device detail already separates last seen, last discovery, and maintenance mode, and warns about stale facts. Pull that distinction up into Overview. “Last seen” is not an outage start time.</p>
+<p><strong>Quick hit:</strong> “Operations” in the header and an “Operations” subtab promise similar destinations. The subtab lists capability IDs, while the header opens the action catalog. Rename the subtab “Capabilities” or merge its content into a relevant device summary. Recovery links should select the recovery operation, not merely open the catalog.</p>
+<h3>4. Operations exposes scope, but distributes it across the catalog</h3>
+<p><img src="screenshots/05-operations-handoff.jpg" alt="05. Device-to-Operations handoff"></p>
+<p><strong>Strength:</strong> impact labels, eligible targets, unavailable-target disclosures, and existing typed confirmations are the right raw materials.</p>
+<p><strong>Finding F4, medium:</strong> a sidebar saying “1 selected” does not identify the device; targets repeat in each operation card. A selection is shared across the catalog even though the user perceives local checkboxes. “Select eligible” also lacks a specific operation in its wording.</p>
+<p><strong>Recommendation:</strong> an Overview handoff should land on one operation with an explicit device scope and eligibility review. Show selected names, supported/excluded counts, reasons, prerequisites, and the expected impact before continuing to the existing confirmation. Keep the catalog for browsing. Do not add one-click reboot, update, cleanup, or “Fix fleet” controls to Overview.</p>
+<p>The screenshot uses a reduced fixture catalog. It supports a critique of layout and scope presentation, not a conclusion about production eligibility rules.</p>
+<h3>5. Recent activity hides the outcomes that matter</h3>
+<p><img src="screenshots/06-activity-outcomes.jpg" alt="06. Full Activity list exposes outcomes absent from Overview"></p>
+<p><strong>Finding F5, high:</strong> the Overview’s six recent rows show two active jobs and four successes. Activity exposes a recovery-required update and two failures immediately below them. Routine scans can push adverse outcomes out of the landing page.</p>
+<p><strong>Recommendation:</strong> dedicate space to Work in progress, then summarize recent completed outcomes and highlight adverse results separately. Distinguish a historical failed job from an unresolved current device condition; the former does not prove the latter.</p>
+<p><img src="screenshots/07-activity-recovery-detail.jpg" alt="07. Recovery job detail and evidence"></p>
+<p><strong>Strength:</strong> per-device outcomes, error summaries, structured results, and logs already exist in the detailed experience. Keep raw logs one layer down. Overview should offer a concise statement with a specific evidence link.</p>
+<p><strong>Quick hits:</strong> persist Activity’s status/operation/device/time filters in the URL. The existing <code>job</code> deep link is useful; the Overview “Active jobs” metric currently opens unfiltered Activity. Recovery guidance links to generic Operations and loses the affected-device scope. Fix that handoff before adding more analytics.</p>
+<h3>6. Access and Context deserve different navigation weight</h3>
+<table>
+<thead>
+<tr>
+<th>Screen</th>
+<th>Keep</th>
+<th>Quick-hit finding and direction</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><a href="screenshots/08-access.jpg">08. Access</a></td>
+<td>Explicit target scope, stale/recovery labels, inspect-before-change guidance</td>
+<td>Rename to “Device access” to distinguish machine accounts from application access. Show selected names persistently. Keep scope and typed confirmation.</td>
+</tr>
+<tr>
+<td><a href="screenshots/09-context.jpg">09. Context</a></td>
+<td>Device-document association and explicit indexing state</td>
+<td>“Context” is implementation language. Rename to “Knowledge sources” and place it under Fleet Help or a secondary management area, with direct links from device documentation. Index-record counts do not deserve equal navigation weight with fleet operations.</td>
+</tr>
+</tbody></table>
+<p><strong>The intentional overreach:</strong> make Overview the home for operational follow-through, absorbing prioritization from Devices and active/recovery work from Activity. Reduce the primary navigation to Overview, Devices, Operations, and Activity. Keep Device access easy to reach in secondary navigation; move Knowledge sources beside Fleet Help. The tradeoff is one extra step for less frequent administrative work. Validate that tradeoff with operators who provision accounts daily. Preserve existing URLs and direct links.</p>
+<p>Do not merge the full job archive or execution forms into Overview. It should organize decisions and handoffs, while Operations owns execution and Activity owns evidence.</p>
+<h2>State coverage and accessibility</h2>
+<table>
+<thead>
+<tr>
+<th>Evidence</th>
+<th>Observed behavior</th>
+<th>Proposed behavior</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><a href="screenshots/10-overview-dark.jpg">10. Dark theme</a></td>
+<td>Theme surfaces work, but small blue links are subdued</td>
+<td>Separate link-text colors from filled-button colors; validate both theme palettes.</td>
+</tr>
+<tr>
+<td><a href="screenshots/11-overview-empty.jpg">11. Empty</a></td>
+<td>Zero cards, a zero health bar, “No current device alerts,” and an enabled Scan fleet</td>
+<td>Replace the dashboard with Add/import → verify identity → inspect first facts. No health assessment until a device has evidence.</td>
+</tr>
+<tr>
+<td><a href="screenshots/12-overview-one.jpg">12. One device</a></td>
+<td>Full dashboard for one unscanned device; “1 device need a scan”</td>
+<td>Name the device and its next discovery step. Show onboarding progress, not fleet percentages.</td>
+</tr>
+<tr>
+<td><a href="screenshots/13-overview-five.jpg">13. Five devices</a></td>
+<td>Same count-heavy structure</td>
+<td>Show all affected device names; expand small groups without forcing detail clicks. Avoid trend charts with tiny samples.</td>
+</tr>
+<tr>
+<td><a href="screenshots/14-overview-offline.jpg">14. Offline-only</a></td>
+<td>Red reachability bar, repeated stale/offline/storage rows</td>
+<td>Lead with “No devices currently reported reachable.” Group the connectivity investigation; keep last-known evidence visible and qualified. Do not assert a shared network outage.</td>
+</tr>
+<tr>
+<td><a href="screenshots/15-overview-200-alerts.jpg">15. 200 alerts</a></td>
+<td>“All devices are reachable” over 200 attention devices; first seven storage rows</td>
+<td>Put recovery first, then a 199-device storage group with affected scope, search, and progressive disclosure.</td>
+</tr>
+<tr>
+<td><a href="screenshots/16-overview-load-error.jpg">16. Initial API error</a></td>
+<td>Looks like first run and claims no device alerts; active count alone is unknown</td>
+<td>“Fleet state unavailable,” Retry, no zero counts or all-clear claims. On later failures retain observations with a conspicuous age/error label.</td>
+</tr>
+<tr>
+<td><a href="screenshots/17-overview-reachable-with-recovery.jpg">17. All reachable with warnings</a></td>
+<td>Reassuring headline despite recovery/stale/reboot/storage conditions</td>
+<td>Treat reachability as one dimension. Condition brief leads with the most consequential known issue.</td>
+</tr>
+<tr>
+<td><a href="screenshots/18-keyboard-skip-focus.jpg">18. Focused skip link</a>, <a href="screenshots/19-skip-link-broken-route.jpg">19. activation</a></td>
+<td>Focus is visible, but Enter navigates to <code>#/main-content</code>, producing a blank route</td>
+<td>Preserve the skip link and make it focus the main landmark without changing the application route. Verify with keyboard on every main view.</td>
+</tr>
+<tr>
+<td><a href="screenshots/20-overview-zoom.jpg">20. 200% zoom</a></td>
+<td>Header reflows; primary nav becomes icons. Active-jobs control loses its visible contents</td>
+<td>Keep an explicit Jobs label/count or accessible menu entry at narrow widths. Priorities must stay ahead of inventory chrome.</td>
+</tr>
+</tbody></table>
+<p><strong>F6, critical: the skip link is present but broken in the tested hash-router flow.</strong> This is an observed interaction failure, not a theoretical markup concern. A bypass mechanism must actually take the user past repeated navigation. <a href="https://www.w3.org/WAI/WCAG22/Understanding/bypass-blocks.html">W3C bypass-block guidance</a>.</p>
+<p><strong>F7, medium: theme tokens are not yet sufficient for all uses.</strong> Calculated from the declared colors, <code>#1769d2</code> on the dark card surface <code>#111111</code> is about <strong>3.59:1</strong>. The normal-size “View devices”/“View all” links need <strong>4.5:1</strong>. The same blue on white is about 5.27:1, so simply brightening the shared accent everywhere would compromise white-on-blue buttons. Add separate text, fill, and focus roles. <a href="https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html">W3C text-contrast guidance</a>.</p>
+<p>The dark border token <code>#3a3a3a</code> against <code>#111111</code> is about 1.66:1. Decorative card borders need not all become high contrast; essential control boundaries and states need their own evaluation and tokens. <a href="https://www.w3.org/WAI/WCAG22/Understanding/non-text-contrast.html">W3C non-text contrast guidance</a>.</p>
+<p>Preserve real links, status words, visible focus, labeled controls, and existing confirmation safeguards. New group disclosures need buttons, <code>aria-expanded</code>, names/counts in accessible labels, logical focus return, and no nested interactive row controls. Announce refresh completion or failure politely; do not repeatedly announce the whole queue or reorder the item under keyboard focus. Use semantic lists/tables, full timestamps alongside relative time, and reduced-motion support. Test screen-reader navigation, modal focus trapping/return, narrow-phone reflow, 400% zoom, forced colors, and OS theme changes before calling the implementation accessible.</p>
+<h2>Annotated redesign: component and data inventory</h2>
+<p>The <a href="proposal.html?theme=light">proposal</a> includes mixed, 200-alert, first-run, and unavailable states plus light/dark/automatic theme controls. Numbered markers correspond to this inventory. It is a schematic design artifact, not a new implementation of Dashboard.vue. Links demonstrate existing destinations; richer group filters and operation-specific handoffs below remain requirements.</p>
+<p><img src="screenshots/21-proposal-light.jpg" alt="21. Annotated proposed Overview"></p>
+<p><a href="screenshots/22-proposal-dark.jpg">Dark proposal</a> · <a href="screenshots/23-proposal-lower.jpg">Coverage and secondary panels</a> · <a href="screenshots/24-proposal-200-alerts.jpg">200-alert proposal</a> · <a href="screenshots/25-proposal-first-run.jpg">First run</a> · <a href="screenshots/26-proposal-unavailable.jpg">Unavailable</a></p>
+<table>
+<thead>
+<tr>
+<th>Marker / component</th>
+<th>Purpose and interaction</th>
+<th>Data and implementation boundary</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>1. Evidence header</strong></td>
+<td>Small title, inventory count, API refresh time, separate device-observation coverage. Retry inline on error.</td>
+<td><strong>Frontend only:</strong> store <code>loading</code>, <code>hasLoadedOnce</code>, <code>error</code>, <code>lastUpdated</code>; device <code>facts_stale</code>, <code>discovered_at</code>, <code>last_seen</code>. API response freshness is not device freshness. Track per-resource fetch results so a jobs failure does not erase a successful device observation.</td>
+</tr>
+<tr>
+<td><strong>2. Condition brief</strong></td>
+<td>One consequence-led sentence, highest-priority named issue, compact last-known reachability. “Unknown” is explicit.</td>
+<td><strong>Frontend only:</strong> unique device IDs and current attention fields. No health percentage. <strong>Needs backend</strong> for direction of change, duration of offline state, or a durable since-last-visit comparison.</td>
+</tr>
+<tr>
+<td><strong>3. Next steps queue</strong></td>
+<td>Group by recovery, connectivity, storage investigation, verification, planned reboot. Expand affected devices; review the relevant action. Keep recovery visible at any fleet size.</td>
+<td><strong>Frontend only:</strong> current fields, device names/IDs, <code>recovery_reason</code>, timestamps; <code>/operations</code> for eligibility/exclusion reasons. New route handling for group reason and batch IDs. <strong>Needs backend</strong> for first-seen time, acknowledgment, assignment, snooze, durable resolution, or policy-controlled prioritization.</td>
+</tr>
+<tr>
+<td><strong>4. Work in progress</strong></td>
+<td>Running/queued/cancelling jobs, targets, phase, start/queue age, direct output link. Show overlap with a suggested investigation.</td>
+<td><strong>Frontend only:</strong> existing <code>activeJobs</code>, summary <code>active_count</code>, job <code>phase</code>, <code>started_at</code>, <code>created_at</code>, <code>target_devices</code>, <code>device_results</code> where populated. Page the active endpoint when count exceeds loaded records. No percent complete or ETA without reliable progress telemetry.</td>
+</tr>
+<tr>
+<td><strong>5. Recent outcomes</strong></td>
+<td>Separate success, failure, recovery, cancellation. Highlight recent adverse outcomes; let the operator inspect evidence.</td>
+<td><strong>Frontend only:</strong> bounded jobs sample labeled “latest N completed in loaded sample”; <code>playbook</code>, status, timestamps, error summary, per-device outcomes. <strong>Needs backend</strong> for efficient, consistent 24h/7d aggregation by operation and stable target identity.</td>
+</tr>
+<tr>
+<td><strong>6. Observation coverage / pressure</strong></td>
+<td>Worst observed root disks, stale/unknown readings, reported denominator. Review inspection before cleanup.</td>
+<td><strong>Frontend only:</strong> <code>disk_root_percent</code>, stale state, scan timestamp; optionally latest structured storage artifacts via job detail. Percentages do not reveal free bytes or time-to-full. <strong>Needs backend</strong> for usage history, growth rates, normalized per-mount byte capacity, forecast, and scalable latest-observation retrieval.</td>
+</tr>
+<tr>
+<td><strong>7. Composition / readiness entry</strong></td>
+<td>Compact disjoint composition below triage. Expand operation-specific eligible/blocked/unknown scope.</td>
+<td><strong>Frontend only:</strong> <code>kind</code>, transport, capabilities; <code>/operations</code> eligible IDs and excluded reasons. A GPU capability count is not GPU utilization. Driver/Fabric Manager/MIG/Kubernetes labels stay inside integration-specific details. <strong>Needs backend</strong> for uniform readiness policy, historical readiness, and normalized capacity/utilization coverage.</td>
+</tr>
+<tr>
+<td><strong>8. Change digest, later</strong></td>
+<td>“New / resolved / still active” conditions plus comparable outcome windows. Include definition, period, sample size, coverage, and links.</td>
+<td><strong>Needs backend:</strong> timestamped condition/observation events, stable IDs, persistence of cleared conditions, user visit watermark, defined comparison windows. Do not derive fleet-health history from job logs alone.</td>
+</tr>
+<tr>
+<td><strong>9. First-run replacement</strong></td>
+<td>Connect one device or import CSV; show identity verification, discovered facts, first read-only inspection.</td>
+<td><strong>Frontend only:</strong> successful inventory load, device count, discovery/observation fields, current add/import flow and supported operations. Enrollment success does not imply the first operation succeeded.</td>
+</tr>
+</tbody></table>
+<h3>What “ranked” means</h3>
+<p>Use explicit consequence bands, not a mysterious score: <strong>recovery verification → offline investigation → storage pressure → missing/stale evidence → planned reboot</strong>. Within a band, prefer more consequential evidence (for example, greater observed disk pressure), then affected-device count, then a stable name/ID tie-break. If timestamps are available, show observation age; do not invent an alert age. These are proposed defaults, not universal SRE policy.</p>
+<p>One device may belong to several groups. Show “7 affected devices; groups overlap.” In expanded device rows, show all conditions and a recommended first step. A stale disk observation stays visible, but verification gates the cleanup recommendation. A recovery gate outranks a reboot suggestion. Grouping is organizational, not evidence of a common cause or permission for one bulk operation.</p>
+<p>Batch only after reviewing the exact scope, operation compatibility, freshness, exclusions, and current reservations. The frontend can preview this with existing operation data; the backend remains authoritative at execution. Match active-job targets to device <code>inventory_name</code> where available and mark unresolved target strings as unknown. A durable job-to-device ID relation is a backend requirement.</p>
+<h3>Handoffs are part of the design</h3>
+<table>
+<thead>
+<tr>
+<th>Entry</th>
+<th>Landing contract</th>
+<th>Boundary</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Recovery group</td>
+<td>Affected-device evidence, then Verify recovery with exact targets and prerequisites</td>
+<td><strong>Frontend only</strong> route/state work using existing operations. Recovery completion still requires backend verification.</td>
+</tr>
+<tr>
+<td>Storage group</td>
+<td>Affected disks and observation ages; review Analyze storage eligibility</td>
+<td><strong>Frontend only.</strong> Never map pressure directly to destructive cleanup.</td>
+</tr>
+<tr>
+<td>Verification group</td>
+<td>Stale/never-scanned devices, existing scans, supported scan targets</td>
+<td><strong>Frontend only</strong> for review and existing per-device scans. A single new arbitrary-batch scan endpoint would <strong>need backend</strong> if current operations cannot express it.</td>
+</tr>
+<tr>
+<td>Running job</td>
+<td>Correct job expanded, phase and targets immediately visible, return to Overview</td>
+<td><strong>Frontend only.</strong></td>
+</tr>
+<tr>
+<td>Recent failure</td>
+<td>Selected job plus per-device outcomes and error evidence</td>
+<td><strong>Frontend only.</strong> A “resolved” state needs a trustworthy relation to later evidence.</td>
+</tr>
+</tbody></table>
+<h3>Time and outcome semantics</h3>
+<p>The backend already exposes more than the seed brief: device <code>last_seen</code>, <code>discovered_at</code>, <code>recovery_reason</code>, maintenance fields, and arbitrary facts; jobs expose start/finish times, duration, error summary, phase, and per-device outcomes. Structured result artifacts are added by the job-detail endpoint. Use these before requesting new telemetry.</p>
+<p><code>GET /jobs</code> supports status, playbook, limit (up to 200), and offset. The Overview currently loads only the latest 10 and renders six. The API summary gives active count only. A bounded frontend sample is straightforward. Complete historical analysis is technically possible by paging existing history, but list payloads include logs, ordering is by creation time, and there is no stable snapshot/time-window aggregate contract. A job created before a window can finish inside it. Do not stop paging at a creation-time cutoff and call that a completed-job window.</p>
+<p>For the later aggregate, define the window by <strong>finished_at</strong>. Show succeeded, failed, recovery-required, and cancelled separately. If using a rate, use succeeded / (succeeded + failed + recovery-required), with cancellations and active jobs outside that denominator. Always show <code>n</code>, compare like operation classes, and distinguish job rate from per-device success. A successful scan must not dilute failed update operations into a reassuring headline. Small samples get counts rather than a claimed trend or “flaky host” label. Historical target attribution should survive renames and device removal.</p>
+<p>Do not promise “one action away from healthy.” A scan may reveal new problems; rebooting may not resolve a recovery requirement. Safer copy is “5 devices need verification” or “2 reboots to review.” Do not claim a shared subnet outage based on matching IP prefixes. Proper network/role grouping needs validated site/subnet/role metadata and event timing; current freeform annotations can support explicitly configured labels, not causal diagnosis.</p>
+<h2>Visual system direction</h2>
+<p>Keep Vue, existing native controls, and hand-rolled components for this redesign. The complexity lies in information meaning, state, and scope; a component library will not solve those. Reuse the existing modal and confirmation work after keyboard validation. The cost is maintaining accessible disclosure, filtering, and table patterns yourselves. Reconsider a headless primitive library only when interaction complexity grows enough to justify dependency, styling, and regression costs.</p>
+<p>Use the existing neutral surfaces and blue interaction language with these targeted changes:</p>
+<ul>
+<li>Adopt a practical 4/8/12/16/24/32 spacing scale instead of large 15/30/45 jumps. Use 16–20px section padding; avoid card shadows on every row.</li>
+<li>Keep a roughly 1350–1440px maximum work area. Align navigation and content gutters. Use about two-thirds width for priorities and one-third for active work; stack in that order at narrow widths.</li>
+<li>Set task content around 14px, secondary evidence around 12–13px, section headings around 18px, and the page title around 26–28px. Reserve monospace for identifiers and logs. Inter is declared but not loaded in the checked frontend; either bundle it or deliberately embrace the system fallback.</li>
+<li>Separate <code>link-text</code>, <code>action-fill</code>, <code>status-text</code>, <code>status-surface</code>, <code>control-border</code>, and <code>focus-ring</code> roles. For example, the existing light blue can remain a filled button color while dark links use a lighter blue such as <code>#6fa8ff</code> (about 7.84:1 on <code>#111111</code>). Validate complete foreground/background pairs, including soft status surfaces.</li>
+<li>Use plain labels alongside severity color. Reserve solid red for an urgent condition, not the badge for ordinary running work. Preserve status names when navigation compresses.</li>
+</ul>
+<p>Do not widen the dashboard simply to fit more metrics. More width should expose meaningful device names, evidence, and actions. In a typical desktop viewport, the most serious group and current work must be visible without scrolling. On smaller screens, keep the condition brief and first safe step ahead of composition and administrative actions.</p>
+<h2>Priorities</h2>
+<table>
+<thead>
+<tr>
+<th>Priority</th>
+<th>Recommendation</th>
+<th>Scope</th>
+<th>Why this order / acceptance</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>P0</strong></td>
+<td>Repair the keyboard skip interaction</td>
+<td><strong>Frontend only</strong></td>
+<td>Confirmed route-breaking failure. Enter focuses main content and preserves the current route on all main screens.</td>
+</tr>
+<tr>
+<td><strong>P0</strong></td>
+<td>Distinguish loading, unavailable, stale, and true-empty states</td>
+<td><strong>Frontend only</strong></td>
+<td>Prevents false assurance. A 503 never produces zero devices or “No alerts”; later failures retain labeled observations.</td>
+</tr>
+<tr>
+<td><strong>P0</strong></td>
+<td>Rank and group attention; make recovery impossible to truncate away</td>
+<td><strong>Frontend only</strong></td>
+<td>Highest operational consequence. <code>node-200</code> recovery appears ahead of 199 storage warnings; all affected devices remain reachable.</td>
+</tr>
+<tr>
+<td><strong>P1</strong></td>
+<td>Replace hero/cards with condition brief, Next steps, and active work</td>
+<td><strong>Frontend only</strong></td>
+<td>Changes the first ten seconds. Operator can identify top issue, evidence age, current job, and next safe step before navigating.</td>
+</tr>
+<tr>
+<td><strong>P1</strong></td>
+<td>Separate adverse outcomes from recency; label sample coverage</td>
+<td><strong>Frontend only</strong></td>
+<td>Failures survive routine scan traffic. Distinguish historical failures from unresolved current state; expose existing job evidence.</td>
+</tr>
+<tr>
+<td><strong>P1</strong></td>
+<td>Preserve reason, target scope, and intended operation across handoffs</td>
+<td><strong>Frontend only</strong></td>
+<td>Makes the new queue useful end to end. Devices explains inclusion; Operations shows exact names/exclusions; Activity retains selected job/filter.</td>
+</tr>
+<tr>
+<td><strong>P1</strong></td>
+<td>Fix dark link contrast, narrow-width Jobs visibility, and disclosure/focus behavior</td>
+<td><strong>Frontend only</strong></td>
+<td>Accessibility cannot be deferred to visual polish. Test both themes, keyboard, zoom/reflow, reduced motion, and assistive technology.</td>
+</tr>
+<tr>
+<td><strong>P1</strong></td>
+<td>Design first-run, one-device, offline-only, and large-fleet variants</td>
+<td><strong>Frontend only</strong></td>
+<td>These are normal operating states, not exceptions. No zero-health dashboard, no misleading green hero, no seven-row ceiling.</td>
+</tr>
+<tr>
+<td><strong>P2</strong></td>
+<td>Add pressure/coverage and operation-specific eligibility summaries</td>
+<td><strong>Frontend only</strong></td>
+<td>Makes existing facts useful without overclaiming utilization. Show reported/stale/missing denominators and backend exclusion reasons.</td>
+</tr>
+<tr>
+<td><strong>P2</strong></td>
+<td>Provide compact job summaries and consistent time-window aggregates</td>
+<td><strong>Needs backend</strong></td>
+<td>Enables truthful 24h/7d outcomes without loading full log history. Define finish-time windows, stable snapshot/cursor, per-operation/per-device counts, coverage, and target IDs.</td>
+</tr>
+<tr>
+<td><strong>P2</strong></td>
+<td>Add device-state history and durable change events</td>
+<td><strong>Needs backend</strong></td>
+<td>Required for trajectory, first-seen/resolved conditions, outage timing, and since-last-visit claims. Store timestamps and observation provenance, not just latest status.</td>
+</tr>
+<tr>
+<td><strong>P2</strong></td>
+<td>Reweight navigation and rename Context / Access</td>
+<td><strong>Frontend only</strong></td>
+<td>Reduces competition from administrative work after the operational hierarchy is fixed. Preserve links; validate frequent-access workflows.</td>
+</tr>
+<tr>
+<td><strong>P3</strong></td>
+<td>Add ownership, acknowledgment/snooze, validated fleet grouping, and readiness policies</td>
+<td><strong>Needs backend</strong></td>
+<td>Supports team-scale triage. Requires persistence, auditability, permission rules, expiration, and explicit reopening behavior.</td>
+</tr>
+<tr>
+<td><strong>P3</strong></td>
+<td>Add normalized capacity history and forecasts</td>
+<td><strong>Needs backend</strong></td>
+<td>Only after timestamps, coverage, mount identities, and byte measurements exist. Avoid decorative sparklines built from inconsistent samples.</td>
+</tr>
+</tbody></table>
+<p>The first implementation slice should combine the P0 fixes with the new condition brief and ranked queue. Then connect handoffs and active/outcome panels. History should be a separately specified backend capability, rather than a dependency that delays the immediate design improvement.</p>
+<h2>Validation and limits</h2>
+<p>The walkthrough confirms visual hierarchy, actual route behavior, the filter handoff, recovery-job expansion, the failed-load presentation, explicit dark styling, visible keyboard focus, skip-link failure, and 200% navigation behavior. Source inspection grounds the data boundaries and confirms existing confirmation patterns. I did not execute changes on machines, authenticate to the production API, test real enrollment, run a screen reader, or measure backend latency. Read-only fixtures cannot establish production failure frequency, common causes, or the usability of every operation form.</p>
+<p>For implementation acceptance, run a short ten-second task test: after showing a mixed or 200-alert fleet, ask the operator to identify the highest-priority device/group, evidence freshness, current work, and next safe step. Then require completion of the corresponding handoff without reselecting scope or reconstructing the reason. Include a stale/error case so “I don’t know yet” is a successful interpretation.</p>
+<h3>Reproduce this review</h3>
+<p>From <code>frontend/</code>, run <code>node design-review/preview.mjs</code>, then open <code>http://127.0.0.1:9012/design-review/index.html</code>. The current UI supports <code>?scenario=mixed|empty|one|five|offline|large|error|reachable</code> before the hash route, plus <code>theme=light|dark</code>. No production service or credentials are used. Stop the Node process to close the preview.</p>
+<p>Source grounding: <a href="../src/views/Dashboard.vue">Overview</a>, <a href="../src/stores/devices.js">fleet store</a>, <a href="../src/api.js">API client</a>, <a href="../src/styles/variables.css">tokens</a>, <a href="../src/components/NavBar.vue">navigation</a>, <a href="../src/App.vue">application shell</a>, <a href="../src/views/Devices.vue">Devices</a>, <a href="../src/views/Operations.vue">Operations</a>, and <a href="../src/views/JobHistory.vue">Activity</a>. Backend schemas and jobs routes were read only to verify API capabilities; all review files live under <code>frontend/design-review/</code>.</p>
+<h2>Screenshot appendix</h2>
+<p>Select an image to inspect its original capture. All scenarios use synthetic data.</p>
+<details>
+<summary>Open state, accessibility, and proposal evidence</summary>
+<div class="gallery">
+<figure><a href="screenshots/08-access.jpg"><img loading="lazy" src="screenshots/08-access.jpg" alt="08. Access"></a><figcaption>08. Access</figcaption></figure>
+<figure><a href="screenshots/09-context.jpg"><img loading="lazy" src="screenshots/09-context.jpg" alt="09. Context"></a><figcaption>09. Context</figcaption></figure>
+<figure><a href="screenshots/10-overview-dark.jpg"><img loading="lazy" src="screenshots/10-overview-dark.jpg" alt="10. Current dark theme"></a><figcaption>10. Current dark theme</figcaption></figure>
+<figure><a href="screenshots/11-overview-empty.jpg"><img loading="lazy" src="screenshots/11-overview-empty.jpg" alt="11. Empty inventory"></a><figcaption>11. Empty inventory</figcaption></figure>
+<figure><a href="screenshots/12-overview-one.jpg"><img loading="lazy" src="screenshots/12-overview-one.jpg" alt="12. One unscanned device"></a><figcaption>12. One unscanned device</figcaption></figure>
+<figure><a href="screenshots/13-overview-five.jpg"><img loading="lazy" src="screenshots/13-overview-five.jpg" alt="13. Five devices"></a><figcaption>13. Five devices</figcaption></figure>
+<figure><a href="screenshots/14-overview-offline.jpg"><img loading="lazy" src="screenshots/14-overview-offline.jpg" alt="14. Offline-only fleet"></a><figcaption>14. Offline-only fleet</figcaption></figure>
+<figure><a href="screenshots/15-overview-200-alerts.jpg"><img loading="lazy" src="screenshots/15-overview-200-alerts.jpg" alt="15. 200 alerting devices"></a><figcaption>15. 200 alerting devices</figcaption></figure>
+<figure><a href="screenshots/16-overview-load-error.jpg"><img loading="lazy" src="screenshots/16-overview-load-error.jpg" alt="16. Initial API failure"></a><figcaption>16. Initial API failure</figcaption></figure>
+<figure><a href="screenshots/17-overview-reachable-with-recovery.jpg"><img loading="lazy" src="screenshots/17-overview-reachable-with-recovery.jpg" alt="17. Reachable with warnings"></a><figcaption>17. Reachable with warnings</figcaption></figure>
+<figure><a href="screenshots/18-keyboard-skip-focus.jpg"><img loading="lazy" src="screenshots/18-keyboard-skip-focus.jpg" alt="18. Keyboard skip focus"></a><figcaption>18. Keyboard skip focus</figcaption></figure>
+<figure><a href="screenshots/19-skip-link-broken-route.jpg"><img loading="lazy" src="screenshots/19-skip-link-broken-route.jpg" alt="19. Broken skip destination"></a><figcaption>19. Broken skip destination</figcaption></figure>
+<figure><a href="screenshots/20-overview-zoom.jpg"><img loading="lazy" src="screenshots/20-overview-zoom.jpg" alt="20. 200% zoom"></a><figcaption>20. 200% zoom</figcaption></figure>
+<figure><a href="screenshots/22-proposal-dark.jpg"><img loading="lazy" src="screenshots/22-proposal-dark.jpg" alt="22. Proposed dark theme"></a><figcaption>22. Proposed dark theme</figcaption></figure>
+<figure><a href="screenshots/23-proposal-lower.jpg"><img loading="lazy" src="screenshots/23-proposal-lower.jpg" alt="23. Proposed secondary panels"></a><figcaption>23. Proposed secondary panels</figcaption></figure>
+<figure><a href="screenshots/24-proposal-200-alerts.jpg"><img loading="lazy" src="screenshots/24-proposal-200-alerts.jpg" alt="24. Proposed 200-alert queue"></a><figcaption>24. Proposed 200-alert queue</figcaption></figure>
+<figure><a href="screenshots/25-proposal-first-run.jpg"><img loading="lazy" src="screenshots/25-proposal-first-run.jpg" alt="25. Proposed first run"></a><figcaption>25. Proposed first run</figcaption></figure>
+<figure><a href="screenshots/26-proposal-unavailable.jpg"><img loading="lazy" src="screenshots/26-proposal-unavailable.jpg" alt="26. Proposed unavailable state"></a><figcaption>26. Proposed unavailable state</figcaption></figure>
+</div>
+</details>
+<footer>Review artifacts only · Synthetic fleet data · No production UI or backend edits</footer></main><script>document.querySelectorAll('h2,h3').forEach(el=>el.id=el.textContent.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,''));</script></body></html>

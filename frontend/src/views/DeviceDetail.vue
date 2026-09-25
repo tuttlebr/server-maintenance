@@ -1,7 +1,7 @@
 <template>
   <div v-if="device">
     <div class="detail-header">
-      <router-link to="/devices" class="back-link"><i class="fas fa-arrow-left" aria-hidden="true"></i>Devices</router-link>
+      <router-link :to="{ path: '/devices', query: route.query }" class="back-link"><i class="fas fa-arrow-left" aria-hidden="true"></i>Devices</router-link>
       <div class="detail-title-row">
         <span class="device-icon" aria-hidden="true"><i :class="['fas', kind.icon]"></i></span>
         <div><h2>{{ device.name }}</h2><p>{{ identity }}</p></div>
@@ -17,7 +17,7 @@
       </div>
     </div>
 
-    <p v-if="device.recovery_required" class="callout callout-danger" role="status">Recovery required: {{ device.recovery_reason }} <router-link :to="`/operations?device=${device.id}`">Verify recovery</router-link></p>
+    <p v-if="device.recovery_required" class="callout callout-danger" role="status">Recovery required: {{ device.recovery_reason }} <router-link :to="`/operations?device=${device.id}&operation=system.recover&reason=recovery`">Verify recovery</router-link></p>
     <p v-if="device.facts_stale" class="callout callout-warn" role="status">Displayed facts need verification after a change, a failed scan, or more than one hour. Scan to refresh them before further maintenance.</p>
     <nav class="detail-tabs" aria-label="Device sections">
       <button v-for="tab in tabs" :key="tab" :class="{ active: activeTab === tab }" @click="activeTab = tab">{{ tab }}</button>
@@ -33,12 +33,12 @@
 
     <section v-else-if="activeTab === 'Software'" class="card"><div class="card-body"><h3>Software</h3><dl v-if="device.kind === 'robot'" class="facts-list"><template v-for="item in reachySoftwareFacts" :key="item.label"><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></template></dl><dl v-else class="facts-list"><dt>Operating system</dt><dd>{{ device.os_version || 'Not reported' }}</dd><dt>OS family</dt><dd>{{ device.os_family || 'Not reported' }}</dd><dt v-if="device.driver_version">GPU driver</dt><dd v-if="device.driver_version">{{ device.driver_version }}</dd><dt v-if="device.cuda_version">CUDA</dt><dd v-if="device.cuda_version">{{ device.cuda_version }}</dd></dl></div></section>
 
-    <section v-else-if="activeTab === 'Context'" class="context-grid">
+    <section v-else-if="activeTab === 'Knowledge sources'" class="context-grid">
       <article class="card"><div class="card-body"><div class="section-header"><div><h3>Manual attributes</h3><p>Add facts discovery can't determine. These are included in RAG after re-indexing.</p></div><button class="btn btn-ghost btn-sm" type="button" @click="addAnnotation"><i class="fas fa-plus" aria-hidden="true"></i>Add attribute</button></div><form class="annotations-form" @submit.prevent="saveAnnotations"><div v-for="(item, index) in annotationRows" :key="item.id" class="annotation-row"><input v-model="item.key" class="form-input" maxlength="80" placeholder="Motherboard model" aria-label="Attribute name" /><input v-model="item.value" class="form-input" maxlength="500" placeholder="ASRock Rack ROMED6U-2L2T" aria-label="Attribute value" /><button class="btn btn-ghost btn-icon remove-action" type="button" aria-label="Remove attribute" @click="annotationRows.splice(index, 1)"><i class="fas fa-trash" aria-hidden="true"></i></button></div><p v-if="!annotationRows.length" class="muted">No manual attributes yet.</p><button class="btn btn-primary btn-sm" type="submit" :disabled="savingAnnotations"><i :class="['fas', savingAnnotations ? 'fa-spinner fa-spin' : 'fa-save']" aria-hidden="true"></i>{{ savingAnnotations ? 'Saving…' : 'Save attributes' }}</button></form></div></article>
       <article class="card"><div class="card-body"><h3>Device documentation</h3><p class="muted">Upload manuals, notes, and other text for this device, then re-index context to make the relationship searchable.</p><router-link :to="`/context?device=${device.id}`" class="btn btn-primary btn-sm"><i class="fas fa-upload" aria-hidden="true"></i>Upload or manage documents</router-link></div></article>
     </section>
 
-    <section v-else class="card"><div class="card-body"><div class="section-header"><div><h3>Available operations</h3><p>These actions are derived from discovered capabilities.</p></div><router-link :to="`/operations?device=${device.id}`" class="btn btn-primary btn-sm">Open Operations</router-link></div><div class="capability-grid"><span v-for="capability in device.capabilities" :key="capability"><i class="fas fa-check" aria-hidden="true"></i>{{ capability }}</span></div></div></section>
+    <section v-else class="card"><div class="card-body"><div class="section-header"><div><h3>Discovered capabilities</h3><p>Review operation eligibility before planning changes.</p></div><router-link :to="`/operations?device=${device.id}`" class="btn btn-primary btn-sm">Open Operations</router-link></div><div class="capability-grid"><span v-for="capability in device.capabilities" :key="capability"><i class="fas fa-check" aria-hidden="true"></i>{{ capability }}</span></div></div></section>
 
     <BaseModal :visible="showEdit" title="Edit device and maintenance settings" @cancel="showEdit = false">
       <form id="edit-device-form" @submit.prevent="save">
@@ -80,7 +80,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
-import { useRouter } from "vue-router";
+import { useRouter, useRoute } from "vue-router";
 import { configureDeviceSsh, deleteDevice, getDevice, previewDeviceSsh, scanDevice, updateDevice, updateDeviceAnnotations } from "../api.js";
 import StatusBadge from "../components/StatusBadge.vue";
 import BaseModal from "../components/BaseModal.vue";
@@ -88,7 +88,7 @@ import ConfirmDialog from "../components/ConfirmDialog.vue";
 import { deviceKind, devicePlatformName } from "../utils/devices.js";
 import { formatLongTime } from "../utils/time.js";
 const props = defineProps({ id: { type: String, required: true } });
-const router = useRouter(); const device = ref(null); const loading = ref(true); const scanning = ref(false); const showEdit = ref(false); const showRemove = ref(false); const showSshSetup = ref(false); const sshPreviewing = ref(false); const sshSaving = ref(false); const sshPreview = ref(null); const sshFingerprintConfirmed = ref(false); const activeTab = ref("Summary"); const tabs = ["Summary", "Hardware", "Software", "Context", "Operations"]; const savingAnnotations = ref(false); const annotationRows = ref([]); let nextAnnotationId = 1;
+const router = useRouter(); const route = useRoute(); const device = ref(null); const loading = ref(true); const scanning = ref(false); const showEdit = ref(false); const showRemove = ref(false); const showSshSetup = ref(false); const sshPreviewing = ref(false); const sshSaving = ref(false); const sshPreview = ref(null); const sshFingerprintConfirmed = ref(false); const activeTab = ref("Summary"); const tabs = ["Summary", "Hardware", "Software", "Knowledge sources", "Capabilities"]; const savingAnnotations = ref(false); const annotationRows = ref([]); let nextAnnotationId = 1;
 const edit = reactive({ display_name: "", endpoint: "", ssh_user: "", maintenance_mode: "unknown", kubernetes_context: "", kubernetes_node_name: "" });
 const sshSetup = reactive({ ssh_user: "pollen", passwordless_ssh: true, ssh_password: "", bootstrap_password: "", become_password: "" });
 const kind = computed(() => deviceKind(device.value?.kind));

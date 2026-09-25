@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="page-header">
-      <div><h2>Context</h2><p class="page-subtitle">Manage the documentation and device metadata Fleet Help uses for retrieval.</p></div>
+      <div><h2>Knowledge sources</h2><p class="page-subtitle">Manage the documentation and device metadata Fleet Help uses for retrieval.</p></div>
       <button class="btn btn-primary btn-sm" :disabled="status.running" @click="startReindex"><i :class="['fas', status.running ? 'fa-spinner fa-spin' : 'fa-arrows-rotate']" aria-hidden="true"></i>{{ status.running ? 'Re-indexing…' : 'Re-index context' }}</button>
     </div>
 

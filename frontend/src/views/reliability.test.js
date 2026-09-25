@@ -8,7 +8,7 @@ import {createRouter, createMemoryHistory} from 'vue-router';
 // Exercise actual Vue setup functions as well as compilation. In particular,
 // reactive watchers must not access target selection before it is initialized.
 test('maintenance views initialize with empty fleet data', async () => {
-  const server = await createServer({server:{middlewareMode:true}, appType:'custom'});
+  const server = await createServer({server:{middlewareMode:true,hmr:false,ws:false}, appType:'custom'});
   try {
     for (const [name, expected] of [['Operations', 'Choose an action'], ['UserManagement', 'Target devices'], ['JobHistory', 'Activity']]) {
       const {default: component} = await server.ssrLoadModule(`/src/views/${name}.vue`);

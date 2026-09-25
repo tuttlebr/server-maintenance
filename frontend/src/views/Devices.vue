@@ -3,23 +3,27 @@
     <div class="page-header">
       <div><h2>Devices</h2><p class="page-subtitle">Compute, edge, and robotics inventory discovered by capability.</p></div>
       <div class="header-actions">
-        <input ref="csvInput" class="visually-hidden" type="file" accept=".csv,text/csv" @change="loadCsv" />
+        <input id="device-csv-import" ref="csvInput" aria-label="Choose device CSV" class="visually-hidden" type="file" accept=".csv,text/csv" @change="loadCsv" />
         <button class="btn btn-ghost btn-sm" :disabled="!devices.length" title="Download all devices without stored passwords" @click="downloadCsv"><i class="fas fa-download" aria-hidden="true"></i>Download CSV</button>
         <button class="btn btn-ghost btn-sm" @click="csvInput?.click()"><i class="fas fa-file-csv" aria-hidden="true"></i>Import CSV</button>
         <button class="btn btn-primary btn-sm" @click="openAdd"><i class="fas fa-plus" aria-hidden="true"></i>Add device</button>
       </div>
     </div>
 
+    <div v-if="route.query.import" class="triage-context"><label for="device-csv-import">Choose a CSV with name, endpoint, and transport columns.</label><button class="btn btn-primary btn-sm" @click="csvInput?.click()">Choose CSV file</button></div>
     <div class="filter-bar" role="search" aria-label="Filter devices">
-      <div class="search-field"><i class="fas fa-search" aria-hidden="true"></i><input v-model="search" class="form-input" placeholder="Search name, vendor, model, platform, or endpoint" /></div>
+      <div class="search-field"><i class="fas fa-search" aria-hidden="true"></i><input v-model="search" class="form-input" aria-label="Search devices" placeholder="Search name, vendor, model, platform, or endpoint" /></div>
       <select v-model="kindFilter" class="form-select" aria-label="Filter by device type"><option value="">All types</option><option v-for="item in availableKinds" :key="item" :value="item">{{ deviceKind(item).label }}</option></select>
       <select v-model="capabilityFilter" class="form-select" aria-label="Filter by capability"><option value="">All capabilities</option><option v-for="item in availableCapabilities" :key="item" :value="item">{{ capabilityLabel(item) }}</option></select>
       <select v-model="statusFilter" class="form-select" aria-label="Filter by status"><option value="">All states</option><option value="online">Online</option><option value="offline">Offline</option><option value="unknown">Unknown</option><option value="attention">Needs attention</option></select>
     </div>
 
-    <div class="results-summary">{{ filteredDevices.length }} of {{ devices.length }} devices</div>
-    <div v-if="filteredDevices.length" class="device-grid"><DeviceCard v-for="device in filteredDevices" :key="device.id" :device="device" /></div>
-    <div v-else-if="store.hasLoadedOnce" class="empty-state">
+    <div v-if="store.deviceError" class="callout callout-warn" role="status"><div>{{ store.hasLoadedOnce ? 'Device refresh failed. Showing the last observations.' : 'Device data is unavailable.' }} <button class="btn btn-ghost btn-sm" :disabled="store.loading" @click="store.refresh()">Retry</button></div></div>
+    <div v-if="reasonGroup" class="triage-context"><div><strong>{{ reasonGroup.label }}</strong><p>{{ reasonGroup.description }}</p></div><router-link v-if="reasonGroup.operation && filteredDevices.length" class="btn btn-ghost btn-sm" :to="operationRoute(reasonGroup.operation, filteredDevices, reasonGroup.id)">{{ reasonGroup.action }}</router-link><button class="btn btn-ghost btn-sm" @click="setQuery({ reason: undefined })">Clear reason filter</button></div>
+    <div class="results-summary"><span>{{ store.hasLoadedOnce ? `${filteredDevices.length} of ${devices.length} devices` : 'Loading devices…' }}</span><div class="view-switch" aria-label="Device presentation"><button class="btn btn-ghost btn-sm" :aria-pressed="viewMode === 'table'" @click="setQuery({ view: 'table' })">Table</button><button class="btn btn-ghost btn-sm" :aria-pressed="viewMode === 'cards'" @click="setQuery({ view: 'cards' })">Cards</button></div></div>
+    <div v-if="filteredDevices.length && viewMode === 'table'" class="table-wrapper"><table><caption class="visually-hidden">Devices and current attention evidence</caption><thead><tr><th scope="col">Device</th><th scope="col">Conditions</th><th scope="col">Facts observed</th><th scope="col">Next step</th></tr></thead><tbody><tr v-for="device in filteredDevices" :key="device.id"><td><router-link :to="deviceLink(device)">{{ device.name }}</router-link><small class="table-evidence">{{ deviceKind(device.kind).label }} · {{ device.status }}</small></td><td><div class="condition-list"><span v-for="condition in deviceConditions(device)" :key="condition.id" :class="['condition-tag', condition.severity]">{{ condition.label }}</span><span v-if="!deviceConditions(device).length">No flagged conditions</span></div><small v-if="device.recovery_required" class="table-evidence">{{ device.recovery_reason }}</small></td><td>{{ formatLongTime(device.discovered_at) || 'Not observed' }}<small v-if="device.facts_stale" class="table-evidence">Stale facts</small></td><td><router-link :to="deviceLink(device)">Review evidence</router-link></td></tr></tbody></table></div>
+    <div v-else-if="filteredDevices.length" class="device-grid"><DeviceCard v-for="device in filteredDevices" :key="device.id" :device="device" /></div>
+    <div v-else-if="store.hasLoadedOnce && !store.deviceError" class="empty-state">
       <i class="fas fa-server" aria-hidden="true"></i>
       <p>{{ devices.length ? 'No devices match these filters' : 'No devices have been added yet' }}</p>
       <button v-if="!devices.length" class="btn btn-primary btn-sm" @click="openAdd">Add your first device</button>
@@ -121,7 +125,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import Papa from "papaparse";
 import { useRoute, useRouter } from "vue-router";
 import { addDevice, discoverDevice } from "../api.js";
@@ -130,11 +134,19 @@ import DeviceCard from "../components/DeviceCard.vue";
 import BaseModal from "../components/BaseModal.vue";
 import { createDeviceCsv } from "../utils/deviceCsv.js";
 import { deviceKind, deviceMatchesSearch } from "../utils/devices.js";
+import { ATTENTION_GROUPS, deviceConditions, matchesAttention, operationRoute } from '../utils/fleetOverview.js';
+import { formatLongTime } from '../utils/time.js';
 
 const route = useRoute(); const router = useRouter(); const store = useDevicesStore();
 const devices = computed(() => store.devices); const showAdd = ref(false); const step = ref(1); const working = ref(false); const discovery = ref({ capabilities: [] }); const fingerprintConfirmed = ref(false);
 const csvInput = ref(null); const showBulk = ref(false); const bulkRows = ref([]); const bulkPhase = ref("review"); const bulkProgress = ref(0); const bulkTargetCount = ref(0); const bulkFingerprintsConfirmed = ref(false);
-const search = ref(""); const kindFilter = ref(String(route.query.kind || "")); const capabilityFilter = ref(String(route.query.capability || "")); const statusFilter = ref(route.query.attention ? "attention" : "");
+function setQuery(values) { router.replace({ query: { ...route.query, ...values } }); }
+function queryFilter(key) { return computed({ get: () => String(route.query[key] || ''), set: value => setQuery({ [key]: value || undefined }) }); }
+const search = queryFilter('q'), kindFilter = queryFilter('kind'), capabilityFilter = queryFilter('capability');
+const statusFilter = computed({ get: () => route.query.attention ? 'attention' : String(route.query.status || ''), set: value => setQuery({ attention: value === 'attention' ? '1' : undefined, status: value === 'attention' ? undefined : value || undefined }) });
+const reasonGroup = computed(() => ATTENTION_GROUPS.find(group => group.id === route.query.reason));
+const viewMode = computed(() => route.query.view || (reasonGroup.value || statusFilter.value === 'attention' ? 'table' : 'cards'));
+function deviceLink(device) { return { path: `/devices/${device.id}`, query: { ...route.query, add: undefined, import: undefined } }; }
 const steps = ["Connection", "Details", "Review"];
 const stepTitle = computed(() => `${steps[step.value - 1]} · Add device`);
 const emptyDraft = () => ({ name: "", endpoint: "", transport: "ssh", ssh_user: "", ssh_password: "", become_password: "", bootstrap_password: "", passwordless_ssh: true, daemon_port: 8000 });
@@ -142,8 +154,8 @@ const draft = reactive(emptyDraft());
 const availableKinds = computed(() => [...new Set(devices.value.map((device) => device.kind))].sort());
 const availableCapabilities = computed(() => [...new Set(devices.value.flatMap((device) => device.capabilities || []))].sort());
 const filteredDevices = computed(() => devices.value.filter((device) => {
-  const attention = device.recovery_required || device.facts_stale || device.status !== "online" || device.reboot_required || (device.disk_root_percent || 0) >= 85;
-  return deviceMatchesSearch(device, search.value) && (!kindFilter.value || device.kind === kindFilter.value) && (!capabilityFilter.value || device.capabilities.includes(capabilityFilter.value)) && (!statusFilter.value || (statusFilter.value === "attention" ? attention : device.status === statusFilter.value));
+  const attention = deviceConditions(device).length > 0;
+  return (!reasonGroup.value || matchesAttention(device, reasonGroup.value.id)) && deviceMatchesSearch(device, search.value) && (!kindFilter.value || device.kind === kindFilter.value) && (!capabilityFilter.value || (device.capabilities || []).includes(capabilityFilter.value)) && (!statusFilter.value || (statusFilter.value === "attention" ? attention : device.status === statusFilter.value));
 }));
 const canAdd = computed(() => discovery.value.reachable && (!discovery.value.fingerprint || fingerprintConfirmed.value));
 const bulkBusy = computed(() => ["discovering", "adding"].includes(bulkPhase.value));
@@ -170,7 +182,7 @@ function downloadCsv() {
   window.$toast?.info(`Downloaded ${devices.value.length} device${devices.value.length === 1 ? "" : "s"}. Stored passwords aren't included.`);
 }
 function openAdd() { showAdd.value = true; }
-function closeAdd() { showAdd.value = false; step.value = 1; discovery.value = { capabilities: [] }; fingerprintConfirmed.value = false; Object.assign(draft, emptyDraft()); if (route.query.add) router.replace({ path: "/devices", query: {} }); }
+function closeAdd() { showAdd.value = false; step.value = 1; discovery.value = { capabilities: [] }; fingerprintConfirmed.value = false; Object.assign(draft, emptyDraft()); if (route.query.add) setQuery({ add: undefined }); }
 async function discover() { working.value = true; try { discovery.value = await discoverDevice({ ...draft }); step.value = 3; } catch (error) { window.$toast?.error("Couldn't discover device", error); } finally { working.value = false; } }
 async function enroll() { working.value = true; try { const result = await addDevice({ device: { ...draft }, approval: discovery.value.fingerprint ? { fingerprint: discovery.value.fingerprint } : null }); window.$toast?.success(`${result.name} added`); await store.refresh({ force: true }); closeAdd(); router.push(`/devices/${result.id}`); } catch (error) { window.$toast?.error("Couldn't add device", error); } finally { working.value = false; } }
 function parseCsvBoolean(value, defaultValue = true) { const normalized = String(value ?? "").trim().toLowerCase(); if (!normalized) return defaultValue; return ["true", "yes", "1", "key", "passwordless"].includes(normalized); }
@@ -224,10 +236,12 @@ async function enrollBulk() {
 function closeBulk() { if (bulkBusy.value) return; showBulk.value = false; bulkRows.value = []; bulkPhase.value = "review"; bulkProgress.value = 0; bulkTargetCount.value = 0; bulkFingerprintsConfirmed.value = false; }
 function bulkStateLabel(row) { return ({ pending: "Pending", discovering: "Discovering…", ready: "Ready", adding: "Adding…", added: "Added", failed: "Needs attention" })[row.state] || row.state; }
 watch(() => route.query.add, (value) => { if (value) openAdd(); }, { immediate: true });
-onMounted(() => store.start()); onUnmounted(() => store.stop());
+
 </script>
 
 <style scoped>
+.triage-context { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 16px; margin: 14px 0; background: var(--surface-info-soft); border: 1px solid var(--border-subtle); border-radius: 6px; }.triage-context > div { flex: 1; min-width: 200px; }.triage-context p, .table-evidence { color: var(--text-secondary); font-size: 12px; }.table-evidence { display: block; margin-top: 5px; }.condition-list { display: flex; flex-wrap: wrap; gap: 5px; }.results-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; }.view-switch { display: flex; gap: 6px; }.view-switch [aria-pressed=true] { border-color: var(--focus-ring); color: var(--link-text); }
+
 .page-subtitle { margin: 4px 0 0; color: var(--text-secondary); }.header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }.filter-bar { display: grid; grid-template-columns: minmax(260px, 1fr) repeat(3, minmax(145px, auto)); gap: 10px; padding: 12px; background: var(--surface-white); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }.search-field { position: relative; }.search-field i { position: absolute; left: 12px; top: 12px; color: var(--text-muted); }.search-field input { padding-left: 34px; }.results-summary { margin: 14px 0 9px; color: var(--text-secondary); font-size: 12px; }.device-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
 .stepper { display: grid; grid-template-columns: repeat(3, 1fr); list-style: none; padding: 0; margin: 0 0 24px; counter-reset: none; }.stepper li { position: relative; display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 12px; }.stepper li::after { content: ""; height: 1px; flex: 1; background: var(--border-subtle); }.stepper li:last-child::after { display: none; }.stepper li span { width: 25px; height: 25px; border: 1px solid var(--border-color); border-radius: 50%; display: grid; place-items: center; }.stepper li.active { color: var(--text-primary); font-weight: 700; }.stepper li.active span, .stepper li.done span { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
 .transport-options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; border: 0; padding: 0; }.transport-options legend { grid-column: 1/-1; margin-bottom: 10px; font-weight: 650; }.transport-card { display: flex; align-items: center; gap: 14px; padding: 18px; border: 2px solid var(--border-subtle); border-radius: var(--radius-md); cursor: pointer; }.transport-card.selected { border-color: var(--color-accent); background: var(--surface-info-soft); }.transport-card > i { font-size: 24px; color: var(--color-accent); }.transport-card span { display: flex; flex-direction: column; }.transport-card small { margin-top: 3px; color: var(--text-secondary); }.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }.full-width { grid-column: 1/-1; margin: 4px 0 14px; }.optional { color: var(--text-muted); font-weight: 400; }.review-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 16px 0; }.review-grid div, .fingerprint-panel { padding: 13px; background: var(--surface-light); border-radius: var(--radius-sm); }.review-grid div { display: flex; flex-direction: column; }.review-grid span, .fingerprint-panel > span { color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }.fingerprint-panel code { display: block; margin: 8px 0 14px; overflow-wrap: anywhere; }.fingerprint-panel .checkbox-label { align-items: flex-start; }
