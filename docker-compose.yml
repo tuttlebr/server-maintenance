@@ -14,6 +14,7 @@ services:
       - ${SSH_KNOWN_HOSTS_PATH:-./.fleet-ssh/known_hosts}:/run/fleet-known-hosts-seed:ro
       - ${FLEET_KUBECONFIG_PATH:-/dev/null}:/run/fleet-kubeconfig/config:ro
       - ./docs:/app/docs:ro
+      - ./nat/config.yml:/app/nat/config.yml:ro
       - fleet-data:/app/data
     env_file:
       - .env
@@ -115,6 +116,7 @@ services:
     build: ./nat
     volumes:
       - ./docs:/app/docs:ro
+      - ./nat/config.yml:/app/config.yml:ro
     environment:
       - AI_HELPER_API_KEY=${AI_HELPER_API_KEY:-}
       - AI_HELPER_MODEL=${AI_HELPER_MODEL:-}

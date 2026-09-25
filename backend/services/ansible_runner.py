@@ -722,9 +722,18 @@ async def run_playbook(
                                                        host_credentials, job_id, settings.ansible_job_timeout_seconds, True)
                     scan_output = log_path.read_text() if log_path.exists() else ""
                     output = scan_output
-                    errors.extend(_process_scan_results(successful, _extract_unreachable_hosts(scan_output.split("--- Post-operation facts ---")[-1]), settings.data_dir / "scans" / job_id))
+                    scan_output = scan_output.partition("--- Post-operation facts ---")[2]
+                    scan_outcomes = parse_host_outcomes(scan_output, successful)
+                    unverified = {item["hostname"] for item in scan_outcomes if item["status"] != "success"}
+                    # A process error with successful recaps still leaves the
+                    # verification incomplete (for example a callback failure).
+                    if scan_rc and not unverified:
+                        unverified.update(successful)
+                    errors.extend(_process_scan_results(successful, _extract_unreachable_hosts(scan_output), settings.data_dir / "scans" / job_id))
                     with SessionLocal() as state_db:
-                        unverified = {host.hostname for host in state_db.query(Host).filter(Host.hostname.in_(successful)).all() if host.facts_stale}
+                        unverified.update(host.hostname for host in state_db.query(Host).filter(Host.hostname.in_(successful)).all() if host.facts_stale)
+                    if unverified:
+                        _invalidate_devices(unverified)
                     if scan_rc or unverified:
                         errors.append("Post-operation facts could not be fully verified. Scan and verify recovery before further changes.")
                         for item in outcomes:

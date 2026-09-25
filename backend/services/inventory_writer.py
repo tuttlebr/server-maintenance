@@ -34,7 +34,7 @@ def _ssh_common_args(passwordless_ssh: bool) -> str:
     return " ".join(args)
 
 
-def _validated_device_vars(device: Device) -> dict[str, str]:
+def _validated_device_vars(device: Device) -> dict[str, str | bool]:
     if not HOSTNAME_RE.fullmatch(device.hostname):
         raise ValueError(f"Unsafe inventory name in database: {device.hostname!r}")
     endpoint = getattr(device, "endpoint", None) or getattr(device, "ip_address", None)
@@ -46,10 +46,15 @@ def _validated_device_vars(device: Device) -> dict[str, str]:
     legacy_type = getattr(device, "machine_type", None)
     if legacy_type not in LEGACY_TYPES:
         legacy_type = "unknown"
+    facts = getattr(device, "facts", {})
     hostvars = {
         "device_kind": getattr(device, "kind", None) or "generic",
         "machine_type": legacy_type,
         "fleet_maintenance_mode": getattr(device, "maintenance_mode", None) or "unknown",
+        "fleet_kubernetes_membership_expected": bool(
+            facts.get("kubernetes_membership_detected")
+            or facts.get("kubernetes_available")
+        ),
     }
     if getattr(device, "kubernetes_context", None):
         hostvars["kubernetes_context"] = device.kubernetes_context

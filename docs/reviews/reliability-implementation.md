@@ -40,3 +40,11 @@ The subsequent full UI review should still address catalog navigation at fleet s
 The initial reliability release added `package_facts` to identify supported NVIDIA driver packages. This broke scanning on the Ubuntu 18.04 Jetson: Ansible uses `/usr/local/bin/python3.8`, while the installed `python3-apt` bindings are available only to the system Python 3.6. Scanning now queries the native `dpkg-query` command for driver package names and installation states, without depending on Python APT bindings. It accepts no matching desktop driver package on Jetson, rejects incomplete package states, and still fails on genuine package database errors. Nine Ansible integration cases cover driver variants, missing packages, non-Debian hosts, and database failures.
 
 After the fix, the targeted Jetson scan `1496d9fd-7559-41db-bec5-d3e1933ae43f` completed successfully with 39 successful tasks and zero failed or unreachable tasks. No host packages were installed or upgraded. The mounted playbooks made the fix active without restarting the web service.
+
+## Recovery verification follow-up (2026-09-25)
+
+Operations allowed recovery on devices whose maintenance mode was `unknown`, but the playbook rejected every such device before checking health. Recovery now determines its checks from local membership files, controller node discovery, prior scan evidence, and explicit Kubernetes mode. Known cluster members still require API access, unique identity, and readiness. Verification leaves maintenance policy and scheduling unchanged; disruptive operations still require a configured policy.
+
+Follow-up scans now need both a valid report and a successful per-device execution recap before clearing recovery. Missing recaps, failed scans, and executor errors leave affected devices unverified. The shared readiness task also enforces at least one retry because Ansible skips its `until` check when retries is zero.
+
+Validation passed 242 tests and 29 subtests, plus syntax/lint checks across all 47 Ansible files. After rebuilding and restarting the idle web executor, Operations recovery job `65273746-b82e-4d19-8ff2-008bf514cb1c` succeeded on all seven SSH devices in 68 seconds, including the post-operation fact refresh. Every recovery recap reported zero changed, failed, or unreachable tasks. Reachy was excluded. No disruptive maintenance was executed.

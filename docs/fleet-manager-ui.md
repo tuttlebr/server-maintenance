@@ -52,6 +52,6 @@ After starting an operation, use **Activity** to monitor progress and review out
 
 ## Fleet Help Evidence Rules
 
-Always search recorded operation logs for questions about the user's fleet. Treat results as time-stamped historical observations. Use integration documentation for product or procedure questions, and do not represent documentation as the user's current device state.
+Fleet Help receives fresh activity evidence with each question and can search completed operation logs for additional history when needed. Results are time-stamped historical observations. Integration documentation covers products and procedures; it does not establish a device's current state.
 
 If a required fact has not been recorded, say which evidence is missing and direct the user to the narrowest eligible operation that collects it. Carry device names and scope forward in follow-up questions.

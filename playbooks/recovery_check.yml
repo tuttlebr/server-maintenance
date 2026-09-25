@@ -6,24 +6,40 @@
   tasks:
     - name: Check local Kubernetes membership evidence
       ansible.builtin.include_tasks: tasks/kubernetes_indicators.yml
-    - name: Require a valid recovery policy
-      ansible.builtin.assert:
-        that:
-          - fleet_maintenance_mode | default('unknown') in ['standalone', 'kubernetes']
-          - fleet_maintenance_mode != 'standalone' or not kubernetes_membership_expected | bool
-        fail_msg: "Configure a verified maintenance mode before recovery."
+
+    - name: Discover Kubernetes membership from the controller
+      ansible.builtin.include_tasks: tasks/kubernetes_discover.yml
+
+    # Recovery observes health; it does not authorize disruptive maintenance.
+    # Include prior discovery evidence so a missing local file or unavailable
+    # API cannot silently turn a known cluster member into a standalone host.
+    - name: Determine which recovery checks apply
+      ansible.builtin.set_fact:
+        fleet_recovery_requires_kubernetes: >-
+          {{
+            fleet_maintenance_mode | default('unknown') == 'kubernetes'
+            or fleet_kubernetes_membership_expected | default(false) | bool
+            or kubernetes_membership_expected | bool
+            or kubernetes_node_found | bool
+          }}
+
     - name: Verify host health
       ansible.builtin.include_tasks: tasks/verify_host_health.yml
+      when: not fleet_recovery_requires_kubernetes | bool
 
     - name: Verify Kubernetes identity and health
-      when: fleet_maintenance_mode | default('unknown') == 'kubernetes'
+      when: fleet_recovery_requires_kubernetes | bool
       block:
-        - name: Discover the configured node
-          ansible.builtin.include_tasks: tasks/kubernetes_discover.yml
         - name: Require cluster access and node identity
           ansible.builtin.assert:
             that:
               - kubernetes_api_accessible | bool
               - kubernetes_node_found | bool
+            fail_msg: >-
+              Kubernetes membership is configured or detected, so recovery requires
+              an accessible cluster and a matching node. Check the controller kubeconfig,
+              API connectivity and RBAC; set the Kubernetes context and node name in
+              Devices -> Edit device if automatic matching is insufficient.
+              {{ kubernetes_api_error }}
         - name: Verify node readiness without uncordoning
           ansible.builtin.include_tasks: tasks/kubernetes_ready.yml

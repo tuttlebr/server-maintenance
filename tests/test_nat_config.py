@@ -31,6 +31,11 @@ class NatConfigTests(unittest.TestCase):
         self.assertEqual(self.config["workflow"]["_type"], "tool_calling_agent")
         self.assertEqual(self.config["llms"]["fleet_llm"]["api_type"], "chat_completion")
 
+    def test_prepared_config_preserves_the_canonical_system_prompt(self):
+        config = prepare_config(copy.deepcopy(self.config), {})
+        runtime_config = yaml.safe_load(yaml.safe_dump(config, sort_keys=False))
+        self.assertEqual(runtime_config["workflow"]["system_prompt"], self.config["workflow"]["system_prompt"])
+
     def test_embedding_outage_leaves_empty_docs_collection_ready(self):
         collection = MagicMock(num_entities=0)
         def fail_embeddings(texts):

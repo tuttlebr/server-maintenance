@@ -190,7 +190,7 @@ def test_partial_mutation_refreshes_only_success_and_requires_failed_host_recove
         if playbook == 'host_facts.yml':
             scan = tmp_path/'scans'/job_id; scan.mkdir(parents=True)
             (scan/'node-01.json').write_text(json.dumps({'hostname':'node-01', 'os_family':'Debian','distribution':'Ubuntu','service_manager':'systemd'}))
-            with log.open('a') as out: out.write('\nnode-01 : ok=9 changed=0 unreachable=0 failed=0\n')
+            with log.open('a') as out: out.write('\n--- Post-operation facts ---\nnode-01 : ok=9 changed=0 unreachable=0 failed=0\n')
             return 0
         log.write_text('PLAY RECAP\nnode-01 : ok=5 changed=1 unreachable=0 failed=0\nnode-02 : ok=3 changed=1 unreachable=0 failed=1\n')
         return 2
@@ -380,6 +380,90 @@ def test_failed_recovery_keeps_device_blocked(database, monkeypatch):
     with database() as db:
         assert db.query(Device).one().recovery_required
         assert db.query(Job).one().status=='failed'
+
+
+@pytest.mark.parametrize('playbook', ['recovery_check.yml', 'system_update.yml'])
+@pytest.mark.parametrize('scan_rc,second_recap,marker,expected_verified', [
+    (0, 'ok=9 changed=0 unreachable=0 failed=0', True, ['node-01', 'node-02']),
+    (2, 'ok=8 changed=0 unreachable=0 failed=1', True, ['node-01']),
+    (0, '', True, ['node-01']),
+    (1, 'ok=9 changed=0 unreachable=0 failed=0', True, []),
+    (0, '', False, []),
+])
+def test_followup_scan_requires_report_and_successful_execution(
+    database, tmp_path, monkeypatch, playbook, scan_rc, second_recap, marker, expected_verified,
+):
+    recovering = playbook == 'recovery_check.yml'
+    with database() as db:
+        db.add_all([device(name, recovery_required=recovering) for name in ('node-01', 'node-02')])
+        db.commit()
+
+    def fake_execute(name, targets, values, credentials, job_id, timeout, append=False):
+        with runner.get_log_path(job_id).open('a' if append else 'w') as log:
+            if name != 'host_facts.yml':
+                log.write('PLAY RECAP\n')
+                for target in targets:
+                    log.write(f'{target} : ok=5 changed=0 unreachable=0 failed=0\n')
+                return 0
+            # A report can exist even when a later scan task or executor fails.
+            scan = tmp_path / 'scans' / job_id
+            scan.mkdir(parents=True)
+            for target in targets:
+                (scan / f'{target}.json').write_text(json.dumps({
+                    'hostname': target, 'os_family': 'Debian', 'distribution': 'Ubuntu',
+                    'service_manager': 'systemd',
+                }))
+            if marker:
+                log.write('\n--- Post-operation facts ---\nPLAY RECAP\n')
+                log.write('node-01 : ok=9 changed=0 unreachable=0 failed=0\n')
+                if second_recap:
+                    log.write(f'node-02 : {second_recap}\n')
+            return scan_rc
+
+    monkeypatch.setattr(runner, '_run_playbook_streaming', fake_execute)
+
+    async def scenario():
+        with database() as db:
+            job_id = await runner.run_playbook(db, playbook, hosts=['node-01', 'node-02'])
+        await asyncio.gather(*list(runner._BACKGROUND_TASKS))
+        return job_id
+
+    job_id = asyncio.run(scenario())
+    with database() as db:
+        completed = db.query(Job).filter_by(job_id=job_id).one()
+        expected_status = 'success' if len(expected_verified) == 2 else 'failed' if recovering else 'recovery_required'
+        assert completed.status == expected_status
+        for host, outcome in zip(db.query(Device).order_by(Device.hostname), completed.device_results):
+            verified = host.hostname in expected_verified
+            assert outcome['status'] == ('success' if verified else 'verification_failed')
+            assert host.facts_stale is not verified
+            assert host.recovery_required is not verified
+        assert db.query(DeviceReservation).count() == 0
+
+
+def test_unknown_policy_allows_verification_but_still_blocks_disruptive_operations():
+    from backend.capabilities import MAINTENANCE_OPERATIONS
+    host = device()
+    host.maintenance_mode = 'unknown'
+    assert operation_ineligibility(host, OPERATION_BY_ID['system.recover']) is None
+    for operation_id in MAINTENANCE_OPERATIONS:
+        assert 'maintenance mode' in operation_ineligibility(host, OPERATION_BY_ID[operation_id])
+
+
+@pytest.mark.parametrize('facts,expected', [
+    ({}, False),
+    ({'kubernetes_membership_detected': True}, True),
+    ({'kubernetes_available': True}, True),
+    ({'kubernetes_membership_detected': False, 'kubernetes_available': False}, False),
+])
+def test_inventory_retains_cluster_evidence_without_assigning_maintenance_policy(facts, expected):
+    from backend.services.inventory_writer import _validated_device_vars
+    host = device()
+    host.maintenance_mode = 'unknown'
+    host.facts = facts
+    values = _validated_device_vars(host)
+    assert values['fleet_maintenance_mode'] == 'unknown'
+    assert values['fleet_kubernetes_membership_expected'] is expected
 
 
 def test_reachy_poll_recovers_from_a_transient_restart_disconnect(database):

@@ -547,6 +547,10 @@ Both Fleet Help chat modes also read fresh job evidence directly from the activi
 
 NAT uses `tool_calling_agent` to preserve conversation history, the system prompt and streamed tool calls. Optional Kubernetes and UniFi MCP definitions are omitted at startup unless both their server URL and token are configured; missing optional settings no longer prevent Fleet Help from starting. Embedding failures can still limit historical semantic search, but do not prevent fresh job evidence from reaching either chat mode.
 
+Fleet Help's sole system prompt is `workflow.system_prompt` in `nat/config.yml`. NAT uses it directly, and the direct-LLM fallback reads the same text for each request. Supplied documentation, uploaded context, and job evidence stay separate from system instructions. The prompt favors direct answers, evidence-backed diagnoses, and a small number of useful next steps. NAT can search fleet guidance, completed job history, and NVIDIA Dynamo, AIPerf, NVCF, and DSX documentation. Kubernetes and UniFi definitions are not exposed to the agent unless explicitly added to `workflow.tool_names`; the fallback has no callable tools.
+
+Both images include the canonical config, and Compose mounts the same file read-only into both services. After editing the prompt, restart `nat` to reload its workflow; the fallback picks up edits on its next request. When upgrading to this shared-prompt setup, rebuild and recreate `web` and `nat` with `docker compose up -d --build web nat`. Image-only deployments also need both images rebuilt after prompt changes. The direct fallback reports a configuration error if the prompt is missing or invalid instead of silently using another policy.
+
 ### Switching from MinIO
 
 Existing installations start with empty search indexes in the new `etcd-local-data` and `milvus-local-data` volumes. Both volumes are new because the old etcd metadata points to objects stored in MinIO. Changing only the storage backend would leave those objects unavailable. This is a rebuild of derived indexes, not an in-place conversion of MinIO data.
