@@ -50,6 +50,8 @@ Low-impact observations include device scan, maintenance assessment, storage ana
 
 After starting an operation, use **Activity** to monitor progress and review output. GPU, storage, maintenance-assessment, and driver jobs show compact result cards above the full Ansible log. A successful historical job is not proof of current live health.
 
+**Partial** means some, but not all, targeted devices completed successfully. Filter Activity by **Partial**, or open a run to review each device's outcome. Partial runs also appear under **Adverse outcomes**. Cancellation and **Recovery required** take precedence when execution was cancelled or a change needs recovery verification.
+
 ## Fleet Help Evidence Rules
 
 Fleet Help receives fresh activity evidence with each question and can search completed operation logs for additional history when needed. Results are time-stamped historical observations. Integration documentation covers products and procedures; it does not establish a device's current state.

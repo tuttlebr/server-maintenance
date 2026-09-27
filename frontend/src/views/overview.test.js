@@ -30,5 +30,9 @@ test('Overview renders unavailable, first-run, partial-error, and ranked large-f
     assert.ok(large.indexOf('Verify interrupted maintenance') < large.indexOf('Inspect root storage pressure'));
     assert.match(large,/operation=system.recover[^"<]*devices=200/);
     assert.doesNotMatch(large,/All devices are reachable|No active jobs/);
+    const partial = {job_id:'partial-run',status:'partial',playbook:'preflight_check.yml',target_devices:'node-01,node-02',created_at:'2026-09-27T12:00:00Z'};
+    const mixed = await render({devices:devices.slice(0,2),hasLoadedOnce:true,recentJobs:[partial],jobsUpdated:'2026-09-27T12:00:00Z',adverseJobs:[partial]});
+    assert.match(mixed,/href="\/activity\?status=partial"[^>]*>1 partial/);
+    assert.match(mixed,/condition-tag warning[^>]*>Partial/);
   } finally { await server.close(); }
 });

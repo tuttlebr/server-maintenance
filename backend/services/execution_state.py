@@ -12,7 +12,7 @@ from backend.config import settings
 from backend.models import Device, DeviceReservation, Job, UserHostAssociation
 
 ACTIVE_STATUSES = {"pending", "running", "cancelling"}
-TERMINAL_STATUSES = {"success", "failed", "cancelled", "recovery_required"}
+TERMINAL_STATUSES = {"success", "partial", "failed", "cancelled", "recovery_required"}
 READ_ONLY_PLAYBOOKS = {
     "host_facts.yml", "maintenance_assessment.yml", "preflight_check.yml",
     "health_diagnostics.yml", "storage_analysis.yml", "gpu_usage.yml",
@@ -23,6 +23,16 @@ READ_ONLY_PLAYBOOKS = {
 
 class ExecutionConflict(ValueError):
     pass
+
+
+def completed_status(outcomes, *, has_errors=False):
+    """Summarize final per-device results; cancellation and recovery take priority."""
+    successful = sum(item["status"] == "success" for item in outcomes)
+    if 0 < successful < len(outcomes):
+        return "partial"
+    if successful and not has_errors:
+        return "success"
+    return "failed"
 
 
 def acquire_executor_lock():

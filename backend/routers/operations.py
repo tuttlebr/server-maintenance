@@ -17,7 +17,7 @@ from backend.models import Device, Job, DeviceReservation
 from backend.schemas import OperationResponse, OperationRunRequest
 from backend.services.ansible_runner import get_log_path, run_playbook, track_task, job_semaphore
 from backend.services.job_results import get_job_results
-from backend.services.execution_state import ExecutionConflict, reserve_devices, release_devices, request_fingerprint
+from backend.services.execution_state import TERMINAL_STATUSES, ExecutionConflict, completed_status, reserve_devices, release_devices, request_fingerprint
 from backend.services.device_discovery import (
     probe_reachy,
     reachy_request,
@@ -193,7 +193,7 @@ async def _recover_reachy(db, devices, user):
         except Exception as exc:
             outcomes.append({"hostname":device.hostname, "status":"failed", "detail":str(exc)})
     local.outcomes_json = json.dumps(outcomes)
-    local.status = "success" if all(item["status"] == "success" for item in outcomes) else "failed"
+    local.status = completed_status(outcomes)
     local.finished_at = datetime.now(timezone.utc)
     local.phase = "complete"
     local.output_log = json.dumps(outcomes, indent=2)
@@ -257,7 +257,7 @@ def _start_reachy_inspection(db, devices, user, operation_id="reachy.health"):
                         outcomes.append({"hostname":hostname, "status":"failed", "detail":str(exc)})
                         _append_reachy_log(job_id, f"[{hostname}] FAILED: {exc}\n")
                     _update_reachy_job(job_id, outcomes_json=json.dumps(outcomes))
-                status = "success" if all(item["status"] == "success" for item in outcomes) else "failed"
+                status = completed_status(outcomes)
                 error = "; ".join(item.get("detail", "") for item in outcomes if item["status"] != "success") or None
         except asyncio.CancelledError:
             error = "Inspection interrupted by executor shutdown"
@@ -423,7 +423,7 @@ def _update_reachy_job(job_id: str, capture_log: bool = False, **values) -> None
             for device in db.query(Device).filter(Device.hostname.in_((job.target_hosts or "").split(","))).all():
                 if not any(item.get("hostname") == device.hostname and item.get("status") == "success" for item in job.device_results):
                     device.facts_stale = True
-        if job.status in {"success", "failed", "recovery_required", "cancelled"}:
+        if job.status in TERMINAL_STATUSES:
             release_devices(db, job_id)
             for device in db.query(Device).filter(Device.hostname.in_((job.target_hosts or "").split(","))).all():
                 outcome = next((item for item in job.device_results if item.get("hostname") == device.hostname), {})

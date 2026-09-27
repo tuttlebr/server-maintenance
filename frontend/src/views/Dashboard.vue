@@ -56,15 +56,15 @@
             <header class="panel-heading"><div><h2 id="outcomes-title">Recent outcomes</h2><p v-if="store.jobsUpdated">{{ outcomes.total }} completed in the latest {{ store.recentJobs.length }} loaded jobs</p></div></header>
             <p v-if="store.jobsError" class="panel-notice">Recent outcomes could not be refreshed. {{ store.jobsUpdated ? `Last observation: ${formatLongTime(store.jobsUpdated)}.` : 'Outcomes are unknown.' }}</p>
             <div v-if="store.jobsUpdated" class="outcome-summary">
-              <div class="outcome-counts"><router-link to="/activity?status=success">{{ outcomes.counts.success }} succeeded</router-link><router-link to="/activity?status=failed">{{ outcomes.counts.failed }} failed</router-link><router-link to="/activity?status=recovery_required">{{ outcomes.counts.recovery_required }} recovery</router-link><router-link v-if="outcomes.counts.cancelled" to="/activity?status=cancelled">{{ outcomes.counts.cancelled }} cancelled</router-link></div>
+              <div class="outcome-counts"><router-link to="/activity?status=success">{{ outcomes.counts.success }} succeeded</router-link><router-link to="/activity?status=partial">{{ outcomes.counts.partial }} partial</router-link><router-link to="/activity?status=failed">{{ outcomes.counts.failed }} failed</router-link><router-link to="/activity?status=recovery_required">{{ outcomes.counts.recovery_required }} recovery</router-link><router-link v-if="outcomes.counts.cancelled" to="/activity?status=cancelled">{{ outcomes.counts.cancelled }} cancelled</router-link></div>
               <p>A sample of jobs, not a time-window success rate.</p>
             </div>
             <div class="adverse-heading"><h3>Latest adverse outcomes</h3><p>Historical results may already be addressed.</p></div>
             <p v-if="store.adverseError" class="panel-notice">Adverse outcomes could not be refreshed. {{ store.adverseUpdated ? `Last observation: ${formatLongTime(store.adverseUpdated)}.` : 'History is unavailable.' }}</p>
             <router-link v-for="job in store.adverseJobs.slice(0, 3)" :key="job.job_id" :to="{ path: '/activity', query: { job: job.job_id } }" class="adverse-item">
-              <span :class="['condition-tag', 'danger']">{{ job.status === 'recovery_required' ? 'Recovery required' : 'Failed' }}</span><strong>{{ operationLabel(job.playbook) }}</strong><span>{{ formatTargetList(job.target_devices) }}</span><time :datetime="job.finished_at || job.created_at" :title="formatLongTime(job.finished_at || job.created_at)">{{ relativeTime(job.finished_at || job.created_at) }}</time>
+              <span :class="['condition-tag', job.status === 'partial' ? 'warning' : 'danger']">{{ job.status === 'recovery_required' ? 'Recovery required' : job.status === 'partial' ? 'Partial' : 'Failed' }}</span><strong>{{ operationLabel(job.playbook) }}</strong><span>{{ formatTargetList(job.target_devices) }}</span><time :datetime="job.finished_at || job.created_at" :title="formatLongTime(job.finished_at || job.created_at)">{{ relativeTime(job.finished_at || job.created_at) }}</time>
             </router-link>
-            <p v-if="store.adverseUpdated && !store.adverseJobs.length && !store.adverseError" class="panel-empty">No failed or recovery-required jobs found.</p>
+            <p v-if="store.adverseUpdated && !store.adverseJobs.length && !store.adverseError" class="panel-empty">No partial, failed, or recovery-required jobs found.</p>
             <p class="panel-footer"><router-link to="/activity?status=adverse">Review adverse outcomes</router-link></p>
           </section>
         </div>

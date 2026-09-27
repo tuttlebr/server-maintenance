@@ -7,6 +7,7 @@
         <select id="job-filter-status" v-model="filterStatus" class="form-select" style="width: auto; min-width: 140px">
           <option value="">All statuses</option><option value="active">Active work</option><option value="adverse">Adverse outcomes</option>
           <option value="success">Success</option>
+          <option value="partial">Partial</option>
           <option value="failed">Failed</option>
           <option value="running">Running</option>
           <option value="pending">Pending</option>
@@ -61,6 +62,7 @@
               <td colspan="7" style="padding: 0">
                 <div class="job-detail">
                   <p v-if="expandedJob?.error_summary" role="status" class="callout callout-danger">{{ expandedJob.error_summary }}</p>
+                  <p v-if="expandedJob?.status === 'partial'" class="callout callout-warn">Some, but not all, devices completed successfully. Review the per-device outcomes and log below.</p>
                   <p v-if="expandedJob?.status === 'recovery_required'" class="callout callout-warn">Remote state needs verification. Review the log and Kubernetes recovery details, repair the host if needed, then run Verify recovery in <router-link :to="{ path: '/operations', query: { operation: 'system.recover', targets: expandedJob.target_devices, reason: 'recovery' } }">Operations with these targets</router-link>. Resume Kubernetes scheduling separately when ready.</p>
                   <p v-if="expandedJob && ['pending', 'running', 'cancelling'].includes(expandedJob.status)">Phase: {{ expandedJob.phase?.replaceAll('_', ' ') }}. <button v-if="canCancel(expandedJob)" class="btn btn-ghost btn-sm" :disabled="cancelling" @click="requestCancel(expandedJob)">Cancel {{ expandedJob.status === 'pending' ? 'queued job' : 'inspection' }}</button><span v-else>Running changes finish under supervision; they cannot be safely cancelled.</span></p>
                   <ul v-if="expandedJob?.device_results?.length" class="outcomes" aria-label="Per-device outcomes"><li v-for="result in expandedJob.device_results" :key="result.hostname"><strong>{{ result.hostname }}</strong>: {{ result.status.replaceAll('_', ' ') }}</li></ul>
@@ -253,9 +255,9 @@ async function load() {
     if (filterPlaybook.value) params.playbook = filterPlaybook.value;
     let rows, more;
     if (filterStatus.value === 'adverse') {
-      const [failed, recovery] = await Promise.all([getJobs({ ...params, status: 'failed' }), getJobs({ ...params, status: 'recovery_required' })]);
-      rows = [...failed, ...recovery].sort((a,b) => String(b.created_at).localeCompare(String(a.created_at)));
-      more = failed.length === 50 || recovery.length === 50;
+      const [failed, partial, recovery] = await Promise.all([getJobs({ ...params, status: 'failed' }), getJobs({ ...params, status: 'partial' }), getJobs({ ...params, status: 'recovery_required' })]);
+      rows = [...failed, ...partial, ...recovery].sort((a,b) => String(b.created_at).localeCompare(String(a.created_at)));
+      more = failed.length === 50 || partial.length === 50 || recovery.length === 50;
     } else {
       if (filterStatus.value) params.status = filterStatus.value;
       rows = await getJobs(params); more = rows.length === 50;

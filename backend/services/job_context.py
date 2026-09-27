@@ -190,7 +190,7 @@ def get_job_context(messages: list[dict], *, job_id: str | None = None, device_i
                 return [p for p in playbooks if any(
                     term in p.lower() or term in p.lower().replace("_", " ")
                     for term in _terms(text)
-                    if len(term) >= 4 and term not in {"failed", "success", "running", "pending", "cancelled"}
+                    if len(term) >= 4 and term not in {"failed", "partial", "success", "running", "pending", "cancelled"}
                 )]
 
             matched = matching_playbooks(question)
@@ -209,7 +209,7 @@ def get_job_context(messages: list[dict], *, job_id: str | None = None, device_i
             if matched:
                 query = query.filter(Job.playbook.in_(matched))
                 scope_note += "; matching playbooks: " + ", ".join(matched)
-            for status in ("recovery_required", "failed", "cancelled", "cancelling", "running", "pending", "success"):
+            for status in ("recovery_required", "partial", "failed", "cancelled", "cancelling", "running", "pending", "success"):
                 if _mentions(status_question, status):
                     query = query.filter(Job.status == status)
                     scope_note += f"; status={status}"

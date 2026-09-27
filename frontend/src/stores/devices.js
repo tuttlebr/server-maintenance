@@ -28,8 +28,8 @@ export const useDevicesStore = defineStore('devices', () => {
         return { rows, summary };
       }, ({ rows, summary }) => { activeJobs.value = rows; activeJobCount.value = summary.active_count; activeUpdated.value = new Date().toISOString(); }, activeError),
       observe(async () => {
-        const [failed, recovery] = await Promise.all([getJobs({ status: 'failed', limit: 5 }), getJobs({ status: 'recovery_required', limit: 5 })]);
-        return [...failed, ...recovery].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+        const [failed, partial, recovery] = await Promise.all([getJobs({ status: 'failed', limit: 5 }), getJobs({ status: 'partial', limit: 5 }), getJobs({ status: 'recovery_required', limit: 5 })]);
+        return [...failed, ...partial, ...recovery].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
       }, rows => { adverseJobs.value = rows; adverseUpdated.value = new Date().toISOString(); }, adverseError),
     ]).finally(() => { loading.value = false; inFlight = null; });
     return inFlight;

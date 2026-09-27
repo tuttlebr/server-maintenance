@@ -21,13 +21,13 @@ from datetime import datetime, timezone
 from backend.config import settings
 from backend.database import SessionLocal
 from backend.models import Host, Job
+from backend.services.execution_state import TERMINAL_STATUSES
 
 logger = logging.getLogger(__name__)
 
 COLLECTION_NAME = "fleet_job_logs"
 COLLECTION_ALIAS = "fleet_job_logs_indexer"
 SNAPSHOT_JOB_ID = "__fleet_snapshot__"
-TERMINAL_STATUSES = ("success", "failed", "cancelled", "recovery_required")
 EMBED_BATCH_SIZE = 16
 MAX_CHUNK_CHARS = 3_500
 MAX_INDEXED_LOG_CHARS = 200_000
@@ -236,10 +236,11 @@ def build_fleet_snapshot_documents(db) -> list[IndexDocument]:
             ),
             f"Registered hosts: {len(hosts)}",
             (
-                f"Latest per-host outcomes: success={counts.get('success', 0)}, failed={counts.get('failed', 0)}, "
+                f"Latest per-host outcomes: success={counts.get('success', 0)}, partial={counts.get('partial', 0)}, failed={counts.get('failed', 0)}, "
                 f"cancelled={counts.get('cancelled', 0)}, no completed job={no_job_count}"
             ),
             f"Hosts whose latest completed job failed: {_host_list(outcome_hosts.get('failed', []))}",
+            f"Hosts whose latest completed job was partial: {_host_list(outcome_hosts.get('partial', []))}",
             f"Hosts whose latest completed job was cancelled: {_host_list(outcome_hosts.get('cancelled', []))}",
             f"Hosts with no completed job: {_host_list(no_job_hosts)}",
             "",

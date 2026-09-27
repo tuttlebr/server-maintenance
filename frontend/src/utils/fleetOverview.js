@@ -1,7 +1,7 @@
 import { hasCapability } from './devices.js';
 
 export const ACTIVE_STATUSES = ['pending', 'running', 'cancelling'];
-export const COMPLETED_STATUSES = ['success', 'failed', 'recovery_required', 'cancelled'];
+export const COMPLETED_STATUSES = ['success', 'partial', 'failed', 'recovery_required', 'cancelled'];
 export const ATTENTION_GROUPS = [
   { id: 'recovery', label: 'Recovery required', title: 'Verify interrupted maintenance', severity: 'danger', operation: 'system.recover', action: 'Review recovery targets', description: 'Review remote state before making further changes.' },
   { id: 'offline', label: 'Offline', title: 'Investigate connectivity', severity: 'danger', action: 'Review connection state', description: 'Check device and connection evidence. Last seen is an observation time, not an outage duration.' },

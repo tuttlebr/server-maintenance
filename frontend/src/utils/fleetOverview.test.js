@@ -27,9 +27,9 @@ test('absent and invalid readings remain unknown while real zero stays reported'
   assert.equal(deviceConditions(device(1,{discovered_at:null}))[0].label,'No discovery recorded');
 });
 test('outcome sample excludes active and unrecognized states, keeps recovery and cancellation distinct', () => {
-  const summary = completedSummary(['success','failed','recovery_required','cancelled','running','pending','cancelling','unknown'].map(status => ({status})));
-  assert.equal(summary.total,4);
-  assert.deepEqual(summary.counts,{success:1,failed:1,recovery_required:1,cancelled:1});
+  const summary = completedSummary(['success','partial','failed','recovery_required','cancelled','running','pending','cancelling','unknown'].map(status => ({status})));
+  assert.equal(summary.total,5);
+  assert.deepEqual(summary.counts,{success:1,partial:1,failed:1,recovery_required:1,cancelled:1});
 });
 test('active overlap uses exact inventory identities, never display-name guesses', () => {
   const jobs = [{status:'running',target_devices:'host-1, host-2'}, {status:'success',target_devices:'host-1'}, {status:'pending',target_devices:'node-001'}, {status:'running',target_devices:'host-10'}];

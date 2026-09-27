@@ -88,6 +88,15 @@ class JobContextTests(unittest.TestCase):
         self.assertIn(FIRST, text)
         self.assertNotIn(SECOND, text)
 
+    def test_partial_query_selects_only_partial_jobs(self):
+        with self.sessions() as db:
+            db.query(Job).filter_by(job_id=FIRST).update({"status": "partial"})
+            db.commit()
+        text = self.context("Show partial runs")
+        self.assertIn("status=partial", text)
+        self.assertIn(FIRST, text)
+        self.assertNotIn(SECOND, text)
+
     def test_followup_preserves_playbook_scope_without_a_job_id(self):
         text = job_context.get_job_context([
             {"role": "user", "content": "Why did the storage analysis fail?"},

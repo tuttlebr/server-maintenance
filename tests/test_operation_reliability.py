@@ -180,6 +180,140 @@ def test_missing_host_recap_is_not_success():
     assert parse_host_outcomes('node-01 : ok=0 changed=0 unreachable=0 failed=0', ['node-01'])[0]['status'] == 'not_checked'
 
 
+@pytest.mark.parametrize('recaps,rc,cancelled,expected', [
+    (['ok=5 changed=0 unreachable=0 failed=0', 'ok=2 changed=0 unreachable=0 failed=1'], 2, False, 'partial'),
+    (['ok=5 changed=0 unreachable=0 failed=0', 'ok=0 changed=0 unreachable=1 failed=0'], 4, False, 'partial'),
+    (['ok=5 changed=0 unreachable=0 failed=0', ''], 0, False, 'partial'),
+    (['ok=5 changed=0 unreachable=0 failed=0', ''], 124, False, 'partial'),
+    (['ok=5 changed=0 unreachable=0 failed=0', ''], 2, True, 'cancelled'),
+    (['ok=5 changed=0 unreachable=0 failed=0'] * 2, 0, False, 'success'),
+    (['ok=5 changed=0 unreachable=0 failed=0'] * 2, 1, False, 'failed'),
+    (['ok=2 changed=0 unreachable=0 failed=1', ''], 2, False, 'failed'),
+    (['', ''], 0, False, 'failed'),
+    (['ok=5 changed=0 unreachable=0 failed=0'], 0, False, 'success'),
+    (['ok=2 changed=0 unreachable=0 failed=1'], 2, False, 'failed'),
+])
+def test_inspection_status_reflects_completed_devices(database, monkeypatch, recaps, rc, cancelled, expected):
+    targets = [f'node-{index + 1:02}' for index in range(len(recaps))]
+    with database() as db:
+        db.add_all([device(name) for name in targets])
+        db.commit()
+
+    def fake_execute(playbook, hosts, values, credentials, job_id, timeout, append=False):
+        runner.get_log_path(job_id).write_text('PLAY RECAP\n' + '\n'.join(
+            f'{name} : {recap}' for name, recap in zip(targets, recaps) if recap
+        ))
+        if cancelled:
+            runner._CANCELLED_JOBS.add(job_id)
+        return rc
+
+    monkeypatch.setattr(runner, '_run_playbook_streaming', fake_execute)
+
+    async def scenario():
+        with database() as db:
+            job_id = await runner.run_playbook(db, 'preflight_check.yml', hosts=targets)
+        await asyncio.gather(*list(runner._BACKGROUND_TASKS))
+        return job_id
+
+    job_id = asyncio.run(scenario())
+    with database() as db:
+        completed = db.query(Job).filter_by(job_id=job_id).one()
+        assert completed.status == expected
+        assert completed.finished_at is not None and completed.phase == 'complete'
+        assert db.query(DeviceReservation).count() == 0
+
+
+@pytest.mark.parametrize('valid_reports,expected', [(1, 'partial'), (0, 'failed')])
+def test_scan_status_requires_valid_reports(database, tmp_path, monkeypatch, valid_reports, expected):
+    targets = ['node-01', 'node-02']
+    with database() as db:
+        db.add_all([device(name) for name in targets])
+        db.commit()
+
+    def fake_execute(playbook, hosts, values, credentials, job_id, timeout, append=False):
+        scan = tmp_path / 'scans' / job_id
+        scan.mkdir(parents=True)
+        for name in targets[:valid_reports]:
+            (scan / f'{name}.json').write_text(json.dumps({'hostname': name, 'os_family': 'Debian'}))
+        runner.get_log_path(job_id).write_text('PLAY RECAP\n' + '\n'.join(
+            f'{name} : ok=5 changed=0 unreachable=0 failed=0' for name in targets
+        ))
+        return 0
+
+    monkeypatch.setattr(runner, '_run_playbook_streaming', fake_execute)
+
+    async def scenario():
+        with database() as db:
+            job_id = await runner.run_playbook(db, 'host_facts.yml', hosts=targets)
+        await asyncio.gather(*list(runner._BACKGROUND_TASKS))
+        return job_id
+
+    job_id = asyncio.run(scenario())
+    with database() as db:
+        completed = db.query(Job).filter_by(job_id=job_id).one()
+        assert completed.status == expected
+        assert [item['status'] for item in completed.device_results] == (
+            ['success'] * valid_reports + ['verification_failed'] * (2 - valid_reports)
+        )
+
+
+def test_partial_jobs_are_filterable_and_finish_streaming(database, monkeypatch):
+    from backend.routers import jobs
+    monkeypatch.setattr(jobs, 'SessionLocal', database)
+    monkeypatch.setattr(jobs, 'decode_token', lambda *args: {'sub': 'test'})
+    with database() as db:
+        partial = job(status='partial', output_log='mixed results')
+        db.add_all([partial, job(status='success'), job(status='failed')])
+        db.commit()
+        assert jobs.list_jobs(status='partial', limit=50, offset=0, db=db, user='test') == [partial]
+        assert jobs.get_job(partial.job_id, db=db, user='test').status == 'partial'
+
+        async def scenario():
+            response = await jobs.stream_job_output(partial.job_id, authorization='Bearer test', db=db)
+            return [event async for event in response.body_iterator]
+
+        assert asyncio.run(asyncio.wait_for(scenario(), timeout=2)) == ['event: done\ndata: partial\n\n']
+
+
+@pytest.mark.parametrize('operation', ['reachy.health', 'reachy.logs.read', 'reachy.recover'])
+def test_reachy_mixed_outcomes_are_partial_and_release_devices(database, monkeypatch, operation):
+    from backend.routers import operations
+    monkeypatch.setattr(operations, 'SessionLocal', database)
+    monkeypatch.setattr(operations, 'probe_reachy', lambda endpoint, port: {
+        'reachable': endpoint == 'node-01', 'facts': {}, 'detail': 'Health inspection failed',
+    })
+
+    async def logs(endpoint, port):
+        if endpoint == 'node-02':
+            raise RuntimeError('Logs unavailable')
+        return 'Daemon ready'
+
+    monkeypatch.setattr(operations, '_collect_reachy_logs', logs)
+    with database() as db:
+        for name in ('node-01', 'node-02'):
+            host = device(name)
+            host.transport = 'reachy_daemon'
+            db.add(host)
+        db.commit()
+
+    async def scenario():
+        with database() as db:
+            hosts = db.query(Device).order_by(Device.hostname).all()
+            if operation == 'reachy.recover':
+                result = await operations._recover_reachy(db, hosts, 'test')
+            else:
+                result = operations._start_reachy_inspection(db, hosts, 'test', operation)
+        await asyncio.gather(*list(runner._BACKGROUND_TASKS))
+        return result['job_id']
+
+    job_id = asyncio.run(scenario())
+    with database() as db:
+        completed = db.query(Job).filter_by(job_id=job_id).one()
+        assert completed.status == 'partial'
+        assert [item['status'] for item in completed.device_results] == ['success', 'failed']
+        assert db.query(DeviceReservation).count() == 0
+
+
 def test_partial_mutation_refreshes_only_success_and_requires_failed_host_recovery(database, tmp_path, monkeypatch):
     with database() as db:
         db.add_all([device('node-01'),device('node-02')]); db.commit()
@@ -431,7 +565,7 @@ def test_followup_scan_requires_report_and_successful_execution(
     job_id = asyncio.run(scenario())
     with database() as db:
         completed = db.query(Job).filter_by(job_id=job_id).one()
-        expected_status = 'success' if len(expected_verified) == 2 else 'failed' if recovering else 'recovery_required'
+        expected_status = 'success' if len(expected_verified) == 2 else ('partial' if expected_verified else 'failed') if recovering else 'recovery_required'
         assert completed.status == expected_status
         for host, outcome in zip(db.query(Device).order_by(Device.hostname), completed.device_results):
             verified = host.hostname in expected_verified

@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     sshpass \
     curl \
     tzdata \
+    python3-apt \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system --gid 10001 fleet \

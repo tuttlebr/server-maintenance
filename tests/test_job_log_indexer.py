@@ -95,7 +95,7 @@ class JobLogDocumentTests(unittest.TestCase):
         )
         db.close()
 
-        self.assertIn("success=1, failed=0, cancelled=1, no completed job=1", text)
+        self.assertIn("success=1, partial=0, failed=0, cancelled=1, no completed job=1", text)
         self.assertIn("dgx-01: latest job=success", text)
         self.assertIn("job_id=newer-success", text)
         self.assertIn("dgx-02: latest job=cancelled", text)
@@ -105,6 +105,12 @@ class JobLogDocumentTests(unittest.TestCase):
 
 class CompletedJobIngestionTests(unittest.TestCase):
     def test_failed_job_is_sent_to_index_with_fleet_snapshot(self):
+        self.assert_job_is_indexed("failed")
+
+    def test_partial_job_is_sent_to_index_with_fleet_snapshot(self):
+        self.assert_job_is_indexed("partial")
+
+    def assert_job_is_indexed(self, status):
         sessions = _test_session_factory()
         db = sessions()
         now = datetime(2026, 8, 5, 12, 0, tzinfo=timezone.utc)
@@ -114,7 +120,7 @@ class CompletedJobIngestionTests(unittest.TestCase):
                 job_id="failed-job",
                 playbook="preflight_check.yml",
                 target_hosts="dgx-01",
-                status="failed",
+                status=status,
                 finished_at=now,
                 created_at=now,
                 output_log="fatal: host unreachable",
@@ -137,6 +143,8 @@ class CompletedJobIngestionTests(unittest.TestCase):
 
         self.assertTrue(indexed)
         self.assertEqual(len(captured), 1)
+        self.assertIn(f"Terminal status: {status}", '\n'.join(document.text for document in captured[0]))
+        self.assertIn(f"latest job={status}", '\n'.join(document.text for document in captured[0]))
         self.assertTrue(
             any(document.job_id == "failed-job" for document in captured[0])
         )

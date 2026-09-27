@@ -16,7 +16,7 @@ from pathlib import Path
 from backend.config import settings
 from backend.database import SessionLocal
 from backend.models import Host, Job, ManagedUser, UserHostAssociation
-from backend.services.execution_state import (ExecutionConflict, is_read_only, parse_host_outcomes, request_fingerprint, reserve_devices, release_devices)
+from backend.services.execution_state import (ExecutionConflict, completed_status, is_read_only, parse_host_outcomes, request_fingerprint, reserve_devices, release_devices)
 from backend.services.job_results import get_job_results
 from backend.services import job_log_indexer
 from backend.capabilities import NVIDIA_FABRIC_MANAGER, REACHY_APP_RESET, has_capability
@@ -740,6 +740,11 @@ async def run_playbook(
                             if item["hostname"] in unverified:
                                 item["status"] = "verification_failed"
                                 failed.append(item["hostname"])
+                # Successful execution also needs any required result/health
+                # verification before it counts toward the aggregate outcome.
+                for item in outcomes:
+                    if item["hostname"] in failed and item["status"] == "success":
+                        item["status"] = "verification_failed"
                 if not readonly and (failed or rc):
                     _invalidate_devices(failed or targets, recovery_reason=f"Incomplete job {job_id} ({playbook})")
                 if recovery:
@@ -751,7 +756,7 @@ async def run_playbook(
                                 host.recovery_reason = None
                         state_db.commit()
                 finished = datetime.now(timezone.utc)
-                status = "success" if rc == 0 and not failed and not errors else "failed"
+                status = completed_status(outcomes, has_errors=bool(rc or errors))
                 if not readonly and (failed or rc):
                     status = "recovery_required"
                 elif cancelled:

@@ -139,7 +139,7 @@ class Job(Base):
     job_id = Column(String, unique=True, nullable=False, index=True)
     playbook = Column(String, nullable=False)
     target_hosts = Column(String)
-    status = Column(String, default="pending")  # pending | running | success | failed | cancelled
+    status = Column(String, default="pending")  # pending | running | cancelling | success | partial | failed | cancelled | recovery_required
     started_at = Column(DateTime)
     finished_at = Column(DateTime)
     duration_seconds = Column(Integer)
