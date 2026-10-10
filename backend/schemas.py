@@ -329,88 +329,45 @@ class OperationRunRequest(BaseModel):
 
 
 # Users
-class UserInfo(BaseModel):
-    full_name: str
-    email: str
+class AccountFields(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    full_name: str | None = None
+    email: str | None = None
+    groups: str | None = None
+    shell: str | None = None
 
     @field_validator("full_name")
     @classmethod
-    def validate_full_name(cls, value: str) -> str:
-        value = value.strip()
-        if not SAFE_TEXT_RE.fullmatch(value):
+    def validate_full_name(cls, value):
+        value = _strip(value)
+        if not value:
+            return None
+        if not SAFE_TEXT_RE.fullmatch(value) or any(ord(c) < 32 for c in value):
             raise ValueError("full name contains unsupported or shell-sensitive characters")
         return value
 
     @field_validator("email")
     @classmethod
-    def validate_email(cls, value: str) -> str:
-        value = value.strip().lower()
-        if not EMAIL_RE.fullmatch(value):
+    def validate_email(cls, value):
+        value = value.strip().lower() if value else None
+        if value and not EMAIL_RE.fullmatch(value):
             raise ValueError("email address is invalid")
-        username = value.split("@", 1)[0]
-        _validate_linux_name(username)
-        return value
-
-    @property
-    def username(self) -> str:
-        return self.email.split("@", 1)[0]
-
-
-class BulkUserAdd(BaseModel):
-    request_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,64}$")
-    users: list[UserInfo] = Field(min_length=1, max_length=500)
-    device_ids: list[int] | None = None
-    all_devices: bool = False
-    password: str | None = None
-
-    @field_validator("device_ids")
-    @classmethod
-    def validate_device_ids(cls, value: list[int] | None) -> list[int] | None:
-        return list(dict.fromkeys(value)) if value else value
-
-    @field_validator("password")
-    @classmethod
-    def validate_password(cls, value: str | None) -> str | None:
-        return _validate_account_password(value, "password")
-
-    @model_validator(mode="after")
-    def validate_targeting(self):
-        _validate_device_targeting(self.device_ids, self.all_devices)
-        return self
-
-
-class BulkUserUpdate(BaseModel):
-    request_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,64}$")
-    usernames: list[str] = Field(min_length=1, max_length=500)
-    device_ids: list[int] | None = None
-    all_devices: bool = False
-    groups: str | None = None
-    shell: str | None = None
-
-    @field_validator("usernames")
-    @classmethod
-    def validate_usernames(cls, value: list[str]) -> list[str]:
-        return [_validate_linux_name(item) for item in value]
-
-    @field_validator("device_ids")
-    @classmethod
-    def validate_device_ids(cls, value: list[int] | None) -> list[int] | None:
-        return list(dict.fromkeys(value)) if value else value
+        return value or None
 
     @field_validator("groups")
     @classmethod
-    def validate_groups(cls, value: str | None) -> str | None:
+    def validate_groups(cls, value):
         value = _strip(value)
         if not value:
             return None
-        value = ",".join(part.strip() for part in value.split(",") if part.strip())
+        value = ",".join(dict.fromkeys(part.strip() for part in value.split(",") if part.strip()))
         if not GROUPS_RE.fullmatch(value):
             raise ValueError("groups must be a comma-separated list of safe Linux group names")
         return value
 
     @field_validator("shell")
     @classmethod
-    def validate_shell(cls, value: str | None) -> str | None:
+    def validate_shell(cls, value):
         value = _strip(value)
         if not value:
             return None
@@ -418,11 +375,103 @@ class BulkUserUpdate(BaseModel):
             raise ValueError("shell is not in the allowed shell list")
         return value
 
+
+class UserInfo(AccountFields):
+    username: str | None = None
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, value):
+        return _validate_optional_linux_name(value)
+
+    @model_validator(mode="after")
+    def resolve_username(self):
+        if not self.username:
+            if not self.email:
+                raise ValueError("provide a username or an email to derive it from")
+            self.username = _validate_linux_name(self.email.split("@", 1)[0])
+        if not self.full_name:
+            raise ValueError("full name is required")
+        return self
+
+
+class UserEdit(AccountFields):
+    username: str
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, value):
+        return _validate_linux_name(value)
+
+    @model_validator(mode="after")
+    def require_change(self):
+        if not any((self.full_name, self.email, self.groups, self.shell)):
+            raise ValueError("provide at least one update field; blank fields keep their current value")
+        return self
+
+
+def _validate_unique_accounts(records):
+    names = [record.username for record in records]
+    if len(set(names)) != len(names):
+        raise ValueError("each username must appear only once")
+
+
+class BulkUserAdd(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,64}$")
+    users: list[UserInfo] = Field(min_length=1, max_length=500)
+    device_ids: list[int] | None = Field(default=None, max_length=200)
+    all_devices: bool = False
+    password: str | None = None
+
+    @field_validator("device_ids")
+    @classmethod
+    def validate_device_ids(cls, value):
+        return list(dict.fromkeys(value)) if value else value
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value):
+        return _validate_account_password(value, "password")
+
     @model_validator(mode="after")
     def validate_targeting(self):
         _validate_device_targeting(self.device_ids, self.all_devices)
-        if not self.groups and not self.shell:
-            raise ValueError("provide at least one update field")
+        _validate_unique_accounts(self.users)
+        return self
+
+
+class BulkUserUpdate(AccountFields):
+    request_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,64}$")
+    users: list[UserEdit] | None = Field(default=None, min_length=1, max_length=500)
+    usernames: list[str] | None = Field(default=None, min_length=1, max_length=500)
+    device_ids: list[int] | None = Field(default=None, max_length=200)
+    all_devices: bool = False
+
+    @field_validator("usernames")
+    @classmethod
+    def validate_usernames(cls, value):
+        return [_validate_linux_name(item) for item in value] if value else value
+
+    @field_validator("device_ids")
+    @classmethod
+    def validate_device_ids(cls, value):
+        return list(dict.fromkeys(value)) if value else value
+
+    @property
+    def updates(self) -> list[UserEdit]:
+        return self.users or [UserEdit(username=name, full_name=self.full_name,
+                                      email=self.email, groups=self.groups, shell=self.shell)
+                              for name in self.usernames or []]
+
+    @model_validator(mode="after")
+    def validate_targeting(self):
+        _validate_device_targeting(self.device_ids, self.all_devices)
+        if bool(self.users) == bool(self.usernames):
+            raise ValueError("provide either per-user records or usernames with shared changes")
+        if self.users and any((self.full_name, self.email, self.groups, self.shell)):
+            raise ValueError("shared changes cannot be combined with per-user records")
+        _validate_unique_accounts(self.updates)
         return self
 
 

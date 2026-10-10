@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from backend.auth import get_current_user
@@ -15,7 +15,7 @@ from backend.schemas import (
     _validate_linux_name,
 )
 from backend.services.ansible_runner import run_playbook
-from backend.services.csv_parser import parse_csv
+from backend.services.csv_parser import MAX_CSV_BYTES, CsvValidationError, parse_csv
 
 router = APIRouter(prefix="/api/v2/users", tags=["access"])
 
@@ -48,7 +48,7 @@ def _validated_username(username: str) -> str:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-def _target_devices(payload, db: Session, *, inspect=False) -> list[Host]:
+def _target_devices(payload, db: Session, *, inspect=False, automatic=False) -> list[Host]:
     if payload.all_devices or not payload.device_ids:
         raise HTTPException(status_code=400, detail="Select explicit target devices. Fleet-wide implicit account changes are disabled.")
     query = db.query(Host).filter((Host.transport == "ssh") | (Host.transport.is_(None)))
@@ -64,7 +64,7 @@ def _target_devices(payload, db: Session, *, inspect=False) -> list[Host]:
         raise HTTPException(status_code=400, detail=f"Linux account management is not supported on: {', '.join(unsupported)}")
     if not devices:
         raise HTTPException(status_code=400, detail="No access-capable devices are available")
-    if not inspect:
+    if not inspect and not automatic:
         for device in devices:
             if device.os_family not in {"Debian", "RedHat"}:
                 raise HTTPException(status_code=409, detail=f"Account changes support discovered Debian and Red Hat family devices: {device.name}")
@@ -75,7 +75,7 @@ def _target_devices(payload, db: Session, *, inspect=False) -> list[Host]:
     return devices
 
 
-@router.get("/")
+@router.get("")
 def list_users(db: Session = Depends(get_db), user: str = Depends(get_current_user)):
     users = db.query(ManagedUser).order_by(ManagedUser.username).all()
     return [_user_to_response(db, u) for u in users]
@@ -89,7 +89,7 @@ async def bulk_add_users(
 ):
     extra_vars = {
         "user_records": [
-            {"username": u.username, "full_name": u.full_name, "email": u.email}
+            u.model_dump(exclude_none=True)
             for u in payload.users
         ],
         "interactive_mode": False,
@@ -97,9 +97,7 @@ async def bulk_add_users(
     if payload.password:
         extra_vars["default_password"] = payload.password
 
-    target_devices = _target_devices(payload, db)
-    if any(device.os_family not in {"Debian", "RedHat"} for device in target_devices):
-        raise HTTPException(status_code=400, detail="Provisioning supports discovered Debian and Red Hat family devices")
+    target_devices = _target_devices(payload, db, automatic=True)
     target_names = [device.hostname for device in target_devices]
     job_id = await run_playbook(
         db=db,
@@ -118,28 +116,44 @@ async def bulk_add_users(
     return {"job_id": job_id, "detail": f"Adding {len(payload.users)} users"}
 
 
+async def _csv_records(file: UploadFile, mode: str):
+    raw = await file.read(MAX_CSV_BYTES + 1)
+    if len(raw) > MAX_CSV_BYTES:
+        raise HTTPException(status_code=413, detail="CSV must be 1 MB or smaller")
+    try:
+        return parse_csv(raw.decode("utf-8-sig"), mode)
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Save the CSV as UTF-8 and upload it again") from exc
+    except CsvValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/csv-preview")
+async def preview_users_csv(
+    file: UploadFile = File(...),
+    mode: str = Form("add"),
+    user: str = Depends(get_current_user),
+):
+    records = await _csv_records(file, mode)
+    return {"users": [record.model_dump(exclude_none=True) for record in records], "mode": mode}
+
+
 @router.post("/bulk-add-csv")
 async def bulk_add_users_csv(
     file: UploadFile = File(...),
-    device_ids: str = "",
-    password: str | None = None,
+    device_ids: str = Form(""),
+    password: str | None = Form(None),
+    request_key: str | None = Form(None),
     db: Session = Depends(get_db),
     user: str = Depends(get_current_user),
 ):
-    content = (await file.read()).decode("utf-8")
-    users = parse_csv(content)
-
-    if not users:
-        raise HTTPException(status_code=400, detail="No valid users found in CSV")
-
+    # Direct API clients use the same validation as the review-first UI.
+    records = await _csv_records(file, "add")
     try:
         target_ids = [int(value.strip()) for value in device_ids.split(",") if value.strip()]
+        payload = BulkUserAdd(users=records, device_ids=target_ids, password=password, request_key=request_key)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="device_ids must be comma-separated integers") from exc
-    if not target_ids:
-        raise HTTPException(status_code=400, detail="At least one target device is required for CSV provisioning")
-    payload = BulkUserAdd(users=users, device_ids=target_ids, password=password)
-
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return await bulk_add_users(payload, db=db, user=user)
 
 
@@ -149,16 +163,9 @@ async def bulk_update_users(
     db: Session = Depends(get_db),
     user: str = Depends(get_current_user),
 ):
-    extra_vars: dict = {
-        "target_usernames": payload.usernames,
-        "interactive_mode": False,
-    }
-    if payload.groups:
-        extra_vars["user_groups"] = payload.groups
-    if payload.shell:
-        extra_vars["user_shell"] = payload.shell
-
-    target_devices = _target_devices(payload, db)
+    records = [record.model_dump(exclude_none=True) for record in payload.updates]
+    extra_vars = {"user_updates": records, "interactive_mode": False}
+    target_devices = _target_devices(payload, db, automatic=True)
     job_id = await run_playbook(
         db=db,
         playbook="user_management.yml",
@@ -170,11 +177,10 @@ async def bulk_update_users(
         completion_action={
             "type": "update_users",
             "hostnames": [device.hostname for device in target_devices],
-            "usernames": payload.usernames,
-            "groups": payload.groups,
+            "users": records,
         },
     )
-    return {"job_id": job_id, "detail": f"Updating {len(payload.usernames)} users"}
+    return {"job_id": job_id, "detail": f"Updating {len(records)} users"}
 
 
 @router.post("/{username}/change-password")

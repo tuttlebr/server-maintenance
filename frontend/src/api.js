@@ -128,6 +128,10 @@ export const runOperation = (operationId, deviceIds, parameters = {}) =>
   });
 
 // Users
+export const previewUsersCsv = (file, mode) => {
+  const body = new FormData(); body.append("file", file); body.append("mode", mode);
+  return request("/users/csv-preview", { method: "POST", body });
+};
 export const inspectAccounts = (data) => request("/users/inspect", { method: "POST", body: data });
 export const bulkUpdateUsers = (data) => request("/users/bulk-update", { method: "PUT", body: data });
 export const getUsers = () => request("/users");

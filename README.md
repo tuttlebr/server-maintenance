@@ -1,6 +1,6 @@
 # Fleet Manager
 
-Fleet maintenance focused on four operations: check for apt updates, install apt updates, clear Docker and containerd/nerdctl cache, and reboot nodes. The backend uses FastAPI and Ansible; the frontend uses Vue 3.
+Fleet maintenance focused on four operations: check for apt updates, install apt updates, clear Docker and containerd/nerdctl cache, and reboot nodes, plus bulk user management with CSV import. The backend uses FastAPI and Ansible; the frontend uses Vue 3.
 
 ## Features
 
@@ -421,6 +421,14 @@ Cache cleanup targets the privileged system runtime connections on the device. I
 **Reboot nodes** always restarts the selected nodes, one at a time, after one confirmation. It requires no reboot-required flag, package preview, preflight health check, or Kubernetes drain. It remains available when a previous operation needs recovery, while respecting active device reservations. Fleet waits for a new boot and SSH access, then refreshes device details. A failed return is reported as an incomplete change. Existing host-health issues are checked automatically before later installs or cleanup. The CLI `reboot.yml` playbook uses the same unconditional behavior.
 
 A rejected package plan before any mutation is a failed attempt, not a recovery lock. Interrupted or unverified changes trigger automatic health checks before the next install or cleanup; there is no separate Verify step. Network retries reuse a request key, so reconnecting cannot launch the same accepted action twice.
+
+### Bulk user management
+
+Open **Users** in navigation or **Manage users** on Operations. Select devices, then add or edit accounts in a table. You can enter rows manually or upload a UTF-8 CSV. Downloadable templates are provided for both modes. Import validates the entire file and reports row errors before any remote changes. Review the exact usernames, fields, and devices once, then follow progress and per-device outcomes on the same page.
+
+CSV columns: `username,full_name,email,groups,shell`. Add requires a full name and either a username or an email from which to derive one. Email is optional with an explicit username and is stored as Fleet Manager metadata. Edit requires a username and at least one changed field. Blank edit fields preserve current values; groups append to existing memberships. Quote fields containing commas. Imports allow 500 users and 1 MB per file; requests target at most 200 explicit devices.
+
+Add creates missing accounts and preserves existing ones. New accounts default to `/bin/bash` and have password login locked unless an initial password is supplied (12 characters minimum, expired on first login). Edit never creates missing accounts. Live preflight checks account names, protected accounts, platform, and shell availability before changes. Previously interrupted devices get automatic health checks within the same reserved job. No manual scan or Verify step is required. No node draining is performed.
 
 ## CLI Usage
 

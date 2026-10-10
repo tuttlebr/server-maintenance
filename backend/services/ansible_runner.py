@@ -435,7 +435,16 @@ def _apply_completion_action(action: dict | None) -> None:
                     ).first()
                     if not association:
                         db.add(UserHostAssociation(user_id=managed.id, host_id=host_id))
-        elif action_type in {"update_users", "set_sudoer"}:
+        elif action_type == "update_users":
+            for record in action.get("users") or []:
+                managed = db.query(ManagedUser).filter_by(username=record["username"]).first()
+                if not managed:
+                    managed = ManagedUser(username=record["username"])
+                    db.add(managed)
+                for field in ("full_name", "email"):
+                    if record.get(field):
+                        setattr(managed, field, record[field])
+        elif action_type == "set_sudoer":
             # Observed per-host results below are authoritative, not requested values.
             pass
         elif action_type == "remove_user":
@@ -704,7 +713,7 @@ async def run_playbook(
     daemon_targets = {host.hostname: (host.endpoint or host.hostname, host.daemon_port or 8000) for host in devices if host.transport == "reachy_daemon"}
     readonly = is_read_only(playbook, extra_vars)
     recovery = playbook == "recovery_check.yml" or (playbook == "host_drain.yml" and (extra_vars or {}).get("drain_action") == "resume")
-    automatic_recovery = playbook in {"system_update.yml", "docker_cleanup.yml"}
+    automatic_recovery = playbook in {"system_update.yml", "docker_cleanup.yml", "user_management.yml"}
     # An explicit reboot is available even when health checks cannot pass.
     # Keep the existing recovery flag until host health is actually verified.
     unconditional_reboot = playbook == "reboot.yml"
@@ -796,7 +805,7 @@ async def run_playbook(
                     unverified, scan_errors, scan_details, output = await _refresh_job_facts(job_id, successful, host_credentials)
                     errors.extend(scan_errors)
                     if unverified:
-                        errors.append("Device details could not be fully refreshed. The next install or cleanup will check host health automatically before making changes.")
+                        errors.append("Device details could not be fully refreshed. The next install, cleanup, or account change will check host health automatically before making changes.")
                         for item in outcomes:
                             if item["hostname"] in unverified:
                                 item["status"] = "verification_failed"
@@ -808,7 +817,7 @@ async def run_playbook(
                     if item["hostname"] in failed and item["status"] == "success":
                         item["status"] = "verification_failed"
                 recovery_targets = failed or (targets if rc else [])
-                if playbook in {"system_update.yml", "docker_cleanup.yml", "reboot.yml"} and rc != 124:
+                if playbook in {"system_update.yml", "docker_cleanup.yml", "reboot.yml", "user_management.yml"} and rc != 124:
                     # A rejected plan or SSH failure before the mutation marker
                     # is an ordinary failed attempt, not an uncertain change.
                     reports = get_job_results(job_id)
@@ -845,7 +854,7 @@ async def run_playbook(
                 _invalidate_devices(targets, recovery_reason=f"Interrupted job {job_id} ({playbook})")
             logger.warning("Job %s interrupted: %s", job_id, exc, exc_info=True)
             _update_job(job_id, status="recovery_required" if uncertain else ("cancelled" if job_id in _CANCELLED_JOBS or (not started and not checking_recovery) else "failed"), phase="interrupted",
-                        finished_at=datetime.now(timezone.utc), error_summary="Execution interrupted. Host health will be checked automatically before the next install or cleanup." if uncertain else ("Automatic health checks were interrupted. The requested action did not start; try again." if checking_recovery else ("Executor stopped before this queued job began" if not started else str(exc)[:2000])),
+                        finished_at=datetime.now(timezone.utc), error_summary="Execution interrupted. Host health will be checked automatically before the next install, cleanup, or account change." if uncertain else ("Automatic health checks were interrupted. The requested action did not start; try again." if checking_recovery else ("Executor stopped before this queued job began" if not started else str(exc)[:2000])),
                         output_log=log_path.read_text() if log_path.exists() else "")
         finally:
             # Wait for a thread-backed process to stop before releasing its devices.

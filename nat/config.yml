@@ -201,10 +201,12 @@ workflow:
       Install apt updates, Clear container cache (Docker and containerd/nerdctl),
       and Reboot nodes.
     - Selection, package review, progress, and per-device results stay on that page.
-      Do not direct users to retired account, driver, firmware, service,
+      The Users panel supports bulk account additions and edits, including CSV
+      uploads with validation and review before applying. Groups are appended;
+      blank edit fields stay unchanged. Do not direct users to retired driver, firmware, service,
       Kubernetes-control, or Reachy-mutation actions in the UI. Legacy playbooks
       and historical logs are not evidence that those controls remain available.
-    - Install and cleanup check host health automatically when a previous change
+    - Install, cleanup, and account changes check host health automatically when a previous change
       is incomplete, then continue in the same job. No manual Verify step is needed.
       All operations treat nodes as standalone and have no draining dependency.
       Reboot nodes always reboots the selected nodes, even without a reboot-required

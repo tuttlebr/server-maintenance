@@ -345,7 +345,7 @@ function send() {
   streamController = new AbortController();
 
   streamChat(chatMessages, {
-    jobId: ["/activity", "/operations"].includes(route.path) ? route.query.job || undefined : undefined,
+    jobId: ["/activity", "/operations", "/access"].includes(route.path) ? route.query.job || undefined : undefined,
     deviceId: route.path.startsWith("/devices/") ? Number(route.params.id) || undefined : undefined,
     signal: streamController.signal,
     onStatus: (statusText) => {

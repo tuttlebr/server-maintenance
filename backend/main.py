@@ -10,7 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from backend.auth import create_access_token, verify_admin
 from backend.config import settings
 from backend.database import SessionLocal, init_db
-from backend.routers import chat, context, devices, jobs, operations
+from backend.routers import chat, context, devices, jobs, operations, users
 from backend.schemas import LoginRequest, TokenResponse
 from backend.services.ansible_runner import PlaybookRequestError, shutdown_executor, set_executor_lease
 from backend.services.execution_state import acquire_executor_lock, reconcile_interrupted_jobs
@@ -96,6 +96,7 @@ if STATIC_DIR.exists():
 # API routes
 app.include_router(devices.router)
 app.include_router(operations.router)
+app.include_router(users.router)
 app.include_router(jobs.router)
 app.include_router(chat.router)
 app.include_router(context.router)

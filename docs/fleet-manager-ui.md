@@ -7,6 +7,7 @@ This guide teaches Fleet Help how to explain the vendor-neutral Fleet Manager UI
 - **Overview** summarizes reachability, devices needing attention, active jobs, and recent activity. GPU and robot metrics appear only when those device capabilities exist.
 - **Devices** is the mixed-fleet inventory. Filter by status, type, vendor, or capability. Device types are server, workstation, edge, robot, and generic.
 - **Operations** is the default page. It always shows four actions: Check for apt updates, Install apt updates, Clear container cache, and Reboot nodes. Selection, review, progress, and results stay on this page.
+- **Users** supports bulk Linux account additions and edits, manual rows or CSV import, and account observations. Operations also links here with the device selection preserved.
 - **Activity** contains background and completed jobs, including target devices, status, recap, logs, errors, and compact structured results when an operation produces them.
 - **Context** shows the current Fleet Help record count, manages uploaded text and Markdown sources, and runs context re-indexing.
 - **Fleet Help** answers documentation and recorded-operation questions. It does not operate devices.
@@ -46,7 +47,7 @@ Select devices once in the left panel. **Check now** refreshes apt metadata and 
 
 **Reboot…** opens one confirmation for the selected nodes. It always restarts them, one at a time, even without a reboot-required flag or with pending recovery. It skips preflight health checks and node draining, waits for reboot completion and SSH access, then refreshes facts. Active device reservations still prevent overlapping operations. Failures remain visible per device.
 
-The catalog and API expose only these four actions. Driver/firmware updates, account administration, service control, and Reachy mutations are retired from the service. Legacy CLI playbooks and historical job results do not mean those controls are still available in the UI.
+The maintenance catalog exposes these four actions. Bulk account management is available separately under Users. Driver/firmware updates, service control, and Reachy mutations are retired from the service. Legacy CLI playbooks and historical job results do not mean those controls are still available in the UI.
 
 APT actions require a discovered Debian-family SSH device. Cleanup requires a discovered container runtime. The backend checks every selected device; the UI never silently excludes an incompatible device. All devices use standalone maintenance. Installation and recovery verification require no maintenance-mode configuration, cluster API access, or node draining. After an incomplete change, installs and cleanup automatically check host health, refresh device details, and continue in the same job. If a check fails, the requested action does not start and the device error appears inline. No manual Verify step is required. Running jobs reserve their devices throughout both checks and changes. Stale dashboard facts alone no longer require a separate scan before maintenance.
 
@@ -61,3 +62,12 @@ Results show per-device outcomes, available packages, reboot requirements, runti
 Fleet Help receives fresh activity evidence with each question and can search completed operation logs for additional history when needed. Results are time-stamped historical observations. Integration documentation covers products and procedures; it does not establish a device's current state.
 
 If a required fact has not been recorded, say which evidence is missing and direct the user to the narrowest eligible operation that collects it. Carry device names and scope forward in follow-up questions.
+## User management
+
+Use **Users** or the Operations **Manage users** link. Select devices and choose **Add users** or **Edit users**. Enter rows or upload a UTF-8 CSV, then review once and run. Progress and per-device errors stay inline; ambiguous network retries reconnect to the same request.
+
+Download a template for the selected mode. Columns are `username,full_name,email,groups,shell`. Add requires full_name and either username or email; the username defaults to the email local part. Edit requires username and at least one changed field. Blank edit fields preserve their current values; groups append without removing memberships. Quote fields containing commas. Upload replaces the current mode's editable rows. Invalid files show row errors and launch no work. Limits: 1 MB, 500 users, and 200 explicit devices. Legacy two-column full_name/email add files also work without a header.
+
+Add creates missing accounts only, using system home defaults and `/bin/bash`. Password login is locked unless an initial password is supplied (minimum 12 characters, changed at first login). Edit never creates missing users. Full names, groups, and shells are remote account attributes; email is Fleet Manager metadata. Platform, account, and shell prerequisites are checked live. Pending health checks run automatically within the same reserved job, without a separate Scan or Verify step or node draining.
+
+The **Accounts** tab shows observed state per selected device. **Refresh accounts** discovers existing users. Select users and choose **Edit selected users** to populate the edit rows.

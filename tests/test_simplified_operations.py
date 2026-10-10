@@ -67,9 +67,11 @@ def test_accepted_retry_survives_device_recovery_and_does_not_relaunch(db):
         asyncio.run(run_operation('system.packages.preview', OperationRunRequest(device_ids=[host.id], request_key=job.request_key), db, 'test'))
 
 
-def test_no_public_account_mutations_remain():
+def test_account_panel_has_explicit_bulk_endpoints():
     from backend.main import app
-    assert not any(path.startswith('/api/v2/users') for path in app.openapi()['paths'])
+    assert '/api/v2/users/bulk-add' in app.openapi()['paths']
+    assert '/api/v2/users/bulk-update' in app.openapi()['paths']
+    assert '/api/v2/users/csv-preview' in app.openapi()['paths']
 
 
 def test_errors_are_attached_to_the_failed_device():

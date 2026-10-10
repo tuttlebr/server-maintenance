@@ -1,101 +1,38 @@
 <template>
-  <div
-    class="upload-zone"
-    :class="{ dragover }"
-    @dragover.prevent="dragover = true"
-    @dragleave="dragover = false"
-    @drop.prevent="onDrop"
-    @click="$refs.fileInput.click()"
-  >
-    <i class="fas fa-cloud-upload-alt"></i>
-    <p>Drag and drop a CSV file here, or click to browse</p>
-    <p style="font-size: 12px; margin-top: 4px">Columns: full_name, email</p>
-    <input
-      ref="fileInput"
-      type="file"
-      accept=".csv"
-      style="display: none"
-      @change="onFileSelect"
-    />
-  </div>
-
-  <div v-if="parsedUsers.length" class="csv-preview">
-    <h4 style="margin: var(--space-sm) 0 var(--space-xs)">
-      Preview ({{ parsedUsers.length }} users)
-    </h4>
-    <div class="table-wrapper">
-      <table>
-        <thead>
-          <tr>
-            <th>Full Name</th>
-            <th>Email</th>
-            <th>Username</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(u, i) in parsedUsers" :key="i">
-            <td>{{ u.full_name }}</td>
-            <td>{{ u.email }}</td>
-            <td>{{ u.email.split('@')[0] }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+  <div class="csv-import">
+    <label :for="`csv-${mode}`" class="form-label">Upload CSV</label>
+    <div class="file-controls"><input :id="`csv-${mode}`" type="file" accept=".csv,text/csv" :disabled="disabled || importing" @change="selectFile" /><a :href="templateUrl" :download="`users-${mode}-template.csv`">Download template</a></div>
+    <p class="muted">{{ mode === 'add' ? 'Columns: username, full_name, email, groups, shell. Username can be derived from email.' : 'Use username and any fields to change: full_name, email, groups, shell. Blank fields stay unchanged.' }} Upload replaces the current rows. Quote groups containing commas. Up to 500 users / 1 MB.</p>
+    <p v-if="importing" role="status">Validating CSV…</p>
+    <p v-else-if="imported" role="status">{{ imported }} users imported into the editable rows below. Review them before applying.</p>
+    <p v-if="error" role="alert" class="callout callout-danger csv-error">{{ error }}</p>
   </div>
 </template>
-
 <script setup>
-import { ref } from "vue";
-
-const emit = defineEmits(["parsed"]);
-
-const dragover = ref(false);
-const parsedUsers = ref([]);
-
-function parseCSV(text) {
-  const lines = text.trim().split("\n");
-  if (lines.length === 0) return [];
-
-  const firstLine = lines[0].toLowerCase();
-  const hasHeader =
-    firstLine.includes("name") || firstLine.includes("email");
-  const dataLines = hasHeader ? lines.slice(1) : lines;
-
-  const users = [];
-  for (const line of dataLines) {
-    const parts = line.split(",").map((s) => s.trim().replace(/^"|"$/g, ""));
-    if (parts.length >= 2 && parts[0] && parts[1]) {
-      users.push({ full_name: parts[0], email: parts[1] });
-    }
-  }
-  return users;
-}
-
-function handleFile(file) {
-  if (!file || !file.name.endsWith(".csv")) return;
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const users = parseCSV(e.target.result);
-    parsedUsers.value = users;
-    emit("parsed", users);
-  };
-  reader.readAsText(file);
-}
-
-function onDrop(e) {
-  dragover.value = false;
-  const file = e.dataTransfer.files[0];
-  handleFile(file);
-}
-
-function onFileSelect(e) {
-  const file = e.target.files[0];
-  handleFile(file);
+import {computed, ref, onUnmounted} from 'vue';
+import {previewUsersCsv} from '../api.js';
+import {csvTemplate} from '../utils/users.js';
+const props = defineProps({mode:{type:String,default:'add'},disabled:Boolean});
+const emit = defineEmits(['parsed','busy']);
+const error = ref(''), importing = ref(false), imported = ref(0);
+const templateUrl = computed(() => `data:text/csv;charset=utf-8,${encodeURIComponent(csvTemplate(props.mode))}`);
+let disposed = false;
+onUnmounted(() => { disposed = true; });
+async function selectFile(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file || props.disabled || importing.value) return;
+  error.value = ''; imported.value = 0;
+  if (!/\.csv$/i.test(file.name)) { error.value = 'Choose a .csv file.'; return; }
+  if (file.size > 1024 * 1024) { error.value = 'CSV must be 1 MB or smaller.'; return; }
+  importing.value = true; emit('busy', true);
+  try {
+    const result = await previewUsersCsv(file, props.mode);
+    if (!disposed) { imported.value = result.users.length; emit('parsed', result.users); }
+  } catch(e) { if (!disposed) error.value = e.message; }
+  finally { if (!disposed) { importing.value = false; emit('busy', false); } }
 }
 </script>
-
 <style scoped>
-.csv-preview {
-  margin-top: var(--space-sm);
-}
+.csv-import { padding:16px; border:1px dashed var(--border-subtle); border-radius:6px; margin:16px 0; }.file-controls {display:flex;align-items:center;gap:12px;flex-wrap:wrap}.file-controls input{max-width:100%;font:inherit;font-size:13px}.file-controls a{font-size:13px}.muted{color:var(--text-secondary);font-size:12px;line-height:1.6;margin-top:8px}.csv-error{white-space:pre-wrap;margin-top:12px}
 </style>

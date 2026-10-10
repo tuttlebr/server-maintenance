@@ -35,16 +35,16 @@ def workflow(tmp_path, monkeypatch):
             job = db.query(Job).filter_by(job_id=job_id).one()
             assert db.query(DeviceReservation).count() == 2
             calls.append((playbook, targets, job_id, job.phase))
-            if playbook in {'system_update.yml', 'docker_cleanup.yml'}:
+            if playbook in {'system_update.yml', 'docker_cleanup.yml', 'user_management.yml'}:
                 assert not any(host.recovery_required for host in db.query(Device).filter(Device.hostname.in_(targets)))
         if behavior.get('exception') and playbook == 'recovery_check.yml':
             raise RuntimeError('Injected health check interruption')
-        before_change = not any(call[0] in {'system_update.yml', 'docker_cleanup.yml', 'reboot.yml'} for call in calls)
+        before_change = not any(call[0] in {'system_update.yml', 'docker_cleanup.yml', 'reboot.yml', 'user_management.yml'} for call in calls)
         fail = (playbook == 'recovery_check.yml' and behavior.get('health_failure')) or (
             playbook == 'host_facts.yml' and behavior.get('scan_failure') and before_change)
         missing_scan = playbook == 'host_facts.yml' and behavior.get('missing_scan') and before_change
         silent_scan = playbook == 'host_facts.yml' and behavior.get('silent_post_scan') and not before_change
-        no_action_recap = playbook in {'system_update.yml', 'docker_cleanup.yml', 'reboot.yml'} and behavior.get('no_action_recap')
+        no_action_recap = playbook in {'system_update.yml', 'docker_cleanup.yml', 'reboot.yml', 'user_management.yml'} and behavior.get('no_action_recap')
         if playbook == 'host_facts.yml' and not missing_scan:
             directory = tmp_path / 'scans' / job_id
             directory.mkdir(parents=True, exist_ok=True)
@@ -90,7 +90,7 @@ def workflow(tmp_path, monkeypatch):
     engine.dispose()
 
 
-@pytest.mark.parametrize('playbook', ['system_update.yml', 'docker_cleanup.yml'])
+@pytest.mark.parametrize('playbook', ['system_update.yml', 'docker_cleanup.yml', 'user_management.yml'])
 def test_automatic_check_continues_once_in_the_same_reserved_job(workflow, playbook):
     sessions, behavior, calls, run = workflow
     job_id = asyncio.run(run(playbook, retry=True))

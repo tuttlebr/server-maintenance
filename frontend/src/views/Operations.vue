@@ -31,6 +31,7 @@
             <button class="btn btn-primary" :disabled="!selectedIds.length || busy || loading || !!loadError || !!missingTargets.length" @click="choose(action.id)">{{ starting === action.id ? 'Starting…' : action.cta }}</button>
           </article>
         </div>
+        <router-link :to="{path:'/access', query:{devices:selectedIds.join(',')}}" class="users-link">Manage users <span>Add or edit accounts in bulk, including CSV imports</span><i class="fas fa-arrow-right" aria-hidden="true"></i></router-link>
         <p v-if="!selectedIds.length" class="selection-prompt">Select devices to get started.</p>
         <div v-if="selectionBlockers.length" class="card blocked-panel" role="status">
           <h3>{{ focusedLabel }} needs attention</h3><p>Every selected device must support this action. Update your selection or resolve these issues.</p>
@@ -215,6 +216,7 @@ onUnmounted(() => { disposed = true; generation++; selectionGeneration++; clearT
 </script>
 
 <style scoped>
+.users-link { display:flex; align-items:center; gap:12px; padding:16px; margin-top:14px; border:1px solid var(--border-subtle); border-radius:6px; font-weight:600; }.users-link span { flex:1; color:var(--text-secondary); font-size:13px; font-weight:400; }@media(max-width:600px){.users-link{flex-wrap:wrap}.users-link span{flex-basis:100%}}
 .page-subtitle { margin:6px 0 0; color:var(--text-secondary); }
 .workspace { display:grid; grid-template-columns:290px minmax(0,1fr); gap:24px; align-items:start; }
 .devices-panel { position:sticky; top:86px; overflow:hidden; }

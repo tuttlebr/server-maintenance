@@ -31,7 +31,7 @@ import { clearToken } from '../api.js';
 import { useDevicesStore } from '../stores/devices.js';
 import { relativeTime, formatLongTime } from '../utils/time.js';
 import { formatTargetList, operationLabel } from '../utils/devices.js';
-const navigation = [{ to: '/operations', label: 'Operations' }, { to: '/devices', label: 'Devices' }, { to: '/activity', label: 'Activity' }, { to: '/overview', label: 'Overview' }];
+const navigation = [{ to: '/operations', label: 'Operations' }, { to: '/devices', label: 'Devices' }, { to: '/access', label: 'Users' }, { to: '/activity', label: 'Activity' }, { to: '/overview', label: 'Overview' }];
 const router = useRouter(), route = useRoute(), store = useDevicesStore();
 const showJobs = ref(false), jobsContainer = ref(null), jobsTrigger = ref(null), management = ref(null);
 function logout() { clearToken(); router.push('/login'); }

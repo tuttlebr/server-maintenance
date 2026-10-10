@@ -365,7 +365,7 @@ class OperationEligibilityTests(unittest.TestCase):
     def tearDown(self):
         self.db.close()
 
-    def test_catalog_always_shows_only_three_actions_with_eligibility(self):
+    def test_catalog_always_shows_four_actions_with_eligibility(self):
         device = Device(
             hostname="reachy-lab",
             display_name="Reachy Lab",
@@ -381,7 +381,7 @@ class OperationEligibilityTests(unittest.TestCase):
         operation_ids = {operation.id for operation in list_operations(self.db, "admin")}
         self.assertEqual(
             operation_ids,
-            {"system.packages.preview", "system.update", "containers.cleanup"},
+            {"system.packages.preview", "system.update", "containers.cleanup", "system.reboot"},
         )
 
     def test_capability_check_blocks_linux_operation_on_robot(self):
@@ -411,7 +411,7 @@ class OperationEligibilityTests(unittest.TestCase):
         device.capabilities = [SYSTEM_REBOOT, REACHY_APP_RESET]
         self.db.add(device)
         self.db.commit()
-        for operation in ("system.reboot", "reachy.apps.reset", "services.manage", "firmware.update"):
+        for operation in ("reachy.apps.reset", "services.manage", "firmware.update"):
             with self.subTest(operation=operation), patch("backend.routers.operations.run_playbook", AsyncMock()) as runner:
                 with self.assertRaisesRegex(HTTPException, "Operation not found"):
                     asyncio.run(run_operation(operation, OperationRunRequest(device_ids=[device.id], confirmation=device.name), self.db, "admin"))

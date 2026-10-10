@@ -5,6 +5,7 @@
   gather_facts: true
   vars:
     user_records: []
+    user_updates: []
     target_usernames: []
     user_groups: ""
     user_shell: ""
@@ -13,6 +14,7 @@
     - name: Normalize structured account records
       ansible.builtin.set_fact:
         fleet_user_records: "{{ user_records }}"
+        fleet_user_updates: "{{ user_updates }}"
       no_log: true
 
     - name: Accept legacy Full Name <email> CLI records
@@ -27,11 +29,17 @@
       when: user_records | length == 0
       no_log: true
 
+    - name: Normalize legacy shared account edits
+      ansible.builtin.set_fact:
+        fleet_user_updates: "{{ fleet_user_updates + [{'username': item, 'groups': user_groups, 'shell': user_shell}] }}"
+      loop: "{{ target_usernames }}"
+      when: user_updates | length == 0
+
     - name: Require a supported Linux platform
       ansible.builtin.assert:
         that:
           - ansible_facts.os_family in ['Debian', 'RedHat']
-          - (fleet_user_records | length > 0) or (target_usernames | length > 0)
+          - (fleet_user_records | length > 0) or (fleet_user_updates | length > 0)
         fail_msg: "Select explicit accounts on a Debian or Red Hat family device."
 
     - name: Validate account names
@@ -40,7 +48,7 @@
           - item is match('^[a-z_][a-z0-9_-]{0,31}$')
           - item not in ['root', ansible_user | default(''), admin_username | default('')]
         fail_msg: "Invalid or protected account {{ item }}"
-      loop: "{{ (fleet_user_records | map(attribute='username') | list) + target_usernames }}"
+      loop: "{{ (fleet_user_records | map(attribute='username') | list) + (fleet_user_updates | map(attribute='username') | list) }}"
 
     - name: Read existing accounts
       ansible.builtin.getent:
@@ -48,43 +56,63 @@
 
     - name: Require update targets to exist
       ansible.builtin.assert:
-        that: item in ansible_facts.getent_passwd
-      loop: "{{ target_usernames }}"
-
-    - name: Validate supplementary groups
-      ansible.builtin.assert:
-        that: item is match('^[a-z_][a-z0-9_-]{0,31}$')
-      loop: "{{ user_groups.split(',') if user_groups else [] }}"
-
-    - name: Verify requested shell is allowed and installed
-      ansible.builtin.command:
-        argv: [test, -x, "{{ user_shell }}"]
-      changed_when: false
-      when: user_shell | length > 0
-
-    - name: Ensure requested supplementary groups exist
-      ansible.builtin.group:
-        name: "{{ item }}"
-        state: present
-      loop: "{{ user_groups.split(',') if user_groups else [] }}"
-
-    - name: Update existing accounts without replacing their other groups
-      ansible.builtin.user:
-        name: "{{ item }}"
-        groups: "{{ user_groups if user_groups else omit }}"
-        append: true
-        shell: "{{ user_shell if user_shell else omit }}"
-      loop: "{{ target_usernames }}"
+        that: item.username in ansible_facts.getent_passwd
+        fail_msg: "Account {{ item.username }} does not exist on {{ inventory_hostname }}. Use Add users first."
+      loop: "{{ fleet_user_updates }}"
+      loop_control:
+        label: "{{ item.username }}"
 
     - name: Identify new accounts
       ansible.builtin.set_fact:
         fleet_new_accounts: "{{ fleet_user_records | rejectattr('username', 'in', ansible_facts.getent_passwd.keys()) | list }}"
 
+    - name: Collect requested groups and shells
+      ansible.builtin.set_fact:
+        fleet_requested_groups: "{{ ((fleet_new_accounts + fleet_user_updates) | map(attribute='groups', default='') | join(',')).split(',') | reject('equalto', '') | unique | list }}"
+        fleet_requested_shells: "{{ (fleet_new_accounts + fleet_user_updates) | map(attribute='shell', default='') | reject('equalto', '') | unique | list }}"
+
+    - name: Validate supplementary groups
+      ansible.builtin.assert:
+        that: item is match('^[a-z_][a-z0-9_-]{0,31}$')
+      loop: "{{ fleet_requested_groups }}"
+
+    - name: Verify requested shell is allowed and installed
+      ansible.builtin.command:
+        argv: [test, -x, "{{ item }}"]
+      changed_when: false
+      loop: "{{ fleet_requested_shells }}"
+
+    - name: Record that account changes are about to begin
+      ansible.builtin.include_tasks: tasks/save_operation_report.yml
+      vars:
+        fleet_report_name: execution
+        fleet_report: "{{ {'schema_version': 1, 'report_type': 'execution', 'hostname': inventory_hostname, 'mutation_started': true} }}"
+
+    - name: Ensure requested supplementary groups exist
+      ansible.builtin.group:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ fleet_requested_groups }}"
+
+    - name: Update existing accounts without replacing their other groups
+      ansible.builtin.user:
+        name: "{{ item.username }}"
+        comment: "{{ item.full_name | default(omit, true) }}"
+        groups: "{{ item.groups | default(omit, true) }}"
+        append: true
+        shell: "{{ item.shell | default(omit, true) }}"
+        state: present
+      loop: "{{ fleet_user_updates }}"
+      loop_control:
+        label: "{{ item.username }}"
+
     - name: Create new accounts using system home defaults
       ansible.builtin.user:
         name: "{{ item.username }}"
         comment: "{{ item.full_name }}"
-        shell: /bin/bash
+        shell: "{{ item.shell | default('/bin/bash', true) }}"
+        groups: "{{ item.groups | default(omit, true) }}"
+        append: true
         create_home: true
         state: present
         password: "{{ (default_password | password_hash('sha512')) if default_password | default('') else omit }}"
@@ -104,4 +132,4 @@
     - name: Observe resulting accounts
       ansible.builtin.include_tasks: tasks/account_report.yml
       vars:
-        fleet_account_names: "{{ (fleet_user_records | map(attribute='username') | list) + target_usernames }}"
+        fleet_account_names: "{{ (fleet_user_records | map(attribute='username') | list) + (fleet_user_updates | map(attribute='username') | list) }}"
