@@ -11,7 +11,7 @@
           <option value="failed">Failed</option>
           <option value="running">Running</option>
           <option value="pending">Pending</option>
-          <option value="cancelled">Cancelled</option><option value="cancelling">Cancelling</option><option value="recovery_required">Recovery required</option>
+          <option value="cancelled">Cancelled</option><option value="cancelling">Cancelling</option><option value="recovery_required">Health check pending</option>
         </select>
         <button class="btn btn-ghost btn-sm" aria-label="Refresh job list" @click="load">
           <i class="fas fa-sync-alt" aria-hidden="true"></i> Refresh
@@ -63,21 +63,23 @@
                 <div class="job-detail">
                   <p v-if="expandedJob?.error_summary" role="status" class="callout callout-danger">{{ expandedJob.error_summary }}</p>
                   <p v-if="expandedJob?.status === 'partial'" class="callout callout-warn">Some, but not all, devices completed successfully. Review the per-device outcomes and log below.</p>
-                  <p v-if="expandedJob?.status === 'recovery_required'" class="callout callout-warn">Remote state needs verification. Review the log and Kubernetes recovery details, repair the host if needed, then run Verify recovery in <router-link :to="{ path: '/operations', query: { operation: 'system.recover', targets: expandedJob.target_devices, reason: 'recovery' } }">Operations with these targets</router-link>. Resume Kubernetes scheduling separately when ready.</p>
+                  <p v-if="expandedJob?.status === 'recovery_required'" class="callout callout-warn">This change did not finish with a confirmed result. The next install or cleanup checks device health automatically and continues if the check passes. Review device errors below and return to <router-link :to="{ path: '/operations', query: { targets: expandedJob.target_devices } }">Operations</router-link> when ready.</p>
                   <p v-if="expandedJob && ['pending', 'running', 'cancelling'].includes(expandedJob.status)">Phase: {{ expandedJob.phase?.replaceAll('_', ' ') }}. <button v-if="canCancel(expandedJob)" class="btn btn-ghost btn-sm" :disabled="cancelling" @click="requestCancel(expandedJob)">Cancel {{ expandedJob.status === 'pending' ? 'queued job' : 'inspection' }}</button><span v-else>Running changes finish under supervision; they cannot be safely cancelled.</span></p>
-                  <ul v-if="expandedJob?.device_results?.length" class="outcomes" aria-label="Per-device outcomes"><li v-for="result in expandedJob.device_results" :key="result.hostname"><strong>{{ result.hostname }}</strong>: {{ result.status.replaceAll('_', ' ') }}</li></ul>
+                  <ul v-if="expandedJob?.device_results?.length" class="outcomes" aria-label="Per-device outcomes"><li v-for="result in expandedJob.device_results" :key="result.hostname"><strong>{{ result.hostname }}</strong>: {{ result.status.replaceAll('_', ' ') }}<p v-if="result.recovery_resolution">{{ result.recovery_resolution }}</p></li></ul>
                   <router-link v-if="expandedJob?.playbook === 'package_preview.yml' && expandedJob.status === 'success'" :to="`/operations?preview=${expandedJob.job_id}`" class="btn btn-primary btn-sm">Review and apply this preview</router-link>
                   <div v-if="job.recap" class="job-recap-expanded"><pre>{{ job.recap }}</pre></div>
-                  <section v-if="expandedJob?.result_artifacts?.length" class="result-grid" aria-label="Structured operation results">
-                    <article v-for="result in expandedJob.result_artifacts" :key="`${result.report_type}-${result.hostname}`" class="result-card">
+                  <section v-if="expandedJob?.result_artifacts?.some(result => result.report_type !== 'execution')" class="result-grid" aria-label="Structured operation results">
+                    <article v-for="result in expandedJob.result_artifacts.filter(item => item.report_type !== 'execution')" :key="`${result.report_type}-${result.hostname}`" class="result-card">
                       <div class="result-heading">
                         <span>{{ resultTitle(result.report_type) }}</span>
                         <strong>{{ result.hostname }}</strong>
                       </div>
-                      <template v-if="result.report_type === 'packages'"><p>{{ result.changes?.length || 0 }} transaction entries. Installation rechecks this plan; changed plans require a new preview.</p><pre class="structured-text">{{ result.changes?.join('\n') || 'No package updates proposed.' }}</pre></template>
+                      <template v-if="result.report_type === 'packages'"><PackageResults :reports="[result]" /></template>
+                      <template v-else-if="result.report_type === 'apt_install'"><p>{{ result.package_count }} packages installed. {{ result.reboot_required ? 'Reboot required; schedule it separately.' : 'No reboot required.' }}</p></template>
+                      <template v-else-if="result.report_type === 'cleanup'"><p>{{ result.summary }}</p><details v-for="step in result.steps" :key="step.label"><summary>{{ step.label }} · {{ step.status }}</summary><pre class="structured-text">{{ step.output || 'Nothing to remove.' }}</pre></details></template>
                       <template v-else-if="result.report_type === 'kubernetes'"><dl><dt>Phase</dt><dd>{{ result.phase }}</dd><dt>Node</dt><dd>{{ result.node }}</dd><dt>Context</dt><dd>{{ result.context }}</dd><dt>Originally cordoned</dt><dd>{{ result.originally_unschedulable ? 'Yes' : 'No' }}</dd></dl></template>
                       <template v-else-if="result.report_type === 'services'"><p>{{ result.action === 'status' ? 'Observed services' : `${result.action}: ${result.service}` }}</p><details :open="result.action !== 'status'"><summary>Service states</summary><div class="service-results"><table><thead><tr><th>Unit</th><th>State</th><th>Startup</th></tr></thead><tbody><tr v-for="unit in Object.values(result.services || {}).sort((a,b) => a.name.localeCompare(b.name))" :key="unit.name"><td>{{ unit.name }}</td><td>{{ unit.state }}</td><td>{{ unit.status }}</td></tr></tbody></table></div></details></template>
-                      <template v-else-if="result.report_type === 'accounts'"><p>{{ result.accounts?.length || 0 }} account observations. <router-link to="/access">Review per-device privileges in Access</router-link>.</p><ul><li v-for="account in result.accounts" :key="account.username">{{ account.username }}: {{ account.present ? 'present' : 'absent' }}</li></ul></template>
+                      <template v-else-if="result.report_type === 'accounts'"><p>{{ result.accounts?.length || 0 }} historical account observations.</p><ul><li v-for="account in result.accounts" :key="account.username">{{ account.username }}: {{ account.present ? 'present' : 'absent' }}</li></ul></template>
                       <template v-else-if="result.report_type === 'assessment'">
                         <div class="result-metrics">
                           <span class="metric-good"><strong>{{ result.summary?.pass_count || 0 }}</strong> passed</span>
@@ -169,6 +171,7 @@
 </template>
 
 <script setup>
+import PackageResults from "../components/PackageResults.vue";
 import { ref, watch, onMounted, onUnmounted, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AnsiToHtml from "ansi-to-html";
@@ -369,7 +372,7 @@ function formatTime(dt) {
 }
 
 function resultTitle(type) {
-  return ({ assessment: "Maintenance assessment", driver: "Driver update", gpu: "GPU usage", storage: "Storage analysis", packages: "Package preview", services: "System services", accounts: "Account state", kubernetes: "Kubernetes recovery" })[type] || "Result";
+  return ({ assessment: "Maintenance assessment", driver: "Driver update", gpu: "GPU usage", storage: "Storage analysis", packages: "Apt updates", apt_install: "Apt installation", cleanup: "Container cache", reboot: "Node reboot", services: "System services", accounts: "Account state", kubernetes: "Kubernetes recovery" })[type] || "Result";
 }
 
 function storagePressure(result) {

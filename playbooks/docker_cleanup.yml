@@ -1,87 +1,31 @@
 ---
-- name: Docker Cleanup
+- name: Clear Docker and containerd cache
   hosts: managed_hosts
   become: true
-  gather_facts: false
+  gather_facts: true
   tasks:
-    - name: Check if Docker CLI is installed
-      command: which docker
-      register: docker_cli
-      failed_when: false
-      changed_when: false
+    - name: Record cleanup start
+      ansible.builtin.include_tasks: tasks/save_operation_report.yml
+      vars:
+        fleet_report_name: execution
+        fleet_report: "{{ {'schema_version': 1, 'report_type': 'execution', 'hostname': inventory_hostname, 'mutation_started': true} }}"
 
-    - name: Check whether Docker is running
-      ansible.builtin.command:
-        argv:
-          - systemctl
-          - is-active
-          - docker
-      register: docker_service
+    - name: Clear unused images and build cache across available runtimes
+      ansible.builtin.script:
+        cmd: files/container_cleanup.py
+        executable: "{{ ansible_facts.python.executable | default('/usr/bin/python3') }}"
+      register: fleet_cleanup
+      changed_when: true
       failed_when: false
-      changed_when: false
-      when: docker_cli.rc == 0
 
-    - name: Check if nerdctl is installed
-      command: which nerdctl
-      register: nerdctl_cli
-      failed_when: false
-      changed_when: false
+    - name: Save runtime cleanup results
+      ansible.builtin.include_tasks: tasks/save_operation_report.yml
+      vars:
+        fleet_report_name: cleanup
+        fleet_report: "{{ (fleet_cleanup.stdout | from_json) | combine({'schema_version': 1, 'report_type': 'cleanup', 'hostname': inventory_hostname}) }}"
+      when: fleet_cleanup.stdout | default('') | trim is match('^\\{')
 
-    - name: Check whether containerd is running
-      ansible.builtin.command:
-        argv:
-          - systemctl
-          - is-active
-          - containerd
-      register: containerd_service
-      failed_when: false
-      changed_when: false
-      when:
-        - nerdctl_cli.rc | default(1) == 0
-
-    - name: Require at least one available container runtime
+    - name: Require completed runtime cleanup
       ansible.builtin.assert:
-        that: (docker_cli.rc == 0 and docker_service.rc | default(1) == 0) or (nerdctl_cli.rc == 0 and containerd_service.rc | default(1) == 0)
-        fail_msg: "No supported container runtime is available for cleanup."
-
-    - name: Prune unused Docker images
-      command: docker image prune -a -f
-      register: docker_image_prune
-      changed_when: "'Total reclaimed space: 0B' not in docker_image_prune.stdout"
-      when:
-        - docker_cli.rc == 0
-        - docker_service.rc | default(1) == 0
-
-    - name: Prune Docker build cache
-      command: docker builder prune -f
-      register: docker_builder_prune
-      changed_when: "'Total reclaimed space: 0B' not in docker_builder_prune.stdout"
-      when:
-        - docker_cli.rc == 0
-        - docker_service.rc | default(1) == 0
-
-    - name: Prune unused Docker networks
-      command: docker network prune -f
-      register: docker_network_prune
-      changed_when: "'Deleted Networks:' in docker_network_prune.stdout"
-      when:
-        - docker_cli.rc == 0
-        - docker_service.rc | default(1) == 0
-
-    - name: Prune unused containerd images in k8s namespace
-      command: nerdctl --namespace k8s.io image prune -f
-      register: containerd_image_prune
-      changed_when: "'Total reclaimed space: 0B' not in containerd_image_prune.stdout"
-      when:
-        - nerdctl_cli.rc | default(1) == 0
-        - containerd_service.rc | default(1) == 0
-
-    - name: Report cleanup summary
-      debug:
-        msg:
-          - "Docker installed: {{ docker_cli.rc == 0 }}"
-          - "Docker running: {{ docker_service.rc | default(1) == 0 }}"
-          - "Docker images: {{ docker_image_prune.stdout_lines | default(['skipped']) }}"
-          - "Docker build cache: {{ docker_builder_prune.stdout_lines | default(['skipped']) }}"
-          - "Docker networks: {{ docker_network_prune.stdout_lines | default(['skipped']) }}"
-          - "containerd images: {{ containerd_image_prune.stdout_lines | default(['skipped']) }}"
+        that: fleet_cleanup.rc == 0
+        fail_msg: "Cache cleanup is incomplete. {{ fleet_cleanup.stdout | default(fleet_cleanup.msg | default('No runtime result returned')) }}"

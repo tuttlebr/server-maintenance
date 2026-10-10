@@ -7,17 +7,17 @@ import Dashboard from "./views/Dashboard.vue";
 const Devices = () => import("./views/Devices.vue");
 const DeviceDetail = () => import("./views/DeviceDetail.vue");
 const Operations = () => import("./views/Operations.vue");
-const UserManagement = () => import("./views/UserManagement.vue");
 const JobHistory = () => import("./views/JobHistory.vue");
 const ContextManagement = () => import("./views/ContextManagement.vue");
 
 const routes = [
   { path: "/login", component: Login, meta: { public: true } },
-  { path: "/", component: Dashboard },
+  { path: "/", redirect: "/operations" },
+  { path: "/overview", component: Dashboard },
   { path: "/devices", component: Devices },
   { path: "/devices/:id", component: DeviceDetail, props: true },
   { path: "/operations", component: Operations },
-  { path: "/access", component: UserManagement },
+  { path: "/access", redirect: "/operations" },
   { path: "/activity", component: JobHistory },
   { path: "/context", component: ContextManagement },
 ];

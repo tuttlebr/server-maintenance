@@ -4,7 +4,7 @@
       <div class="login-logo">
         <div class="login-mark" aria-hidden="true"><i class="fas fa-layer-group"></i></div>
         <h1>Fleet Manager</h1>
-        <p class="login-subtitle">One place for compute, edge, and robotics operations</p>
+        <p class="login-subtitle">Apt updates and container cache, in one place</p>
       </div>
 
       <form @submit.prevent="handleLogin">

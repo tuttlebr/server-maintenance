@@ -88,7 +88,8 @@ def reconcile_interrupted_jobs(db):
     now = datetime.now(timezone.utc)
     for job in db.query(Job).filter(Job.status.in_(ACTIVE_STATUSES)).all():
         started = job.status != "pending"
-        recovery = started and job.execution_kind != "read_only"
+        checking_health = job.phase in {"checking_health", "checking_facts"}
+        recovery = started and job.execution_kind != "read_only" and not checking_health
         job.status = "recovery_required" if recovery else ("failed" if started else "cancelled")
         job.phase = "interrupted"
         job.finished_at = now
@@ -96,8 +97,9 @@ def reconcile_interrupted_jobs(db):
         if log_path.is_file():
             job.output_log = log_path.read_text()
         job.error_summary = (
-            "Executor stopped during this operation. Remote state is uncertain; inspect and verify recovery."
-            if started else "Executor stopped before this queued job began. No automatic replay was attempted."
+            "Executor stopped during automatic health checks. The requested action did not start; try again."
+            if checking_health else ("Executor stopped during this operation. Host health will be checked automatically before the next install or cleanup."
+            if started else "Executor stopped before this queued job began. No automatic replay was attempted.")
         )
         targets = (job.target_hosts or "").split(",")
         previous = {item["hostname"]: item for item in job.device_results if "hostname" in item}
@@ -117,6 +119,19 @@ def reconcile_interrupted_jobs(db):
 def parse_host_outcomes(output, targets):
     """Only a complete, successful host recap proves execution on that host."""
     recaps = {}
+    failures = {}
+    for match in re.finditer(r"fatal: \[([^\] ]+)(?:[^\]]*)\]: (?:FAILED!|UNREACHABLE!) =>\s*", output):
+        try:
+            payload, _ = json.JSONDecoder().raw_decode(output[match.end():])
+            detail = payload.get("msg") or payload.get("stderr") or "Operation failed"
+            if not isinstance(detail, str):
+                detail = json.dumps(detail)
+            # SSH verbosity should not bury the useful connection failure.
+            if "Failed to connect" in detail:
+                detail = "SSH connection failed: " + next((line for line in reversed(detail.splitlines()) if line.strip()), detail)
+            failures[match.group(1)] = detail[:2000]
+        except (ValueError, TypeError):
+            continue
     for line in output.splitlines():
         match = re.match(r"^(\S+)\s*:\s+ok=(\d+)\s+changed=(\d+)\s+unreachable=(\d+)\s+failed=(\d+)", line)
         if match:
@@ -124,4 +139,5 @@ def parse_host_outcomes(output, targets):
             values = dict(ok=int(ok), changed=int(changed), unreachable=int(unreachable), failed=int(failed))
             status = "unreachable" if values["unreachable"] else "failed" if values["failed"] else "success" if values["ok"] else "not_checked"
             recaps[name] = {"hostname": name, "status": status, **values}
-    return [recaps.get(name, {"hostname": name, "status": "not_checked"}) for name in targets]
+    return [{**recaps.get(name, {"hostname": name, "status": "not_checked"}),
+             **({"detail": failures[name]} if name in failures else {})} for name in targets]

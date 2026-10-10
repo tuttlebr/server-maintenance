@@ -76,7 +76,6 @@ m.exit_json(changed=True)
 @pytest.mark.skipif(not ANSIBLE, reason='ansible-playbook is required for transaction parsing tests')
 @pytest.mark.parametrize('family,plan,expected', [
     ('Debian',['Inst openssl [3.0.1] (3.0.2 Ubuntu [amd64])', 'Conf openssl (3.0.2 Ubuntu [amd64])','Inst linux-image-generic (6.8.0 Ubuntu [amd64])'],['linux-image-generic=6.8.0','openssl=3.0.2']),
-    ('RedHat',['Installed: openssl-1:3.0.2-1.el9.x86_64','Removed: openssl-1:3.0.1-1.el9.x86_64'],['openssl-1:3.0.2-1.el9.x86_64']),
     ('Debian',[],[]),
 ])
 def test_preview_pins_exact_versions(tmp_path, family, plan, expected):

@@ -365,7 +365,7 @@ class OperationEligibilityTests(unittest.TestCase):
     def tearDown(self):
         self.db.close()
 
-    def test_catalog_only_shows_operations_supported_by_the_fleet(self):
+    def test_catalog_always_shows_only_three_actions_with_eligibility(self):
         device = Device(
             hostname="reachy-lab",
             display_name="Reachy Lab",
@@ -381,13 +381,7 @@ class OperationEligibilityTests(unittest.TestCase):
         operation_ids = {operation.id for operation in list_operations(self.db, "admin")}
         self.assertEqual(
             operation_ids,
-            {
-                REACHY_HEALTH,
-                "reachy.recover",
-                REACHY_LOGS_READ,
-                REACHY_DAEMON_RESTART,
-                REACHY_SOFTWARE_UPDATE,
-            },
+            {"system.packages.preview", "system.update", "containers.cleanup"},
         )
 
     def test_capability_check_blocks_linux_operation_on_robot(self):
@@ -405,67 +399,23 @@ class OperationEligibilityTests(unittest.TestCase):
         with self.assertRaisesRegex(HTTPException, "Required capability"):
             asyncio.run(
                 run_operation(
-                    "system.reboot",
+                    "system.update",
                     OperationRunRequest(device_ids=[device.id], confirmation=device.name),
                     self.db,
                     "admin",
                 )
             )
 
-    def test_visible_reboot_action_forces_the_selected_reboot(self):
-        from datetime import datetime, timezone
-        device = Device(hostname="compute-01", transport="ssh", kind="server", maintenance_mode="standalone", os_family="Debian", facts_stale=False, discovered_at=datetime.now(timezone.utc))
-        device.capabilities = [SYSTEM_REBOOT]
+    def test_retired_operations_cannot_be_dispatched(self):
+        device = Device(hostname="compute-01", transport="ssh")
+        device.capabilities = [SYSTEM_REBOOT, REACHY_APP_RESET]
         self.db.add(device)
         self.db.commit()
-
-        runner = AsyncMock(return_value="job-1")
-        with patch("backend.routers.operations.run_playbook", runner):
-            result = asyncio.run(
-                run_operation(
-                    "system.reboot",
-                    OperationRunRequest(device_ids=[device.id], confirmation=device.name),
-                    self.db,
-                    "admin",
-                )
-            )
-
-        self.assertEqual(result["job_id"], "job-1")
-        self.assertEqual(runner.await_args.kwargs["extra_vars"], {"force_reboot": True})
-
-    def test_configured_reachy_exposes_and_runs_app_reset(self):
-        device = Device(
-            hostname="reachy-lab",
-            endpoint="reachy-mini.local",
-            transport="reachy_daemon",
-            kind="robot",
-            machine_type="unknown",
-            ansible_user="pollen",
-        )
-        device.capabilities = [
-            *initial_profile("reachy_daemon")["capabilities"],
-            REACHY_APP_RESET,
-        ]
-        self.db.add(device)
-        self.db.commit()
-
-        operation_ids = {operation.id for operation in list_operations(self.db, "admin")}
-        self.assertIn(REACHY_APP_RESET, operation_ids)
-
-        runner = AsyncMock(return_value="job-reset")
-        with patch("backend.routers.operations.run_playbook", runner):
-            result = asyncio.run(
-                run_operation(
-                    REACHY_APP_RESET,
-                    OperationRunRequest(device_ids=[device.id], confirmation=device.name),
-                    self.db,
-                    "admin",
-                )
-            )
-
-        self.assertEqual(result["job_id"], "job-reset")
-        self.assertEqual(runner.await_args.kwargs["playbook"], "reachy_app_reset.yml")
-        self.assertEqual(runner.await_args.kwargs["hosts"], ["reachy-lab"])
+        for operation in ("system.reboot", "reachy.apps.reset", "services.manage", "firmware.update"):
+            with self.subTest(operation=operation), patch("backend.routers.operations.run_playbook", AsyncMock()) as runner:
+                with self.assertRaisesRegex(HTTPException, "Operation not found"):
+                    asyncio.run(run_operation(operation, OperationRunRequest(device_ids=[device.id], confirmation=device.name), self.db, "admin"))
+                runner.assert_not_awaited()
 
     def test_reachy_ssh_setup_adds_reset_capability(self):
         device = Device(

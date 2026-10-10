@@ -7,10 +7,10 @@ test('recovery on device 200 outranks 199 storage alerts without losing any scop
   const fleet = Array.from({length: 200}, (_, i) => device(i + 1, i === 199 ? {recovery_required:true} : {disk_root_percent:86}));
   const groups = attentionGroups(fleet);
   assert.deepEqual(groups.map(group => [group.id, group.devices.length]), [['recovery',1],['storage',199]]);
-  assert.equal(groupRoute(groups[0]).query.operation, 'system.recover');
-  assert.equal(groupRoute(groups[0]).query.devices, '200');
+  assert.equal(groupRoute(groups[0]).path, '/devices');
+  assert.equal(groupRoute(groups[0]).query.reason, 'recovery');
   assert.equal(parseDeviceIds(groupRoute(groups[1]).query.devices).length, 199);
-  assert.equal(groupRoute(groups[1]).query.operation, 'storage.inspect');
+  assert.equal(groupRoute(groups[1]).query.operation, 'containers.cleanup');
 });
 test('overlapping reasons remain explicit; storage ranks by pressure, not name', () => {
   const fleet = [device(1,{disk_root_percent:85}),device(2,{disk_root_percent:97,recovery_required:true,reboot_required:true,facts_stale:true})];

@@ -38,7 +38,7 @@ def test_every_ansible_operation_dispatches_only_selected_hosts(sessions, operat
         selected = db.query(Device).filter_by(hostname='selected').one()
         run = AsyncMock(return_value='review-job')
         with patch('backend.routers.operations.run_playbook', run), patch('backend.routers.operations._approved_package_plans', return_value={'selected':'a'*64}):
-            result = asyncio.run(run_operation(operation.id, OperationRunRequest(device_ids=[selected.id], confirmation='selected', service_name='nginx.service'), db, 'review'))
+            result = asyncio.run(run_operation(operation.id, OperationRunRequest(device_ids=[selected.id], confirmation='selected'), db, 'review'))
         assert result['job_id'] == 'review-job'
         assert run.await_args.kwargs['hosts'] == ['selected']
         assert run.await_args.kwargs['playbook'] == operation.playbook
@@ -48,7 +48,6 @@ def test_every_ansible_operation_dispatches_only_selected_hosts(sessions, operat
             'services.manage': {'service_action':'restarted','service_name':'nginx.service'},
             'kubernetes.drain.execute': {'drain_action':'drain'},
             'kubernetes.resume': {'drain_action':'resume'},
-            'system.reboot': {'force_reboot': True},
             'nvidia.driver.manage': {'upgrade_mode': 'standard'},
             'nvidia.fabric_manager.manage': {'fabric_action': 'status'},
             'nvidia.mig.manage': {'mig_action': 'status'},

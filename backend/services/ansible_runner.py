@@ -235,7 +235,7 @@ def _run_playbook_streaming(
     host_credentials: dict[str, dict[str, str]],
     job_id: str,
     timeout_seconds: int,
-    append: bool = False,
+    append: bool | str = False,
 ) -> int:
     """Run ansible-playbook, streaming output to a log file line by line. Returns rc."""
     ansible_dir = settings.ansible_dir
@@ -260,7 +260,7 @@ def _run_playbook_streaming(
     log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | (os.O_APPEND if append else os.O_TRUNC), 0o600)
     with os.fdopen(log_fd, "a" if append else "w") as log_file:
         if append:
-            log_file.write("\n--- Post-operation facts ---\n")
+            log_file.write(f"\n{append if isinstance(append, str) else '--- Post-operation facts ---'}\n")
             log_file.flush()
         payload = dict(extra_vars or {})
         payload[FLEET_JOB_ID_VAR] = job_id
@@ -624,6 +624,58 @@ def _reconcile_accounts(job_id, targets):
         reconcile_accounts(db, get_job_results(job_id), targets)
 
 
+async def _refresh_job_facts(job_id, targets, host_credentials):
+    """A fresh artifact and successful execution are both required evidence."""
+    log_path = get_log_path(job_id)
+    previous_output = log_path.read_text() if log_path.exists() else ""
+    for name in targets:
+        (settings.data_dir / "scans" / job_id / f"{name}.json").unlink(missing_ok=True)
+    rc = await _execute("host_facts.yml", targets, None, host_credentials,
+                        job_id, settings.ansible_job_timeout_seconds, True)
+    output = log_path.read_text() if log_path.exists() else ""
+    # Parse only this scan's new output, never earlier successful health checks.
+    scan_output = output[len(previous_output):].partition("--- Post-operation facts ---")[2]
+    outcomes = parse_host_outcomes(scan_output, targets)
+    unverified = {item["hostname"] for item in outcomes if item["status"] != "success"}
+    if rc and not unverified:
+        unverified.update(targets)
+    errors = _process_scan_results(targets, _extract_unreachable_hosts(scan_output), settings.data_dir / "scans" / job_id)
+    with SessionLocal() as db:
+        unverified.update(host.hostname for host in db.query(Host).filter(Host.hostname.in_(targets)).all() if host.facts_stale)
+    if unverified:
+        _invalidate_devices(unverified)
+    details = {item["hostname"]: item.get("detail") or "Device details could not be refreshed. Check SSH access and retry."
+               for item in outcomes if item["hostname"] in unverified}
+    return unverified, errors, details, output
+
+
+async def _verify_before_change(job_id, targets, host_credentials):
+    """Check previously interrupted hosts inside the already-reserved job."""
+    rc = await _execute("recovery_check.yml", targets, None, host_credentials,
+                        job_id, settings.ansible_job_timeout_seconds)
+    log_path = get_log_path(job_id)
+    output = log_path.read_text() if log_path.exists() else ""
+    outcomes = parse_host_outcomes(output, targets)
+    healthy = [item["hostname"] for item in outcomes if item["status"] == "success"]
+    # A process failure with no failed recap cannot count as verified health.
+    if rc == 124 or (rc and len(healthy) == len(targets)):
+        healthy = []
+    unverified = set(targets) - set(healthy)
+    details = {item["hostname"]: item.get("detail") or "The host health check did not complete. Check device connectivity and retry."
+               for item in outcomes if item["hostname"] in unverified}
+    if healthy:
+        _update_job(job_id, phase="checking_facts")
+        scan_failed, _, scan_details, output = await _refresh_job_facts(job_id, healthy, host_credentials)
+        unverified.update(scan_failed)
+        details.update(scan_details)
+    with SessionLocal() as db:
+        for host in db.query(Host).filter(Host.hostname.in_(set(targets) - unverified)).all():
+            host.recovery_required = False
+            host.recovery_reason = None
+        db.commit()
+    return unverified, details, output
+
+
 async def run_playbook(
     db, playbook: str, hosts: list[str] | None = None, all_hosts: bool = False,
     extra_vars: dict | None = None, triggered_by: str = "admin",
@@ -652,33 +704,59 @@ async def run_playbook(
     daemon_targets = {host.hostname: (host.endpoint or host.hostname, host.daemon_port or 8000) for host in devices if host.transport == "reachy_daemon"}
     readonly = is_read_only(playbook, extra_vars)
     recovery = playbook == "recovery_check.yml" or (playbook == "host_drain.yml" and (extra_vars or {}).get("drain_action") == "resume")
+    automatic_recovery = playbook in {"system_update.yml", "docker_cleanup.yml"}
+    # An explicit reboot is available even when health checks cannot pass.
+    # Keep the existing recovery flag until host health is actually verified.
+    unconditional_reboot = playbook == "reboot.yml"
     job_id = str(uuid.uuid4())
     job = Job(job_id=job_id, playbook=playbook, target_hosts=",".join(targets),
               status="pending", phase="queued", execution_kind="read_only" if readonly else "mutation",
               triggered_by=triggered_by, extra_vars=redact_extra_vars(extra_vars or {}),
               request_key=request_key, request_fingerprint=fingerprint)
     try:
-        reserve_devices(db, job, devices, recovery=recovery)
+        reserve_devices(db, job, devices, recovery=recovery or automatic_recovery or unconditional_reboot)
     except ExecutionConflict as exc:
         raise PlaybookRequestError(str(exc), 409) from exc
 
     async def _run():
         log_path = get_log_path(job_id)
         started = False
+        checking_recovery = False
         try:
             async with job_semaphore():
                 if job_id in _CANCELLED_JOBS:
                     _update_job(job_id, status="cancelled", phase="cancelled", finished_at=datetime.now(timezone.utc))
                     return
                 started_at = datetime.now(timezone.utc)
+                with SessionLocal() as state_db:
+                    recovery_targets = [host.hostname for host in state_db.query(Host).filter(
+                        Host.hostname.in_(targets), Host.recovery_required.is_(True)).all()] if automatic_recovery else []
+                if recovery_targets:
+                    checking_recovery = True
+                    _update_job(job_id, status="running", phase="checking_health", started_at=started_at)
+                    unverified, details, output = await _verify_before_change(job_id, recovery_targets, host_credentials)
+                    if unverified:
+                        _update_job(job_id, status="failed", phase="health_check_failed", finished_at=datetime.now(timezone.utc),
+                                    duration_seconds=int((datetime.now(timezone.utc) - started_at).total_seconds()),
+                                    output_log=output, recap=_extract_recap(output),
+                                    error_summary="Automatic health check failed. The requested action did not start. Resolve the device issue below, then try again.",
+                                    outcomes_json=json.dumps([{"hostname": name,
+                                        "status": "verification_failed" if name in unverified else "not_started",
+                                        "detail": details.get(name, "The action did not start because another selected device failed its health check.")}
+                                        for name in targets]))
+                        return
+                    if job_id in _CANCELLED_JOBS:
+                        _update_job(job_id, status="cancelled", phase="cancelled", finished_at=datetime.now(timezone.utc), output_log=output)
+                        return
                 _update_job(job_id, status="running", phase="executing", started_at=started_at)
                 started = True
                 if not readonly:
                     _invalidate_devices(targets)
-                rc = await _execute(playbook, targets, extra_vars,
-                                              host_credentials, job_id, settings.ansible_job_timeout_seconds)
+                execution_args = (playbook, targets, extra_vars, host_credentials, job_id, settings.ansible_job_timeout_seconds)
+                rc = await _execute(*execution_args, "--- Requested operation ---") if checking_recovery else await _execute(*execution_args)
                 output = log_path.read_text() if log_path.exists() else ""
-                outcomes = parse_host_outcomes(output, targets)
+                action_output = output.partition("--- Requested operation ---")[2] if checking_recovery else output
+                outcomes = parse_host_outcomes(action_output, targets)
                 successful = [item["hostname"] for item in outcomes if item["status"] == "success"]
                 failed = [name for name in targets if name not in successful]
                 cancelled = job_id in _CANCELLED_JOBS
@@ -715,38 +793,34 @@ async def run_playbook(
                             errors.append(f"{name}: refresh daemon health after app reset")
                 elif (not readonly or recovery) and successful:
                     _update_job(job_id, phase="refreshing_facts")
-                    for name in successful:
-                        (settings.data_dir / "scans" / job_id / f"{name}.json").unlink(missing_ok=True)
-                    # Append the follow-up scan output without replacing the action log.
-                    scan_rc = await _execute("host_facts.yml", successful, None,
-                                                       host_credentials, job_id, settings.ansible_job_timeout_seconds, True)
-                    scan_output = log_path.read_text() if log_path.exists() else ""
-                    output = scan_output
-                    scan_output = scan_output.partition("--- Post-operation facts ---")[2]
-                    scan_outcomes = parse_host_outcomes(scan_output, successful)
-                    unverified = {item["hostname"] for item in scan_outcomes if item["status"] != "success"}
-                    # A process error with successful recaps still leaves the
-                    # verification incomplete (for example a callback failure).
-                    if scan_rc and not unverified:
-                        unverified.update(successful)
-                    errors.extend(_process_scan_results(successful, _extract_unreachable_hosts(scan_output), settings.data_dir / "scans" / job_id))
-                    with SessionLocal() as state_db:
-                        unverified.update(host.hostname for host in state_db.query(Host).filter(Host.hostname.in_(successful)).all() if host.facts_stale)
+                    unverified, scan_errors, scan_details, output = await _refresh_job_facts(job_id, successful, host_credentials)
+                    errors.extend(scan_errors)
                     if unverified:
-                        _invalidate_devices(unverified)
-                    if scan_rc or unverified:
-                        errors.append("Post-operation facts could not be fully verified. Scan and verify recovery before further changes.")
+                        errors.append("Device details could not be fully refreshed. The next install or cleanup will check host health automatically before making changes.")
                         for item in outcomes:
                             if item["hostname"] in unverified:
                                 item["status"] = "verification_failed"
+                                item["detail"] = scan_details[item["hostname"]]
                                 failed.append(item["hostname"])
                 # Successful execution also needs any required result/health
                 # verification before it counts toward the aggregate outcome.
                 for item in outcomes:
                     if item["hostname"] in failed and item["status"] == "success":
                         item["status"] = "verification_failed"
-                if not readonly and (failed or rc):
-                    _invalidate_devices(failed or targets, recovery_reason=f"Incomplete job {job_id} ({playbook})")
+                recovery_targets = failed or (targets if rc else [])
+                if playbook in {"system_update.yml", "docker_cleanup.yml", "reboot.yml"} and rc != 124:
+                    # A rejected plan or SSH failure before the mutation marker
+                    # is an ordinary failed attempt, not an uncertain change.
+                    reports = get_job_results(job_id)
+                    started_targets = {r["hostname"] for r in reports
+                                       if r["report_type"] == "execution" and r.get("mutation_started")}
+                    # A complete cleanup report can prove that discovery failed
+                    # before any prune command was invoked.
+                    started_targets -= {r["hostname"] for r in reports
+                                        if r["report_type"] == "cleanup" and r.get("mutation_started") is False}
+                    recovery_targets = [name for name in recovery_targets if name in started_targets or name in successful]
+                if not readonly and recovery_targets:
+                    _invalidate_devices(recovery_targets, recovery_reason=f"Incomplete job {job_id} ({playbook})")
                 if recovery:
                     with SessionLocal() as state_db:
                         verified = [item["hostname"] for item in outcomes if item["status"] == "success"]
@@ -757,7 +831,7 @@ async def run_playbook(
                         state_db.commit()
                 finished = datetime.now(timezone.utc)
                 status = completed_status(outcomes, has_errors=bool(rc or errors))
-                if not readonly and (failed or rc):
+                if not readonly and recovery_targets:
                     status = "recovery_required"
                 elif cancelled:
                     status = "cancelled"
@@ -770,8 +844,8 @@ async def run_playbook(
             if uncertain:
                 _invalidate_devices(targets, recovery_reason=f"Interrupted job {job_id} ({playbook})")
             logger.warning("Job %s interrupted: %s", job_id, exc, exc_info=True)
-            _update_job(job_id, status="recovery_required" if uncertain else ("cancelled" if not started or job_id in _CANCELLED_JOBS else "failed"), phase="interrupted",
-                        finished_at=datetime.now(timezone.utc), error_summary="Execution interrupted; inspect remote state and verify recovery." if uncertain else ("Executor stopped before this queued job began" if not started else str(exc)[:2000]),
+            _update_job(job_id, status="recovery_required" if uncertain else ("cancelled" if job_id in _CANCELLED_JOBS or (not started and not checking_recovery) else "failed"), phase="interrupted",
+                        finished_at=datetime.now(timezone.utc), error_summary="Execution interrupted. Host health will be checked automatically before the next install or cleanup." if uncertain else ("Automatic health checks were interrupted. The requested action did not start; try again." if checking_recovery else ("Executor stopped before this queued job began" if not started else str(exc)[:2000])),
                         output_log=log_path.read_text() if log_path.exists() else "")
         finally:
             # Wait for a thread-backed process to stop before releasing its devices.

@@ -422,7 +422,7 @@ async def scan_device(
     if device.transport == "reachy_daemon":
         from backend.routers.operations import _start_reachy_inspection
         return _start_reachy_inspection(db, [device], user)
-    job_id = await run_playbook(db=db, playbook="host_facts.yml", hosts=[device.hostname], triggered_by=user)
+    job_id = await run_playbook(db=db, playbook="recovery_check.yml" if device.recovery_required else "host_facts.yml", hosts=[device.hostname], triggered_by=user)
     return {"job_id": job_id, "detail": f"Scanning {device.name}"}
 
 

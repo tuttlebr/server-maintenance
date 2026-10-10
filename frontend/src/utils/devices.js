@@ -38,18 +38,18 @@ export function formatTargetList(value) {
 }
 
 export const OPERATION_LABELS = {
-  "package_preview.yml": "Preview package updates",
+  "package_preview.yml": "Check for apt updates",
   "service_control.yml": "System services",
-  "recovery_check.yml": "Verify recovery",
+  "recovery_check.yml": "Check device health",
   "access_inspect.yml": "Inspect accounts",
   "host_facts.yml": "Scan device",
   "maintenance_assessment.yml": "Assess maintenance readiness",
   "storage_analysis.yml": "Analyze storage",
   "gpu_usage.yml": "Inspect GPU usage",
-  "reboot.yml": "Reboot",
-  "system_update.yml": "Update system packages",
+  "reboot.yml": "Reboot nodes",
+  "system_update.yml": "Install apt updates",
   "host_bootstrap.yml": "Bootstrap device",
-  "docker_cleanup.yml": "Clean container cache",
+  "docker_cleanup.yml": "Clear container cache",
   "driver_upgrade.yml": "Update NVIDIA drivers",
   "fabric_manager.yml": "Check Fabric Manager",
   "mig_management.yml": "Check MIG mode",

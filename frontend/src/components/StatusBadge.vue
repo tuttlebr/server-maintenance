@@ -57,7 +57,7 @@ const DESCRIPTIONS = {
   partial: "Some, but not all, devices completed successfully. Open the job to review per-device outcomes.",
   failed: "The job hit an error. Open the job to read the log and (optionally) run AI analysis.",
   running: "Job is in progress.",
-  recovery_required: "The change did not complete with verified state. Inspect the job and verify recovery before further maintenance.",
+  recovery_required: "The change did not finish with a confirmed result. The next install or cleanup automatically checks device health before continuing.",
   cancelling: "Waiting for execution to stop.",
   pending: "Job is queued and will start shortly.",
   scanning: "A fleet scan is in progress.",
@@ -68,7 +68,7 @@ const description = computed(() => DESCRIPTIONS[props.status] || "");
 const isActive = computed(() => ACTIVE_STATUSES.has(props.status));
 
 const label = computed(() =>
-  props.status.charAt(0).toUpperCase() + props.status.slice(1).replaceAll("_", " ")
+  props.status === "recovery_required" ? "Health check pending" : props.status.charAt(0).toUpperCase() + props.status.slice(1).replaceAll("_", " ")
 );
 </script>
 

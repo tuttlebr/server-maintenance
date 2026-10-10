@@ -1,12 +1,12 @@
 <template>
   <nav class="navbar" aria-label="Main navigation">
     <div class="navbar-inner">
-      <router-link to="/" class="navbar-brand" aria-label="Fleet Manager overview"><i class="fas fa-layer-group" aria-hidden="true"></i><span>Fleet Manager</span></router-link>
+      <router-link to="/" class="navbar-brand" aria-label="Fleet Manager operations"><i class="fas fa-layer-group" aria-hidden="true"></i><span>Fleet Manager</span></router-link>
       <div class="navbar-links"><router-link v-for="item in navigation" :key="item.to" :to="item.to" :aria-current="route.path === item.to || (item.to !== '/' && route.path.startsWith(item.to + '/')) ? 'page' : undefined" class="nav-link">{{ item.label }}</router-link></div>
       <div class="navbar-user">
         <details ref="management" class="management" @keydown.esc.prevent="closeManagement(true)">
           <summary class="nav-link">Manage</summary>
-          <div class="management-links"><router-link to="/access" @click="closeManagement()">Device access</router-link><router-link to="/context" @click="closeManagement()">Knowledge sources</router-link><button type="button" @click="openHelp">Fleet Help</button></div>
+          <div class="management-links"><router-link to="/context" @click="closeManagement()">Knowledge sources</router-link><button type="button" @click="openHelp">Fleet Help</button></div>
         </details>
         <div ref="jobsContainer" class="active-jobs" @keydown.esc.prevent="closeJobs(true)" @focusout="onJobsFocusOut">
           <button ref="jobsTrigger" type="button" class="nav-link" :aria-expanded="showJobs" aria-controls="active-jobs-list" :aria-label="store.activeJobCount == null ? 'Jobs: activity state unavailable' : `Active jobs: ${store.activeJobCount}`" @click="showJobs = !showJobs"><i class="fas fa-bolt" aria-hidden="true"></i>Jobs<span class="jobs-count">{{ store.activeJobCount ?? '–' }}</span></button>
@@ -31,7 +31,7 @@ import { clearToken } from '../api.js';
 import { useDevicesStore } from '../stores/devices.js';
 import { relativeTime, formatLongTime } from '../utils/time.js';
 import { formatTargetList, operationLabel } from '../utils/devices.js';
-const navigation = [{ to: '/', label: 'Overview' }, { to: '/devices', label: 'Devices' }, { to: '/operations', label: 'Operations' }, { to: '/activity', label: 'Activity' }];
+const navigation = [{ to: '/operations', label: 'Operations' }, { to: '/devices', label: 'Devices' }, { to: '/activity', label: 'Activity' }, { to: '/overview', label: 'Overview' }];
 const router = useRouter(), route = useRoute(), store = useDevicesStore();
 const showJobs = ref(false), jobsContainer = ref(null), jobsTrigger = ref(null), management = ref(null);
 function logout() { clearToken(); router.push('/login'); }

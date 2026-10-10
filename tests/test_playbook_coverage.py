@@ -30,21 +30,34 @@ def imported_playbooks(playbook_name: str) -> set[str]:
 
 
 class PlaybookCoverageTests(unittest.TestCase):
-    def test_every_top_level_playbook_is_ui_reachable(self):
-        top_level = {path.name for path in PLAYBOOK_DIR.glob("*.yml")}
-        direct = {operation.playbook for operation in OPERATIONS if operation.playbook}
-        direct.update(ACCESS_PLAYBOOKS)
-        reachable = set(direct)
-        pending = list(direct)
-        while pending:
-            current = pending.pop()
-            if current not in top_level:
-                continue
-            for imported in imported_playbooks(current):
-                if imported not in reachable:
-                    reachable.add(imported)
-                    pending.append(imported)
-        self.assertEqual(top_level, reachable)
+    def test_public_operations_are_limited_to_requested_maintenance(self):
+        self.assertEqual({op.id for op in OPERATIONS}, {"system.packages.preview", "system.update", "containers.cleanup", "system.reboot"})
+        self.assertEqual({op.playbook for op in OPERATIONS}, {"package_preview.yml", "system_update.yml", "docker_cleanup.yml", "reboot.yml"})
+
+    def test_service_workflows_have_no_cluster_api_or_scheduling_dependency(self):
+        visited = set()
+
+        def inspect(path):
+            if path in visited:
+                return
+            visited.add(path)
+            document = yaml.safe_load(path.read_text())
+
+            def walk(value):
+                if isinstance(value, list):
+                    for item in value:
+                        walk(item)
+                elif isinstance(value, dict):
+                    self.assertFalse(any(key.startswith('kubernetes.core.') for key in value), path)
+                    for key, item in value.items():
+                        if key in {'ansible.builtin.include_tasks', 'ansible.builtin.import_tasks', 'import_playbook'}:
+                            inspect(path.parent / (item if isinstance(item, str) else item['file']))
+                        else:
+                            walk(item)
+            walk(document)
+
+        for playbook in ['package_preview.yml', 'system_update.yml', 'docker_cleanup.yml', 'recovery_check.yml', 'host_facts.yml', 'reboot.yml']:
+            inspect(PLAYBOOK_DIR / playbook)
 
     def test_runner_allowlist_matches_top_level_playbooks(self):
         top_level = {path.name for path in PLAYBOOK_DIR.glob("*.yml")}
@@ -53,11 +66,11 @@ class PlaybookCoverageTests(unittest.TestCase):
     def test_disruptive_new_operations_require_confirmation(self):
         operations = {operation.id: operation for operation in OPERATIONS}
         self.assertEqual(operations["system.update"].risk, "high")
-        self.assertEqual(operations["system.bootstrap"].confirmation, "typed-target")
-        self.assertEqual(operations["firmware.update"].confirmation, "typed-target")
-        self.assertEqual(operations["firmware.inspect"].risk, "low")
-        self.assertEqual(operations["reachy.apps.reset"].risk, "high")
-        self.assertEqual(operations["reachy.apps.reset"].confirmation, "typed-target")
+        self.assertEqual(operations["system.update"].confirmation, "confirm")
+        self.assertEqual(operations["containers.cleanup"].confirmation, "confirm")
+        self.assertEqual(operations["system.reboot"].risk, "high")
+        self.assertEqual(operations["system.reboot"].confirmation, "confirm")
+        self.assertEqual(operations["system.packages.preview"].confirmation, "none")
 
     def test_reachy_reset_is_fixed_to_the_app_environment(self):
         content = (PLAYBOOK_DIR / "reachy_app_reset.yml").read_text()

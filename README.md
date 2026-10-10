@@ -1,18 +1,17 @@
 # Fleet Manager
 
-A capability-driven fleet operations platform for Linux compute, edge devices, and robots. It discovers what each device can do, shows only eligible operations, and keeps NVIDIA support as a first-class integration rather than the product identity. The backend uses FastAPI, Ansible, and adapter services; the frontend is Vue 3.
+Fleet maintenance focused on four operations: check for apt updates, install apt updates, clear Docker and containerd/nerdctl cache, and reboot nodes. The backend uses FastAPI and Ansible; the frontend uses Vue 3.
 
 ## Features
 
-- **Mixed-fleet overview** with device reachability, attention, optional GPU and robot summaries, and recent activity
-- **Capability discovery** for portable Linux facts, NVIDIA features, and Reachy Mini Wireless daemon health
-- **Adaptive operations** that appear only when at least one device supports them
-- **Access management** for Linux accounts on devices that advertise `users.manage`
-- **Integration operations** for NVIDIA drivers, Fabric Manager, MIG, and Kubernetes when discovery finds them
-- **Safe Reachy Mini support** for health, logs, daemon restart, stable software updates, and an explicitly enabled app-environment reset, without motion, torque, camera, or audio controls
-- **Activity tracking**: full history with output logs for every operation, indexed for Fleet Help after success, failure, or cancellation
-- **Neutral UI** with NVIDIA, Kubernetes, and Reachy features presented as labeled integrations
-- **CLI compatible**: all Ansible playbooks still work directly from the command line
+- **One maintenance workspace:** select devices once, run an action, and follow progress and per-device results on the same page.
+- **APT checks:** refresh package lists and show exact candidate versions on Debian and Ubuntu, without requiring Python APT bindings.
+- **Reviewed installs:** one confirmation, exact package versions, a 30-minute check validity window, rolling execution, and no automatic reboots or package removals.
+- **Container cache cleanup:** unused Docker images and build cache, plus unused images in containerd namespaces through nerdctl. Containers, volumes, and networks are retained. BuildKit cache is cleared when available; skipped components are reported.
+- **Clear failures:** individual device errors, persistent activity, safe request retries, and automatic health checks when a previous change may be incomplete.
+- **Device inventory and Fleet Help:** connection management, discovery, documentation, and recorded job history remain available.
+
+Other maintenance and account-management operations are no longer exposed through the service. Historical jobs and legacy CLI playbooks remain available.
 
 ## Prerequisites
 
@@ -261,7 +260,7 @@ This creates or reuses the dedicated SSH key, prompts for its passphrase when ne
 
 `make start` supplies the socket and seed paths to Compose automatically. For direct `docker compose` commands, set `SSH_AUTH_SOCK_PATH` to the absolute socket path, normally `/absolute/path/to/server-maintenance/.fleet-ssh/agent.sock`. `SSH_KNOWN_HOSTS_PATH` contains verified server public keys and needs no password.
 
-For Kubernetes-aware maintenance, obtain a kubeconfig for an authorized controller identity from your cluster administrator or provider's login tooling. Follow [Kubernetes-aware maintenance](#kubernetes-aware-maintenance) for permissions and configuration. Set `FLEET_KUBECONFIG_PATH` to its absolute host path and protect the file with `chmod 600`. A kubeconfig can contain tokens or private keys. Leave this variable empty if Kubernetes integration is unused.
+For legacy Kubernetes CLI maintenance, obtain a kubeconfig for an authorized controller identity from your cluster administrator or provider's login tooling. Follow [legacy Kubernetes CLI maintenance](#kubernetes-aware-maintenance-in-legacy-cli-playbooks) for permissions and configuration. Set `FLEET_KUBECONFIG_PATH` to its absolute host path and protect the file with `chmod 600`. A kubeconfig can contain tokens or private keys. Leave this variable empty if Kubernetes integration is unused.
 
 ### 5. Leave `MILVUS_TOKEN` unset for the bundled stack
 
@@ -309,7 +308,7 @@ Startup validates the admin password, JWT signing key, and host-encryption key.
 | `FLEET_PORT` | `8080` | Port the web UI listens on |
 | `SSH_AUTH_SOCK_PATH` | required | Dedicated host SSH agent socket bridged to the non-root web container |
 | `SSH_KNOWN_HOSTS_PATH` | `./.fleet-ssh/known_hosts` | Optional seed file copied into the UI-managed persistent trust database |
-| `FLEET_KUBECONFIG_PATH` | empty | Absolute host path to the controller kubeconfig; required for Kubernetes-aware maintenance in Docker |
+| `FLEET_KUBECONFIG_PATH` | empty | Absolute host path to the controller kubeconfig; used only by legacy Kubernetes CLI maintenance in Docker |
 | `APP_ENV` | `development` | Application environment; required secrets are validated in every environment |
 | `SECRET_KEY` | required | JWT signing key with at least 32 characters |
 | `ADMIN_PASSWORD` | required | Web UI admin password with at least 12 characters |
@@ -405,19 +404,27 @@ Key specs: Ubuntu 24.04 LTS, Blackwell Ultra GPU, 252 GB HBM3e, 496 GB LPDDR5X, 
 2. Confirm its daemon is available on port `8000`, or enter the configured port.
 3. Add it with **Reachy Mini Wireless** as the connection type.
 4. Discovery reads `/api/state/full` and never sends movement, torque, camera, audio, or app-control commands.
-5. To enable app reset, open the device and select **Enable app reset**. Verify the robot's ED25519 SSH fingerprint through a trusted channel and configure the `pollen` SSH account or another authorized account.
-
-**Reset Reachy apps** is a destructive, typed-confirmation operation. It verifies `/venvs/mini_daemon` exists, removes only `/venvs/apps_venv`, and reports whether the environment was removed or already absent. Apps must be reinstalled afterward.
+Reachy daemon devices remain visible in inventory; the four maintenance operations require SSH and their respective discovered capabilities. Reachy app resets and daemon updates are no longer service operations.
 
 ## Common Operations
 
-The **Operations** page derives eligibility from each device's discovered capabilities. It groups read-only inspection, system changes, NVIDIA integration tasks, Kubernetes checks, and Reachy management separately. Unsupported operations are hidden, and high-impact actions require confirmation.
+**Operations** is the default page after login.
 
-Use **Access** for Linux account provisioning, password changes, and sudoers management. Only SSH devices with `users.manage` can be targeted. Use **Activity** for job status, output, cancellation, and history.
+1. Select the devices once.
+2. Choose **Check now**, **Review & install**, **Clear cache…**, or **Reboot…**. Installation automatically runs a package check if no current check matches the selection. Review the resulting packages, then confirm once.
+3. Follow progress, package results, cleanup output, and device-specific errors inline. **Activity** retains the full history and technical logs.
+
+A selection is never silently reduced to eligible devices. The page explains blockers and lets you deselect a device or open its settings. When a previous change is incomplete, installation and cleanup automatically check host health within the same job, then continue if the check passes. A failed check stops the action before changes and shows the device error inline. A stale inventory observation alone does not block an action; live checks still run before changes. All service operations treat devices as standalone hosts. Package installation requires no maintenance-mode configuration, Kubernetes access, or node draining. Recovery verification checks host health only.
+
+Cache cleanup targets the privileged system runtime connections on the device. It enumerates containerd namespaces instead of assuming only `k8s.io`, and leaves Docker's `moby` namespace to Docker. BuildKit availability and every skipped or failed runtime are visible in the result. It never prunes containers, volumes, or networks.
+
+**Reboot nodes** always restarts the selected nodes, one at a time, after one confirmation. It requires no reboot-required flag, package preview, preflight health check, or Kubernetes drain. It remains available when a previous operation needs recovery, while respecting active device reservations. Fleet waits for a new boot and SSH access, then refreshes device details. A failed return is reported as an incomplete change. Existing host-health issues are checked automatically before later installs or cleanup. The CLI `reboot.yml` playbook uses the same unconditional behavior.
+
+A rejected package plan before any mutation is a failed attempt, not a recovery lock. Interrupted or unverified changes trigger automatic health checks before the next install or cleanup; there is no separate Verify step. Network retries reuse a request key, so reconnecting cannot launch the same accepted action twice.
 
 ## CLI Usage
 
-All playbooks work directly with `ansible-playbook` for power users:
+Legacy playbooks remain available directly through `ansible-playbook`. They are not part of the service operation catalog. Package installation requires an approved host-to-plan fingerprint map (`fleet_approved_package_plans`) generated by a current package check; use the UI for this workflow:
 
 ```bash
 # Activate the virtual environment
@@ -427,7 +434,7 @@ source .venv/bin/activate
 ansible-galaxy collection install -r requirements.yml
 
 # System maintenance
-ansible-playbook playbooks/system_update.yml
+ansible-playbook playbooks/package_preview.yml
 ansible-playbook playbooks/docker_cleanup.yml
 ansible-playbook playbooks/maintenance_assessment.yml
 
@@ -459,10 +466,12 @@ ansible-playbook playbooks/host_drain.yml -e '{"drain_action":"status"}'
 ansible-playbook playbooks/mig_management.yml -e '{"mig_action":"status"}'
 
 # Target specific hosts
-ansible-playbook playbooks/system_update.yml --limit ast-spark-01
+ansible-playbook playbooks/package_preview.yml --limit ast-spark-01
 ```
 
-### Kubernetes-aware maintenance
+### Kubernetes-aware maintenance in legacy CLI playbooks
+
+The service's four operations and recovery verification treat every device as standalone. They do not drain, cordon, uncordon, or require Kubernetes access. The following configuration applies only to legacy CLI playbooks such as driver maintenance and explicit drain/resume.
 
 Kubernetes API work runs on the Ansible controller. Managed nodes do not need `kubectl` or a kubeconfig. Set the controller kubeconfig before running Ansible directly:
 
@@ -483,22 +492,22 @@ docker compose up -d --build --force-recreate web
 
 The controller identity needs enough RBAC to list nodes and pods, patch node schedulability, and create pod evictions. A host matches a Kubernetes node by the optional `kubernetes_node_name` host variable, then by inventory name, `ansible_host`, discovered hostname/FQDN, or primary IP. Set `kubernetes_context` per host or group when one controller kubeconfig contains multiple clusters. If local kubelet, K3s, RKE2, or MicroK8s files indicate membership but the selected context has no matching node, disruptive work stops instead of treating the host as standalone.
 
-Disruptive playbooks run one host at a time by default. A matching node is drained before maintenance and returned to its original scheduling state afterward. A node that was already cordoned stays cordoned. Hosts that do not match a node continue normally. If the Kubernetes API cannot be checked, disruptive work fails closed.
+These legacy disruptive playbooks run one host at a time by default. A matching node is drained before maintenance and returned to its original scheduling state afterward. A node that was already cordoned stays cordoned. Hosts that do not match a node continue normally. If the Kubernetes API cannot be checked, disruptive work fails closed.
 
 Normal drains use the Eviction API, respect PodDisruptionBudgets, ignore DaemonSets, and refuse to delete `emptyDir` data. Allow `emptyDir` eviction for a planned operation explicitly:
 
 ```bash
-ansible-playbook playbooks/reboot.yml \
-  -e force_reboot=true \
+ansible-playbook playbooks/host_drain.yml \
+  -e drain_action=drain \
   -e kubernetes_delete_emptydir_data=true
 ```
 
-`force_reboot=true` only reboots a host without `/var/run/reboot-required`; it does not bypass Kubernetes safety. The emergency `force=true` option is intentionally destructive: it permits unmanaged pods and `emptyDir` deletion, bypasses PodDisruptionBudgets by deleting instead of evicting, and continues even if membership or drain cannot be verified.
+The emergency `force=true` option is intentionally destructive: it permits unmanaged pods and `emptyDir` deletion, bypasses PodDisruptionBudgets by deleting instead of evicting, and continues even if membership or drain cannot be verified.
 
 ```bash
-ansible-playbook playbooks/reboot.yml \
+ansible-playbook playbooks/host_drain.yml \
   --limit ast-spark-01 \
-  -e force_reboot=true \
+  -e drain_action=drain \
   -e force=true
 ```
 

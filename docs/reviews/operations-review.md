@@ -1,5 +1,21 @@
 # Fleet operations review
 
+## 2026-10-09 scope reduction
+
+The service now exposes Check for apt updates, Install apt updates, Clear container cache, and Reboot nodes. The fourth action was added on request; it unconditionally reboots selected standalone nodes, waits for SSH to return, and has no health-check or draining prerequisite. Account administration and other operation routes are retired. The older review below is historical and describes a broader product.
+
+Current-run capture: [Operations before simplification](simplified-operations-evidence/01-before.png), captured from the running Safari tab and inspected after saving.
+
+1. **Original install screen: high friction.** The captured screen uses a catalog selector, a separate selection sidebar, a preview selector below the fold, and multiple blocked devices. The inline preview requirement offers no direct package-check action. Visible text is readable, but duplicated targeting and the long card push the next action off-screen.
+2. **Replacement selection and actions: implemented, interaction-tested.** Four fixed actions share one device selection. An incompatible device blocks the request explicitly. APT checks start directly; installation can check automatically and open a package table with one confirmation. Cache cleanup requires one concise confirmation.
+3. **Replacement results: implemented, interaction-tested.** Progress and per-device errors stay in place. Package tables show installed/candidate versions. Cleanup shows namespaces, skipped components, and failures. A network retry uses the original request key.
+
+The current environment subsequently blocked browser interaction, local preview listeners, and Docker access. Post-change screenshots, responsive visual QA, and deployment verification remain unperformed. Component tests cover selection, review, cancellation, and retries; they do not establish full accessibility compliance. No live install or cleanup was run.
+
+Backend validation includes the full Python suite and isolated Ansible execution of package checks/installs against fake package tools. APT commands no longer require python3-apt. The service treats every device as standalone: installation does not drain or change scheduling, and installation, recovery verification, and follow-up scans have no cluster API dependency. Package drift rejected before installation does not create a recovery lock. Startup reconciles older false recovery flags from complete preflight logs and records each resolution in Activity; subsequent installs and cleanup check host health automatically when a prior change is incomplete, then continue within the same reserved job. Failures surface inline without a separate Verify step. Cleanup preserves containers, volumes, and networks; namespace and builder behavior follows the [nerdctl command reference](https://github.com/containerd/nerdctl/blob/main/docs/command-reference.md).
+
+---
+
 Implementation follow-up: [reliability changes and validation](reliability-implementation.md). The findings below describe the review baseline, before those changes.
 
 Reviewed 2026-09-20 against `67caf87`, plus the corrective changes in this working tree.

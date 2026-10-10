@@ -1,36 +1,33 @@
 ---
-- name: Preview package updates without installing packages
+- name: Check for apt package updates
   hosts: managed_hosts
   become: true
   gather_facts: true
+  environment:
+    LC_ALL: C
+    DEBIAN_FRONTEND: noninteractive
   tasks:
-    - name: Refresh Debian package metadata
-      ansible.builtin.apt:
-        update_cache: true
-      when: ansible_facts.os_family == 'Debian'
+    - name: Require apt on a Debian family device
+      ansible.builtin.assert:
+        that: ansible_facts.os_family == 'Debian'
+        fail_msg: "APT updates require a Debian or Ubuntu device."
 
-    - name: Refresh Red Hat package metadata
-      ansible.builtin.command: dnf -q makecache --refresh
+    # Use the CLI so custom Python interpreters do not need python3-apt.
+    - name: Refresh apt package lists
+      ansible.builtin.command:
+        argv: [apt-get, -o, DPkg::Lock::Timeout=120, -o, APT::Update::Error-Mode=any, update]
+      register: fleet_apt_refresh
       changed_when: false
-      when: ansible_facts.os_family == 'RedHat'
+      failed_when: fleet_apt_refresh.rc != 0 or 'Failed to fetch' in (fleet_apt_refresh.stderr | default(''))
+      retries: 3
+      delay: 5
+      until: fleet_apt_refresh.rc == 0 and 'Failed to fetch' not in (fleet_apt_refresh.stderr | default(''))
 
     - name: Compute proposed package transaction
       ansible.builtin.include_tasks: tasks/package_plan.yml
 
-    - name: Create private results directory
-      ansible.builtin.file:
-        path: "{{ __fleet_results_dir }}/{{ __fleet_job_id }}"
-        state: directory
-        mode: "0700"
-      delegate_to: localhost
-      become: false
-      when: __fleet_job_id is defined
-
-    - name: Save package preview
-      ansible.builtin.copy:
-        content: "{{ {'schema_version': 1, 'report_type': 'packages', 'hostname': inventory_hostname, 'family': ansible_facts.os_family, 'changes': fleet_package_changes, 'fingerprint': fleet_package_fingerprint} | to_json }}"
-        dest: "{{ __fleet_results_dir }}/{{ __fleet_job_id }}/packages_{{ inventory_hostname }}.json"
-        mode: "0600"
-      delegate_to: localhost
-      become: false
-      when: __fleet_job_id is defined
+    - name: Save available package updates
+      ansible.builtin.include_tasks: tasks/save_operation_report.yml
+      vars:
+        fleet_report_name: packages
+        fleet_report: "{{ {'schema_version': 1, 'report_type': 'packages', 'hostname': inventory_hostname, 'family': ansible_facts.os_family, 'changes': fleet_package_changes, 'package_count': fleet_package_targets | length, 'fingerprint': fleet_package_fingerprint} }}"

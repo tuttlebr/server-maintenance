@@ -131,27 +131,16 @@ def test_eligibility_checks_platform_freshness_and_recovery():
     assert 'Debian' in operation_ineligibility(host, op)
     host.os_family = 'Debian'
     host.maintenance_mode = 'unknown'
-    assert 'maintenance mode' in operation_ineligibility(host, op)
+    assert operation_ineligibility(host, op) is None
     host.maintenance_mode = 'standalone'
     host.facts_stale = True
-    assert 'fresh scan' in operation_ineligibility(host, op)
+    assert operation_ineligibility(host, op) is None
     host.facts_stale = False
     host.discovered_at = datetime.now(timezone.utc) - timedelta(hours=2)
-    assert 'fresh scan' in operation_ineligibility(host, op)
+    assert operation_ineligibility(host, op) is None
     host.recovery_required = True
-    assert 'recovery' in operation_ineligibility(host, op)
-    assert operation_ineligibility(host, OPERATION_BY_ID['system.scan']) is None
-    host.recovery_required = False
-    host.facts = {'distribution':'Debian', 'service_manager':'openrc'}
-    assert 'Ubuntu' in operation_ineligibility(host, OPERATION_BY_ID['system.bootstrap'])
-    assert 'systemd' in operation_ineligibility(host, OPERATION_BY_ID['services.inspect'])
-
-
-def test_incompatible_driver_installation_is_not_eligible():
-    host = device()
-    host.facts = {'nvidia_driver_package': 'nvidia-jetpack'}
-    assert 'metapackage' in operation_ineligibility(host, OPERATION_BY_ID['nvidia.driver.manage'])
-
+    assert operation_ineligibility(host, op) is None
+    assert operation_ineligibility(host, OPERATION_BY_ID['system.packages.preview']) is None
 
 def test_package_approval_exact_scope_age_and_complete_results(database, tmp_path):
     with database() as db:
@@ -373,13 +362,13 @@ def test_cancel_running_change_is_rejected_but_pending_job_releases_reservation(
         runner._CANCELLED_JOBS.discard(running.job_id)
 
 
-def test_operation_requires_target_confirmation_and_blocks_critical_service(database):
+def test_operation_requires_exact_target_confirmation(database):
     with database() as db:
-        host=device();db.add(host);db.commit()
-        with pytest.raises(HTTPException,match='Confirm the exact'):
-            asyncio.run(run_operation('system.reboot',OperationRunRequest(device_ids=[host.id]),db,'test'))
-        with pytest.raises(HTTPException,match='non-critical'):
-            asyncio.run(run_operation('services.manage',OperationRunRequest(device_ids=[host.id],confirmation=host.name,service_name='sshd.service'),db,'test'))
+        host = device()
+        db.add(host); db.commit()
+        for operation in ('system.update', 'containers.cleanup', 'system.reboot'):
+            with pytest.raises(HTTPException, match='exact target names'):
+                asyncio.run(run_operation(operation, OperationRunRequest(device_ids=[host.id]), db, 'test'))
 
 
 def test_migration_preserves_legacy_state_as_unverified(tmp_path, monkeypatch):
@@ -575,13 +564,13 @@ def test_followup_scan_requires_report_and_successful_execution(
         assert db.query(DeviceReservation).count() == 0
 
 
-def test_unknown_policy_allows_verification_but_still_blocks_disruptive_operations():
-    from backend.capabilities import MAINTENANCE_OPERATIONS
+@pytest.mark.parametrize('mode', [None, 'unknown', 'standalone', 'kubernetes'])
+def test_service_operations_treat_every_device_as_standalone(mode):
     host = device()
-    host.maintenance_mode = 'unknown'
-    assert operation_ineligibility(host, OPERATION_BY_ID['system.recover']) is None
-    for operation_id in MAINTENANCE_OPERATIONS:
-        assert 'maintenance mode' in operation_ineligibility(host, OPERATION_BY_ID[operation_id])
+    host.maintenance_mode = mode
+    host.facts = {'kubernetes_membership_detected': True, 'kubernetes_available': True}
+    for operation in OPERATION_BY_ID.values():
+        assert operation_ineligibility(host, operation) is None
 
 
 @pytest.mark.parametrize('facts,expected', [
@@ -647,3 +636,27 @@ def test_reachy_inspection_is_queued_reserved_and_refreshes_facts(database, monk
         assert db.query(DeviceReservation).count()==0
         assert not db.query(Device).one().facts_stale
         assert len(probes)==1
+
+
+@pytest.mark.parametrize('mutation_started,rc,expected', [(False,2,'failed'), (True,2,'recovery_required'), (False,124,'recovery_required')])
+def test_package_failure_requires_recovery_only_after_mutation_or_timeout(database, tmp_path, monkeypatch, mutation_started, rc, expected):
+    with database() as db:
+        db.add(device()); db.commit()
+    def fake_execute(playbook, targets, values, credentials, job_id, timeout, append=False):
+        runner.get_log_path(job_id).write_text('fatal: [node-01]: FAILED! => {"msg":"Package plan changed"}\nPLAY RECAP\nnode-01 : ok=3 changed=0 unreachable=0 failed=1\n')
+        if mutation_started:
+            directory = tmp_path/'job-results'/job_id; directory.mkdir(parents=True)
+            (directory/'execution_node-01.json').write_text(json.dumps({'schema_version':1,'report_type':'execution','hostname':'node-01','mutation_started':True}))
+        return rc
+    monkeypatch.setattr(runner, '_run_playbook_streaming', fake_execute)
+    async def scenario():
+        with database() as db:
+            job_id = await runner.run_playbook(db,'system_update.yml',hosts=['node-01'])
+        await asyncio.gather(*list(runner._BACKGROUND_TASKS))
+        return job_id
+    job_id = asyncio.run(scenario())
+    with database() as db:
+        completed = db.query(Job).filter_by(job_id=job_id).one()
+        assert completed.status == expected
+        assert db.query(Device).one().recovery_required is (expected == 'recovery_required')
+        assert completed.device_results[0]['detail'] == 'Package plan changed'

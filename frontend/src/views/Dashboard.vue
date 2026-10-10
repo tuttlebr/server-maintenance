@@ -37,7 +37,7 @@
           <header class="panel-heading"><div><h2 id="next-steps-title" tabindex="-1">Next steps</h2><p>{{ affectedCount ? `Ranked by consequence. Groups overlap across ${affectedCount} ${affectedCount === 1 ? 'device' : 'devices'}.` : 'No conditions flagged in the latest observations.' }}</p></div><router-link v-if="affectedCount" to="/devices?attention=1">All affected devices</router-link></header>
           <div v-if="pendingObservations" class="queue-update"><button class="btn btn-ghost btn-sm" @click="applyObservations">Update priorities with new observations</button><p>Your current view is held while you inspect this queue.</p></div>
           <AttentionGroup v-for="group in groups" :key="group.id" :group="group" :jobs="store.activeJobs" />
-          <div v-if="!groups.length" class="panel-empty"><strong>No current device alerts</strong><p>This reflects the latest recorded facts, not continuous monitoring.</p><router-link :to="{ path: '/operations', query: { operation: 'system.scan' } }">Review a fresh scan</router-link></div>
+          <div v-if="!groups.length" class="panel-empty"><strong>No current device alerts</strong><p>This reflects the latest recorded facts, not continuous monitoring.</p><router-link :to="{ path: '/devices' }">Review a fresh scan</router-link></div>
         </section>
         <div class="work-column">
           <section class="overview-panel" aria-labelledby="work-title">
@@ -62,7 +62,7 @@
             <div class="adverse-heading"><h3>Latest adverse outcomes</h3><p>Historical results may already be addressed.</p></div>
             <p v-if="store.adverseError" class="panel-notice">Adverse outcomes could not be refreshed. {{ store.adverseUpdated ? `Last observation: ${formatLongTime(store.adverseUpdated)}.` : 'History is unavailable.' }}</p>
             <router-link v-for="job in store.adverseJobs.slice(0, 3)" :key="job.job_id" :to="{ path: '/activity', query: { job: job.job_id } }" class="adverse-item">
-              <span :class="['condition-tag', job.status === 'partial' ? 'warning' : 'danger']">{{ job.status === 'recovery_required' ? 'Recovery required' : job.status === 'partial' ? 'Partial' : 'Failed' }}</span><strong>{{ operationLabel(job.playbook) }}</strong><span>{{ formatTargetList(job.target_devices) }}</span><time :datetime="job.finished_at || job.created_at" :title="formatLongTime(job.finished_at || job.created_at)">{{ relativeTime(job.finished_at || job.created_at) }}</time>
+              <span :class="['condition-tag', job.status === 'partial' ? 'warning' : 'danger']">{{ job.status === 'recovery_required' ? 'Health check pending' : job.status === 'partial' ? 'Partial' : 'Failed' }}</span><strong>{{ operationLabel(job.playbook) }}</strong><span>{{ formatTargetList(job.target_devices) }}</span><time :datetime="job.finished_at || job.created_at" :title="formatLongTime(job.finished_at || job.created_at)">{{ relativeTime(job.finished_at || job.created_at) }}</time>
             </router-link>
             <p v-if="store.adverseUpdated && !store.adverseJobs.length && !store.adverseError" class="panel-empty">No partial, failed, or recovery-required jobs found.</p>
             <p class="panel-footer"><router-link to="/activity?status=adverse">Review adverse outcomes</router-link></p>

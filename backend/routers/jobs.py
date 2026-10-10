@@ -70,7 +70,7 @@ async def cancel_job_output(
     if job.playbook.startswith("reachy.") or (job.status == "running" and job.execution_kind != "read_only"):
         raise HTTPException(
             status_code=400,
-            detail="A running change cannot be safely cancelled. Monitor completion; interrupted changes require recovery verification.",
+            detail="A running change cannot be safely cancelled. Monitor completion; interrupted changes trigger automatic health checks before the next install or cleanup.",
         )
     if job.status == "pending":
         release_devices(db, job_id)

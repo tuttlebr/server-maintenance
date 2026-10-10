@@ -27,8 +27,8 @@ test('Overview renders unavailable, first-run, partial-error, and ranked large-f
     const devices=Array.from({length:200},(_,i)=>({id:i+1,name:`node-${String(i+1).padStart(3,'0')}`,status:'online',discovered_at:'2026-09-25T12:00:00Z',disk_root_percent:i===199?40:86,recovery_required:i===199}));
     const large=await render({devices,hasLoadedOnce:true,lastUpdated:'2026-09-25T12:00:00Z',activeError:new Error('503'),jobsError:new Error('503')});
     assert.match(large,/200 devices need attention/); assert.match(large,/Active work is unknown/);
-    assert.ok(large.indexOf('Verify interrupted maintenance') < large.indexOf('Inspect root storage pressure'));
-    assert.match(large,/operation=system.recover[^"<]*devices=200/);
+    assert.ok(large.indexOf('Unfinished maintenance') < large.indexOf('Inspect root storage pressure'));
+    assert.match(large,/devices\?reason=recovery/);
     assert.doesNotMatch(large,/All devices are reachable|No active jobs/);
     const partial = {job_id:'partial-run',status:'partial',playbook:'preflight_check.yml',target_devices:'node-01,node-02',created_at:'2026-09-27T12:00:00Z'};
     const mixed = await render({devices:devices.slice(0,2),hasLoadedOnce:true,recentJobs:[partial],jobsUpdated:'2026-09-27T12:00:00Z',adverseJobs:[partial]});

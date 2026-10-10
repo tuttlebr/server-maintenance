@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.auth import get_current_user
-from backend.capabilities import OPERATION_BY_ID, OPERATIONS, REACHY_APP_RESET, has_capability, operation_ineligibility
+from backend.capabilities import OPERATION_BY_ID, OPERATIONS, operation_ineligibility
 from backend.database import SessionLocal, get_db
 from backend.models import Device, Job, DeviceReservation
 from backend.schemas import OperationResponse, OperationRunRequest
@@ -38,8 +38,6 @@ def list_operations(db: Session = Depends(get_db), user: str = Depends(get_curre
     for operation in OPERATIONS:
         eligible = [device.id for device in devices if not reason(device, operation)]
         excluded = [{"id": d.id, "name": d.name, "reason": reason(d, operation)} for d in devices if d.id not in eligible]
-        if not any(has_capability(d, operation.required_capability) for d in devices):
-            continue
         response.append(
             OperationResponse(
                 id=operation.id,
@@ -74,6 +72,17 @@ async def run_operation(
         missing = [str(device_id) for device_id in payload.device_ids if device_id not in found]
         raise HTTPException(status_code=404, detail=f"Unknown device IDs: {', '.join(missing)}")
 
+    if payload.request_key:
+        previous = db.query(Job).filter_by(request_key=payload.request_key).first()
+        if previous:
+            previous_vars = json.loads(previous.extra_vars or "{}")
+            same_preview = operation.id != "system.update" or _preview_matches_accepted(db, payload.preview_job_id, previous_vars)
+            if (previous.playbook != operation.playbook or
+                    set((previous.target_hosts or "").split(",")) != {d.hostname for d in devices} or
+                    previous.triggered_by != user or not same_preview):
+                raise HTTPException(status_code=409, detail="Request key already used for a different operation")
+            return {"job_id": previous.job_id, "detail": "Operation already accepted"}
+
     unsupported = [f"{device.name}: {reason}" for device in devices if (reason := operation_ineligibility(device, operation))]
     if unsupported:
         raise HTTPException(status_code=409, detail="; ".join(unsupported))
@@ -82,49 +91,9 @@ async def run_operation(
         if payload.confirmation != expected:
             raise HTTPException(status_code=400, detail=f"Confirm the exact target names: {expected}")
 
-    if operation.id in {"reachy.health", "reachy.logs.read"} and any(db.get(DeviceReservation, device.id) for device in devices):
-        raise HTTPException(status_code=409, detail="A selected device has an active operation. Check Activity before inspecting it.")
-    if operation.id == "reachy.recover":
-        return await _recover_reachy(db, devices, user)
-    if operation.id in {"reachy.health", "reachy.logs.read"}:
-        return _start_reachy_inspection(db, devices, user, operation.id)
-    if operation.id in {"reachy.daemon.restart", "reachy.software.update"}:
-        return _start_reachy_remote_jobs(db, devices, user, operation.id, operation.label, payload.request_key)
-
-    non_ssh = [
-        device.name
-        for device in devices
-        if (device.transport or "ssh") != "ssh"
-        and not (operation.id == REACHY_APP_RESET and device.ansible_user)
-    ]
-    if non_ssh:
-        raise HTTPException(
-            status_code=400,
-            detail=f"{operation.label} requires an SSH-managed device: {', '.join(non_ssh)}",
-        )
-
     extra_vars = None
     if operation.id == "system.update":
         extra_vars = {"fleet_approved_package_plans": _approved_package_plans(db, payload.preview_job_id, devices)}
-    elif operation.id in {"services.inspect", "services.manage"}:
-        if operation.id == "services.manage":
-            if not payload.service_name or re.fullmatch(r"(ssh.*|sshd.*|systemd.*|dbus.*|NetworkManager.*|network.*|networking|docker.*|containerd.*|kubelet|k3s.*|rke2.*|snap.microk8s.*|crio.*|cri-o.*|fleet.*|firewalld|ufw)\.service", payload.service_name):
-                raise HTTPException(status_code=400, detail="Select a non-critical installed .service unit")
-        extra_vars = {"service_action": "status" if operation.id == "services.inspect" else payload.service_action, "service_name": payload.service_name or ""}
-    elif operation.id in {"kubernetes.drain.execute", "kubernetes.resume"}:
-        extra_vars = {"drain_action": "drain" if operation.id.endswith("execute") else "resume"}
-    if operation.id == "nvidia.driver.manage":
-        extra_vars = {"upgrade_mode": "standard"}
-    elif operation.id == "firmware.update":
-        extra_vars = {"firmware_mode": "update"}
-    elif operation.id == "system.reboot":
-        extra_vars = {"force_reboot": True}
-    elif operation.id == "nvidia.fabric_manager.manage":
-        extra_vars = {"fabric_action": "status"}
-    elif operation.id == "nvidia.mig.manage":
-        extra_vars = {"mig_action": "status"}
-    elif operation.id == "kubernetes.drain":
-        extra_vars = {"drain_action": "status"}
 
     job_id = await run_playbook(
         db=db,
@@ -140,19 +109,25 @@ async def run_operation(
     }
 
 
+def _preview_matches_accepted(db, preview_job_id, values):
+    preview = db.query(Job).filter_by(job_id=preview_job_id, playbook="package_preview.yml").first() if preview_job_id else None
+    plans = {r["hostname"]: r.get("fingerprint") for r in get_job_results(preview.job_id) if r["report_type"] == "packages"} if preview else {}
+    return bool(plans) and plans == values.get("fleet_approved_package_plans")
+
+
 def _approved_package_plans(db, preview_job_id, devices):
     preview = db.query(Job).filter_by(job_id=preview_job_id).first() if preview_job_id else None
     targets = {device.hostname for device in devices}
     if not preview or preview.playbook != "package_preview.yml" or preview.status != "success" or set((preview.target_hosts or "").split(",")) != targets:
-        raise HTTPException(status_code=409, detail="Run and review a successful package preview for these exact devices first")
+        raise HTTPException(status_code=409, detail="Check for apt updates on these exact devices first")
     observed = preview.finished_at
     if observed and observed.tzinfo is None:
         observed = observed.replace(tzinfo=timezone.utc)
     if not observed or (datetime.now(timezone.utc) - observed).total_seconds() > 1800:
-        raise HTTPException(status_code=409, detail="Package preview expired. Run a new preview (valid for 30 minutes)")
+        raise HTTPException(status_code=409, detail="The package check expired. Check for updates again (valid for 30 minutes)")
     plans = {r["hostname"]: r["fingerprint"] for r in get_job_results(preview.job_id) if r["report_type"] == "packages" and re.fullmatch(r"[a-f0-9]{64}", r.get("fingerprint", ""))}
     if set(plans) != targets:
-        raise HTTPException(status_code=409, detail="Package preview is incomplete; run it again")
+        raise HTTPException(status_code=409, detail="The package check is incomplete. Check for updates again")
     return plans
 
 

@@ -3,11 +3,11 @@ import { hasCapability } from './devices.js';
 export const ACTIVE_STATUSES = ['pending', 'running', 'cancelling'];
 export const COMPLETED_STATUSES = ['success', 'partial', 'failed', 'recovery_required', 'cancelled'];
 export const ATTENTION_GROUPS = [
-  { id: 'recovery', label: 'Recovery required', title: 'Verify interrupted maintenance', severity: 'danger', operation: 'system.recover', action: 'Review recovery targets', description: 'Review remote state before making further changes.' },
+  { id: 'recovery', label: 'Health check pending', title: 'Unfinished maintenance', severity: 'danger', action: 'Review affected devices', description: 'The next install or cleanup checks host health automatically before continuing.' },
   { id: 'offline', label: 'Offline', title: 'Investigate connectivity', severity: 'danger', action: 'Review connection state', description: 'Check device and connection evidence. Last seen is an observation time, not an outage duration.' },
-  { id: 'storage', label: 'Root storage ≥85%', title: 'Inspect root storage pressure', severity: 'warning', operation: 'storage.inspect', action: 'Review inspection targets', description: 'Verify stale readings before planning cleanup. Inspection does not delete files.' },
-  { id: 'verification', label: 'Needs verification', title: 'Refresh device evidence', severity: 'neutral', operation: 'system.scan', action: 'Review scan targets', description: 'Refresh stale or missing facts. Check overlapping work before starting another scan.' },
-  { id: 'reboot', label: 'Reboot required', title: 'Plan required reboots', severity: 'warning', operation: 'system.reboot', action: 'Review maintenance targets', description: 'Review workloads, prerequisites, and target eligibility before disruption.' },
+  { id: 'storage', label: 'Root storage ≥85%', title: 'Inspect root storage pressure', severity: 'warning', operation: 'containers.cleanup', action: 'Review cache cleanup', description: 'Verify stale readings before planning cleanup. Cache cleanup removes unused container images and build cache.' },
+  { id: 'verification', label: 'Needs verification', title: 'Refresh device evidence', severity: 'neutral', action: 'Review scan targets', description: 'Refresh stale or missing facts. Check overlapping work before starting another scan.' },
+  { id: 'reboot', label: 'Reboot required', title: 'Plan required reboots', severity: 'warning', action: 'Review maintenance targets', description: 'Review workloads, prerequisites, and target eligibility before disruption.' },
 ];
 
 export function diskPercent(device) {

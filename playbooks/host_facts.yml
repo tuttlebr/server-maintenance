@@ -175,9 +175,6 @@
     - name: Discover the supported NVIDIA driver package
       ansible.builtin.include_tasks: tasks/discover_driver_package.yml
 
-    - name: Discover Kubernetes membership from the controller
-      ansible.builtin.include_tasks: tasks/kubernetes_discover.yml
-
     - name: Check if reboot is required
       stat:
         path: /var/run/reboot-required
@@ -256,10 +253,6 @@
           fabric_manager: "{{ fm_status.stdout | default('N/A') }}"
           fabric_manager_available: "{{ (fm_available.rc | default(1)) == 0 }}"
           mig_available: "{{ (mig_available.rc | default(1)) == 0 }}"
-          kubernetes_available: "{{ kubernetes_node_found | bool }}"
-          kubernetes_api_accessible: "{{ kubernetes_api_accessible | bool }}"
-          kubernetes_node_name: "{{ kubernetes_resolved_node_name | default('') }}"
-          kubernetes_unschedulable: "{{ kubernetes_node_was_unschedulable | default(false) | bool }}"
           uptime_seconds: "{{ ansible_facts['uptime_seconds'] | default(0) }}"
           reboot_required: "{{ reboot_flag.stat.exists }}"
           machine_type: "{{ machine_type | default('unknown') }}"

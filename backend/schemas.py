@@ -320,8 +320,6 @@ class OperationRunRequest(BaseModel):
     device_ids: list[int] = Field(min_length=1, max_length=200)
     request_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,64}$")
     preview_job_id: str | None = Field(default=None, pattern=r"^[0-9a-f-]{36}$")
-    service_name: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.@:-]{0,120}\.service$")
-    service_action: Literal["started", "stopped", "restarted"] = "restarted"
     confirmation: str | None = None
 
     @field_validator("device_ids")

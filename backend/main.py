@@ -10,10 +10,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from backend.auth import create_access_token, verify_admin
 from backend.config import settings
 from backend.database import SessionLocal, init_db
-from backend.routers import chat, context, devices, jobs, operations, users
+from backend.routers import chat, context, devices, jobs, operations
 from backend.schemas import LoginRequest, TokenResponse
 from backend.services.ansible_runner import PlaybookRequestError, shutdown_executor, set_executor_lease
 from backend.services.execution_state import acquire_executor_lock, reconcile_interrupted_jobs
+from backend.services.recovery_state import reconcile_stale_recovery
 from backend.services.inventory_writer import regenerate_inventory
 from backend.services.job_log_indexer import start_reconcile as start_job_log_reconcile
 from backend.services.login_throttle import (
@@ -59,6 +60,7 @@ async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         reconcile_interrupted_jobs(db)
+        reconcile_stale_recovery(db)
         regenerate_inventory(db)
     finally:
         db.close()
@@ -94,7 +96,6 @@ if STATIC_DIR.exists():
 # API routes
 app.include_router(devices.router)
 app.include_router(operations.router)
-app.include_router(users.router)
 app.include_router(jobs.router)
 app.include_router(chat.router)
 app.include_router(context.router)
