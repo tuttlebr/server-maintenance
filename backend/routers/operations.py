@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.auth import get_current_user
-from backend.capabilities import OPERATION_BY_ID, OPERATIONS, operation_ineligibility
+from backend.capabilities import OPERATION_BY_ID, OPERATIONS, REACHY_DAEMON_RESTART, operation_ineligibility
 from backend.database import SessionLocal, get_db
 from backend.models import Device, Job, DeviceReservation
 from backend.schemas import OperationResponse, OperationRunRequest
@@ -77,7 +77,7 @@ async def run_operation(
         if previous:
             previous_vars = json.loads(previous.extra_vars or "{}")
             same_preview = operation.id != "system.update" or _preview_matches_accepted(db, payload.preview_job_id, previous_vars)
-            if (previous.playbook != operation.playbook or
+            if (previous.playbook != (operation.playbook or operation.id) or
                     set((previous.target_hosts or "").split(",")) != {d.hostname for d in devices} or
                     previous.triggered_by != user or not same_preview):
                 raise HTTPException(status_code=409, detail="Request key already used for a different operation")
@@ -90,6 +90,9 @@ async def run_operation(
         expected = ", ".join(device.name for device in devices)
         if payload.confirmation != expected:
             raise HTTPException(status_code=400, detail=f"Confirm the exact target names: {expected}")
+
+    if operation.id == REACHY_DAEMON_RESTART:
+        return _start_reachy_remote_jobs(db, devices, user, operation.id, operation.label, payload.request_key)
 
     extra_vars = None
     if operation.id == "system.update":
@@ -150,6 +153,7 @@ async def _recover_reachy(db, devices, user):
     outcomes = []
     for device in devices:
         try:
+            previous = None
             if device.recovery_required:
                 previous = next((j for j in db.query(Job).filter(Job.execution_kind == "mutation").order_by(Job.created_at.desc()).all() if device.hostname in (j.target_hosts or "").split(",")), None)
                 remote_id = next((item.get("remote_job_id") for item in previous.device_results if item.get("hostname") == device.hostname), None) if previous else None
@@ -158,7 +162,10 @@ async def _recover_reachy(db, devices, user):
                 info = await asyncio.to_thread(reachy_request, device.endpoint or device.hostname, device.daemon_port or 8000, "/update/info", query={"job_id":remote_id}, timeout=10)
                 if str(info.get("status", "")).lower() != "done":
                     raise RuntimeError("The recorded remote job has not completed successfully. Keep the device in recovery.")
-            result = await asyncio.to_thread(probe_reachy, device.endpoint or device.hostname, device.daemon_port or 8000)
+            if previous and previous.playbook == REACHY_DAEMON_RESTART:
+                result = await _wait_for_reachy_health(local.job_id, device.name, device.endpoint or device.hostname, device.daemon_port or 8000)
+            else:
+                result = await asyncio.to_thread(probe_reachy, device.endpoint or device.hostname, device.daemon_port or 8000)
             _apply_reachy_observation(device, result)
             if not result["reachable"]:
                 raise RuntimeError(result["detail"])
@@ -286,6 +293,10 @@ def _start_reachy_remote_jobs(
 
 async def _run_reachy_remote_jobs(job_id, targets, operation_id, label, started):
     async with job_semaphore():
+        with SessionLocal() as db:
+            job = db.query(Job).filter_by(job_id=job_id).first()
+            if not job or job.status != "pending":
+                return
         await _execute_reachy_remote_jobs(job_id, targets, operation_id, label, started)
 
 
@@ -302,10 +313,10 @@ async def _execute_reachy_remote_jobs(
     try:
         for index, (hostname, name, endpoint, port) in enumerate(targets):
             _append_reachy_log(job_id, f"\n[{name}] Starting {label.lower()}…\n")
-            start_path = "/api/daemon/restart" if operation_id == "reachy.daemon.restart" else "/update/start"
+            start_path = "/api/daemon/restart" if operation_id == REACHY_DAEMON_RESTART else "/update/start"
             outcome = outcomes[index]
             outcome["status"] = "running"
-            _update_reachy_job(job_id, outcomes_json=json.dumps(outcomes))
+            _update_reachy_job(job_id, phase="executing", outcomes_json=json.dumps(outcomes))
             try:
                 response = await asyncio.to_thread(reachy_request, endpoint, port, start_path, method="POST", timeout=15)
                 remote_job_id = str(response.get("job_id") or "")
@@ -314,7 +325,10 @@ async def _execute_reachy_remote_jobs(
                 outcome["remote_job_id"] = remote_job_id
                 _update_reachy_job(job_id, outcomes_json=json.dumps(outcomes))
                 await _poll_reachy_job(job_id, name, endpoint, port, remote_job_id)
-                result = await asyncio.to_thread(probe_reachy, endpoint, port)
+                _update_reachy_job(job_id, phase="verifying")
+                result = (await _wait_for_reachy_health(job_id, name, endpoint, port)
+                          if operation_id == REACHY_DAEMON_RESTART
+                          else await asyncio.to_thread(probe_reachy, endpoint, port))
                 if not result["reachable"]:
                     raise RuntimeError("Remote job completed but daemon health could not be verified")
                 with SessionLocal() as db:
@@ -323,7 +337,9 @@ async def _execute_reachy_remote_jobs(
                     db.commit()
                 outcome["status"] = "success"
             except Exception as exc:
-                outcome["status"] = "recovery_required"
+                rejected = not outcome.get("remote_job_id") and re.search(r"Reachy daemon returned HTTP 4\d\d:", str(exc))
+                outcome["status"] = "failed" if rejected else "recovery_required"
+                outcome["detail"] = str(exc)
                 failures.append(f"{name}: {exc}")
                 _append_reachy_log(job_id, f"[{name}] FAILED: {exc}\n")
             _update_reachy_job(job_id, outcomes_json=json.dumps(outcomes))
@@ -334,11 +350,30 @@ async def _execute_reachy_remote_jobs(
                 outcome["status"] = "recovery_required"
     finally:
         finished = datetime.now(timezone.utc)
-        succeeded = not failures
-        _update_reachy_job(job_id, status="success" if succeeded else "recovery_required", phase="complete",
+        status = "recovery_required" if any(item["status"] == "recovery_required" for item in outcomes) else completed_status(outcomes, has_errors=bool(failures))
+        _update_reachy_job(job_id, status=status, phase="complete",
             finished_at=finished, duration_seconds=max(0, int((finished - started).total_seconds())),
             error_summary="\n".join(failures) or None, outcomes_json=json.dumps(outcomes),
             recap=f"{label}: {sum(item['status'] == 'success' for item in outcomes)}/{len(targets)} completed", capture_log=True)
+
+
+async def _wait_for_reachy_health(job_id, name, endpoint, port):
+    deadline = time.monotonic() + 90
+    detail = "No healthy daemon response"
+    _append_reachy_log(job_id, f"[{name}] Waiting for daemon and robot backend readiness.\n")
+    while time.monotonic() < deadline:
+        result = await asyncio.to_thread(probe_reachy, endpoint, port)
+        daemon = result.get("facts", {}).get("daemon") or {}
+        backend = daemon.get("backend_status") or {}
+        if (result["reachable"] and daemon.get("state") == "running" and
+                backend.get("ready") is True and not daemon.get("error") and not backend.get("error")):
+            _append_reachy_log(job_id, f"[{name}] Daemon running; robot backend ready.\n")
+            return result
+        detail = (daemon.get("error") or backend.get("error") or
+                  (f"Daemon state: {daemon.get('state', 'unknown')}; backend ready: {backend.get('ready', 'unknown')}"
+                   if result["reachable"] else result.get("detail", "Daemon unreachable")))
+        await asyncio.sleep(min(2, max(0, deadline - time.monotonic())))
+    raise RuntimeError(f"Restart finished but daemon health could not be verified: {detail}")
 
 
 async def _poll_reachy_job(

@@ -570,6 +570,14 @@ def test_service_operations_treat_every_device_as_standalone(mode):
     host.maintenance_mode = mode
     host.facts = {'kubernetes_membership_detected': True, 'kubernetes_available': True}
     for operation in OPERATION_BY_ID.values():
+        if operation.id == 'reachy.daemon.restart':
+            robot = device('reachy-mini')
+            robot.transport = 'reachy_daemon'
+            robot.kind = 'robot'
+            robot.model = 'Reachy Mini Wireless'
+            robot.maintenance_mode = mode
+            assert operation_ineligibility(robot, operation) is None
+            continue
         assert operation_ineligibility(host, operation) is None
 
 

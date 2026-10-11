@@ -29,7 +29,7 @@ async function compileView(url) {
  return `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`;
 }
 const {default:Operations}=await import(await compileView(new URL('./Operations.vue',import.meta.url)));
-const devices=[{id:1,name:'Node 1',inventory_name:'node-01',transport:'ssh',os_family:'Debian',maintenance_mode:'kubernetes'},{id:2,name:'Robot',inventory_name:'robot',transport:'reachy_daemon'}];
+const devices=[{id:1,name:'Node 1',inventory_name:'node-01',transport:'ssh',os_family:'Debian',maintenance_mode:'kubernetes'},{id:2,name:'Robot',inventory_name:'robot',transport:'reachy_daemon',kind:'robot',model:'Reachy Mini Wireless'}];
 const checkJob={job_id:'check-id',playbook:'package_preview.yml',target_devices:'node-01',status:'success',finished_at:new Date().toISOString(),device_results:[{hostname:'node-01',status:'success'}],result_artifacts:[{hostname:'node-01',report_type:'packages',fingerprint:'a'.repeat(64),changes:['Inst curl [1] (2 Ubuntu)'],package_count:1}]};
 async function mount(query={devices:'1'},failOnce=false,recovery=false,installPhase='complete',inspectionReports=[]) {
  global.localStorage={getItem:()=> 'test'};global.window={location:{hash:''}};
@@ -38,13 +38,14 @@ async function mount(query={devices:'1'},failOnce=false,recovery=false,installPh
   calls.push({url,options,body:options.body?JSON.parse(options.body):null});
   const respond=value=>new Response(JSON.stringify(value),{status:200,headers:{'Content-Type':'application/json'}});
   if(url==='/api/v2/devices')return respond(devices.map(device=>({...device,recovery_required:recovery&&device.id===1})));
-  if(url==='/api/v2/operations')return respond(['system.packages.preview','system.update','containers.cleanup','system.reboot','storage.inspect','gpu.inspect'].map(id=>({id,eligible_device_ids:[1],excluded_devices:[{id:2,reason:'Requires SSH'}]})));
+  if(url==='/api/v2/operations')return respond(['system.packages.preview','system.update','containers.cleanup','system.reboot','storage.inspect','gpu.inspect','reachy.daemon.restart'].map(id=>id==='reachy.daemon.restart'?{id,eligible_device_ids:[2],excluded_devices:[{id:1,reason:'Requires a Reachy Mini device connected through its daemon'}]}:{id,eligible_device_ids:[1],excluded_devices:[{id:2,reason:'Requires SSH'}]}));
   if(url.startsWith('/api/v2/jobs?'))return respond([]);
   if(options.method==='POST') {
    posted++;
    if(failOnce&&posted===1)throw new Error('Connection lost');
    if(url.includes('system.update'))currentJob={...checkJob,job_id:'install-id',playbook:'system_update.yml',phase:installPhase,status:installPhase==='checking_health'?'running':installPhase==='health_check_failed'?'failed':'success',error_summary:installPhase==='health_check_failed'?'Automatic health check failed. The requested action did not start.':null,device_results:installPhase==='health_check_failed'?[{hostname:'node-01',status:'verification_failed',detail:'Required mounts are missing: /data'}]:checkJob.device_results,result_artifacts:[{report_type:'apt_install',hostname:'node-01',package_count:1,reboot_required:true}]};
    if(url.includes('system.reboot'))currentJob={...checkJob,job_id:'reboot-id',playbook:'reboot.yml',status:installPhase==='complete'?'success':installPhase,phase:'executing',error_summary:installPhase==='recovery_required'?'The node did not return over SSH.':null,result_artifacts:[{report_type:'reboot',hostname:'node-01',rebooted:true,elapsed_seconds:30}]};
+   if(url.includes('reachy.daemon.restart'))currentJob={...checkJob,job_id:'restart-id',playbook:'reachy.daemon.restart',target_devices:'robot',status:installPhase==='complete'?'success':installPhase,phase:'verifying',error_summary:installPhase==='recovery_required'?'Daemon health could not be verified':null,device_results:[{hostname:'robot',status:installPhase==='complete'?'success':installPhase}],result_artifacts:[]};
    if(url.includes('storage.inspect') || url.includes('gpu.inspect'))currentJob={...checkJob,job_id:'inspection-id',playbook:url.includes('storage.inspect')?'storage_analysis.yml':'gpu_usage.yml',status:installPhase==='complete'?'success':installPhase,result_artifacts:inspectionReports};
    return respond({job_id:currentJob.job_id});
   }
@@ -202,4 +203,63 @@ test('partial inspection preserves successful results and per-device errors',asy
  const view=await mount({devices:'1'},false,false,'partial',storageReports);
  try {await view.click('Check storage');assert.match(text(view.root),/Some devices need attention/);assert.match(text(view.root),/Contains \/home/);}
  finally {view.app.unmount();}
+});
+
+for (const state of ['complete','running','recovery_required']) {
+ test(`Reachy Mini restart confirms targets and shows daemon progress: ${state}`,async()=>{
+  const view=await mount({devices:'2',operation:'reachy.daemon.restart'},false,false,state);
+  try {
+   await view.click('Restart daemon…');
+   assert.match(text(view.root),/Restart Reachy Mini daemon\?/);
+   assert.match(text(view.root),/Connected apps are interrupted/);
+   assert.match(text(view.root),/robot may move/);
+   assert.equal(view.calls.filter(c=>c.options.method==='POST').length,0);
+   await view.click('Restart daemon');
+   const posts=view.calls.filter(c=>c.options.method==='POST');
+   assert.equal(posts.length,1);
+   assert.match(posts[0].url,/reachy.daemon.restart/);
+   assert.deepEqual(posts[0].body.device_ids,[2]);
+   assert.equal(posts[0].body.confirmation,'Robot');
+   assert.equal(posts[0].body.preview_job_id,undefined);
+   if(state==='complete')assert.match(text(view.root),/Reachy Mini daemon restarted/);
+   else if(state==='running')assert.match(text(view.root),/waiting for the robot backend to be ready/);
+   else assert.match(text(view.root),/Daemon health could not be verified/);
+  } finally {view.app.unmount();}
+ });
+}
+
+test('Reachy Mini restart is hidden when only SSH nodes are selected',async()=>{
+ const view=await mount({devices:'1'});
+ try {assert.doesNotMatch(text(view.root),/Restart daemon…/);}
+ finally {view.app.unmount();}
+});
+
+test('mixed Reachy Mini and SSH selection blocks the entire daemon restart',async()=>{
+ const view=await mount({devices:'1,2'});
+ try {
+  await view.click('Restart daemon…');
+  assert.match(text(view.root),/Requires a Reachy Mini device/);
+  assert.equal(view.calls.filter(c=>c.options.method==='POST').length,0);
+  await view.click('Deselect');
+  await view.click('Restart daemon…');
+  await view.click('Restart daemon');
+  assert.deepEqual(view.calls.find(c=>c.options.method==='POST').body.device_ids,[2]);
+ } finally {view.app.unmount();}
+});
+
+test('Reachy Mini restart can be cancelled before dispatch',async()=>{
+ const view=await mount({devices:'2'});
+ try {await view.click('Restart daemon…');await view.click('Cancel');assert.equal(view.calls.filter(c=>c.options.method==='POST').length,0);}
+ finally {view.app.unmount();}
+});
+
+test('Reachy Mini restart reconnects to an uncertain request with the same key',async()=>{
+ const view=await mount({devices:'2'},true);
+ try {
+  await view.click('Restart daemon…');await view.click('Restart daemon');
+  await view.click('Reconnect to request');
+  const posts=view.calls.filter(c=>c.options.method==='POST');
+  assert.equal(posts.length,2);assert.deepEqual(posts[0].body,posts[1].body);
+  assert.match(text(view.root),/Reachy Mini daemon restarted/);
+ } finally {view.app.unmount();}
 });

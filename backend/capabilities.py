@@ -145,6 +145,11 @@ OPERATIONS = (
         "Show NVIDIA GPU utilization, memory, process owners, and container or pod context.",
         "GPU", GPU_INSPECT, "low", "none", "gpu_usage.yml", "fa-microchip",
     ),
+    OperationDefinition(
+        REACHY_DAEMON_RESTART, "Restart Reachy Mini daemon",
+        "Restart the daemon on Reachy Mini devices, one at a time, and verify it returns healthy. Connected apps are interrupted and the robot may move during initialization.",
+        "Reachy Mini", REACHY_DAEMON_RESTART, "high", "confirm", icon="fa-robot",
+    ),
 )
 
 OPERATION_BY_ID = {operation.id: operation for operation in OPERATIONS}
@@ -157,8 +162,16 @@ def facts_are_stale(device) -> bool:
 
 
 def operation_ineligibility(device, operation) -> str | None:
+    if operation.id == REACHY_DAEMON_RESTART:
+        if (device.transport != "reachy_daemon" or device.kind != "robot" or
+                not re.match(r"^reachy[\s_-]+mini(?:[\s_-]|$)", device.model or "", re.IGNORECASE)):
+            return "Requires a Reachy Mini device connected through its daemon"
+        if device.recovery_required:
+            return "The previous Reachy operation needs verification. Open device settings and Scan before restarting again."
     if not has_capability(device, operation.required_capability):
         return "Required capability has not been discovered"
+    if operation.id == REACHY_DAEMON_RESTART:
+        return None
     if (device.transport or "ssh") != "ssh":
         return "Requires verified SSH access"
     family = device.os_family or device.facts.get("os_family")

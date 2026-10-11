@@ -58,7 +58,7 @@ export const OPERATION_LABELS = {
   "firmware_update.yml": "Update firmware",
   "reachy.health": "Check Reachy health",
   "reachy.logs.read": "Collect Reachy logs",
-  "reachy.daemon.restart": "Restart Reachy daemon",
+  "reachy.daemon.restart": "Restart Reachy Mini daemon",
   "reachy.software.update": "Update Reachy software",
   "reachy_app_reset.yml": "Reset Reachy apps",
 };

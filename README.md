@@ -1,6 +1,6 @@
 # Fleet Manager
 
-Fleet maintenance focused on six operations: check storage, inspect GPU usage, check for apt updates, install apt updates, clear Docker and containerd/nerdctl cache, and reboot nodes, plus bulk user management with CSV import. The backend uses FastAPI and Ansible; the frontend uses Vue 3.
+Fleet maintenance focused on seven operations: check storage, inspect GPU usage, check for apt updates, install apt updates, clear Docker and containerd/nerdctl cache, reboot nodes, and restart Reachy Mini daemons, plus bulk user management with CSV import. The backend uses FastAPI and Ansible; the frontend uses Vue 3.
 
 ## Features
 
@@ -406,7 +406,9 @@ Key specs: Ubuntu 24.04 LTS, Blackwell Ultra GPU, 252 GB HBM3e, 496 GB LPDDR5X, 
 2. Confirm its daemon is available on port `8000`, or enter the configured port.
 3. Add it with **Reachy Mini Wireless** as the connection type.
 4. Discovery reads `/api/state/full` and never sends movement, torque, camera, audio, or app-control commands.
-Reachy daemon devices remain visible in inventory; the six maintenance operations require SSH and their respective discovered capabilities. Reachy app resets and daemon updates are no longer service operations.
+Reachy Mini devices connected through their daemon support **Restart Reachy Mini daemon**. Select a Reachy Mini in Operations to see the action, review the selected targets, and confirm. It restarts devices one at a time and verifies that each daemon is running with its robot backend ready. Connected apps are interrupted, and the robot may move during initialization. Mixed selections containing non-Reachy Mini devices are rejected. The other six operations require SSH and their respective discovered capabilities. Reachy app resets and software updates remain unavailable as service operations.
+
+Daemon restarts use the [Reachy Mini restart API](https://github.com/pollen-robotics/reachy_mini/blob/v1.10.0/src/reachy_mini/daemon/app/routers/daemon.py) and retain the remote job ID for progress tracking and recovery. Retrying an accepted request reconnects to the same job; uncertain failures are never automatically replayed. If a restart is interrupted, use **Scan** in device settings to verify the recorded remote job and daemon health. If no remote job ID was acknowledged, Fleet keeps the device in recovery for manual investigation.
 
 ## Common Operations
 
@@ -481,7 +483,7 @@ ansible-playbook playbooks/package_preview.yml --limit ast-spark-01
 
 ### Kubernetes-aware maintenance in legacy CLI playbooks
 
-The service's six operations and recovery verification treat every device as standalone. They do not drain, cordon, uncordon, or require Kubernetes access. The following configuration applies only to legacy CLI playbooks such as driver maintenance and explicit drain/resume.
+The service's operations and recovery verification treat every device as standalone. They do not drain, cordon, uncordon, or require Kubernetes access. The following configuration applies only to legacy CLI playbooks such as driver maintenance and explicit drain/resume.
 
 Kubernetes API work runs on the Ansible controller. Managed nodes do not need `kubectl` or a kubeconfig. Set the controller kubeconfig before running Ansible directly:
 

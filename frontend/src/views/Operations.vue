@@ -1,12 +1,12 @@
 <template>
   <div class="maintenance">
     <header class="page-header">
-      <div><h2>Operations</h2><p class="page-subtitle">Check storage and GPU usage, update packages, clear cache, and reboot nodes.</p></div>
+      <div><h2>Operations</h2><p class="page-subtitle">Run checks and maintenance on your selected devices.</p></div>
       <button class="btn btn-ghost btn-sm" :disabled="loading || busy" @click="load"><i :class="['fas', loading ? 'fa-spinner fa-spin' : 'fa-sync-alt']" aria-hidden="true"></i>Refresh</button>
     </header>
     <div v-if="loadError" class="callout callout-danger" role="alert">{{ loadError }} <button class="btn btn-ghost btn-sm" @click="load">Try again</button></div>
     <p v-if="loading && !devices.length" role="status" class="loading-state">Loading devices and operations…</p>
-    <div v-else-if="!devices.length && !loadError" class="empty-state card"><h3>Your maintenance workspace</h3><p>Add an SSH device to check storage and GPU usage or run maintenance.</p><router-link to="/devices?add=1" class="btn btn-primary">Add device</router-link></div>
+    <div v-else-if="!devices.length && !loadError" class="empty-state card"><h3>Your maintenance workspace</h3><p>Add an SSH node or Reachy Mini to run checks and maintenance.</p><router-link to="/devices?add=1" class="btn btn-primary">Add device</router-link></div>
     <div v-else class="workspace">
       <aside class="card devices-panel" aria-labelledby="device-heading">
         <div class="panel-heading"><div><h3 id="device-heading">Devices</h3><p aria-live="polite">{{ selectedIds.length }} selected</p></div><router-link to="/devices" class="subtle-link">Manage</router-link></div>
@@ -14,7 +14,7 @@
         <div class="device-list">
           <label v-for="device in visibleDevices" :key="device.id" :class="['device-option', {selected:selectedIds.includes(device.id)}]">
             <input v-model="selectedIds" type="checkbox" :value="device.id" :disabled="busy" />
-            <span class="device-copy"><strong>{{ device.name }}</strong><small>{{ device.os_version || device.os_family || 'OS not discovered' }}</small><small v-if="device.recovery_required" class="warning-text">Health checks run before install or cleanup</small><small v-else-if="device.status === 'offline'" class="warning-text">Last seen offline</small></span>
+            <span class="device-copy"><strong>{{ device.name }}</strong><small>{{ device.os_version || device.os_family || device.model || 'OS not discovered' }}</small><small v-if="device.recovery_required" class="warning-text">{{ device.transport === 'reachy_daemon' ? 'Previous daemon operation needs verification' : 'Health checks run before install or cleanup' }}</small><small v-else-if="device.status === 'offline'" class="warning-text">Last seen offline</small></span>
           </label>
           <p v-if="!visibleDevices.length" class="muted list-empty">No devices match “{{ search }}”.</p>
         </div>
@@ -24,7 +24,7 @@
 
       <div class="main-panel">
         <div class="action-grid" aria-label="Available operations">
-          <article v-for="action in actions" :key="action.id" :class="['card', 'action-card', {chosen:focused === action.id}]">
+          <article v-for="action in visibleActions" :key="action.id" :class="['card', 'action-card', {chosen:focused === action.id}]">
             <span class="action-icon" aria-hidden="true"><i :class="['fas', action.icon]"></i></span>
             <h3>{{ action.label }}</h3><p>{{ action.description }}</p>
             <span class="action-meta">{{ action.meta }}</span>
@@ -39,19 +39,20 @@
         </div>
 
         <section v-if="confirmation" ref="resultPanel" class="card review-panel" aria-labelledby="review-heading" tabindex="-1">
-          <span class="eyebrow">Review and run</span><h3 id="review-heading">{{ confirmation.id === INSTALL ? 'Install checked apt updates?' : confirmation.id === REBOOT ? 'Reboot selected nodes?' : 'Clear unused container cache?' }}</h3>
-          <p class="target-line">{{ selectedDevices.map(d => d.name).join(', ') }}</p><p v-if="confirmation.id !== REBOOT && selectedDevices.some(d => d.recovery_required)" class="muted">An earlier operation did not finish. We’ll check device health first, then continue automatically. If a device needs attention, this action stops before making changes.</p>
+          <span class="eyebrow">Review and run</span><h3 id="review-heading">{{ confirmation.id === INSTALL ? 'Install checked apt updates?' : confirmation.id === REBOOT ? 'Reboot selected nodes?' : confirmation.id === REACHY_RESTART ? 'Restart Reachy Mini daemon?' : 'Clear unused container cache?' }}</h3>
+          <p class="target-line">{{ selectedDevices.map(d => d.name).join(', ') }}</p><p v-if="[INSTALL, CLEANUP].includes(confirmation.id) && selectedDevices.some(d => d.recovery_required)" class="muted">An earlier operation did not finish. We’ll check device health first, then continue automatically. If a device needs attention, this action stops before making changes.</p>
           <template v-if="confirmation.id === INSTALL"><p>{{ packageCount(check) }} package {{ packageCount(check) === 1 ? 'update' : 'updates' }} across {{ selectedDevices.length }} {{ selectedDevices.length === 1 ? 'device' : 'devices' }}. Services may restart. No automatic reboot.</p><PackageResults :reports="check.result_artifacts" :devices="devices" /></template>
           <template v-else-if="confirmation.id === REBOOT"><p>Reboot every selected node, including nodes with pending health checks. Running work will be interrupted.</p><p class="muted">Nodes restart one at a time. We’ll wait for each node to return over SSH and refresh its details.</p></template>
+          <template v-else-if="confirmation.id === REACHY_RESTART"><p>Restart the daemon on the selected Reachy Mini devices. Connected apps are interrupted, and the robot may move during initialization.</p><p class="muted">Devices are handled one at a time. We’ll wait for the daemon to finish restarting and verify the robot backend is ready.</p></template>
           <template v-else><p>Remove unused images and build cache from Docker and containerd/nerdctl. Containers, volumes, and networks stay intact.</p><p class="muted">Removed images may need to be downloaded again. BuildKit cache is cleared when available.</p></template>
-          <div class="review-actions"><button class="btn btn-primary" :disabled="busy || loading || !!loadError || !!selectionBlockers.length || (confirmation.id === INSTALL && !checkReady)" @click="confirmRun">{{ confirmation.id === INSTALL ? `Install ${updateLabel(packageCount(check))}` : confirmation.id === REBOOT ? 'Reboot now' : 'Clear cache' }}</button><button class="btn btn-ghost" @click="confirmation = null">Cancel</button></div>
+          <div class="review-actions"><button class="btn btn-primary" :disabled="busy || loading || !!loadError || !!selectionBlockers.length || (confirmation.id === INSTALL && !checkReady)" @click="confirmRun">{{ confirmation.id === INSTALL ? `Install ${updateLabel(packageCount(check))}` : confirmation.id === REBOOT ? 'Reboot now' : confirmation.id === REACHY_RESTART ? 'Restart daemon' : 'Clear cache' }}</button><button class="btn btn-ghost" @click="confirmation = null">Cancel</button></div>
           <p v-if="confirmation.id === INSTALL && !checkReady" role="alert" class="warning-text">This check expired or the selection changed. Check for updates again.</p>
         </section>
 
         <div v-if="actionError" class="callout callout-danger action-error" role="alert"><div><strong>{{ actionError }}</strong><p v-if="retryRequest">The request may have been accepted. Retry safely to reconnect to the same job.</p><button v-if="retryRequest" class="btn btn-ghost btn-sm" :disabled="starting !== ''" @click="submit(retryRequest)">Reconnect to request</button></div></div>
 
         <section v-if="job && !(confirmation?.id === INSTALL && job.playbook === 'package_preview.yml')" ref="jobPanel" class="card result-panel" aria-labelledby="result-heading" tabindex="-1">
-          <div class="result-heading"><div><span class="eyebrow">{{ job.playbook === 'package_preview.yml' ? 'Package check' : job.playbook === 'docker_cleanup.yml' ? 'Cache cleanup' : job.playbook === 'system_update.yml' ? 'Package installation' : job.playbook === 'reboot.yml' ? 'Node reboot' : job.playbook === 'storage_analysis.yml' ? 'Storage check' : job.playbook === 'gpu_usage.yml' ? 'GPU check' : 'Device verification' }}</span><h3 id="result-heading">{{ jobHeadline }}</h3></div><span role="status" :class="['result-state', {failed:job.status !== 'success' && !jobActive}]"><i v-if="jobActive" class="fas fa-spinner fa-spin" aria-hidden="true"></i>{{ statusLabel(job.status) }}</span></div>
+          <div class="result-heading"><div><span class="eyebrow">{{ job.playbook === 'package_preview.yml' ? 'Package check' : job.playbook === 'docker_cleanup.yml' ? 'Cache cleanup' : job.playbook === 'system_update.yml' ? 'Package installation' : job.playbook === 'reboot.yml' ? 'Node reboot' : job.playbook === 'storage_analysis.yml' ? 'Storage check' : job.playbook === 'gpu_usage.yml' ? 'GPU check' : job.playbook === REACHY_RESTART ? 'Reachy Mini daemon restart' : 'Device verification' }}</span><h3 id="result-heading">{{ jobHeadline }}</h3></div><span role="status" :class="['result-state', {failed:job.status !== 'success' && !jobActive}]"><i v-if="jobActive" class="fas fa-spinner fa-spin" aria-hidden="true"></i>{{ statusLabel(job.status) }}</span></div>
           <p class="muted">{{ job.playbook === 'storage_analysis.yml' ? `${namesFor(job).length} ${namesFor(job).length === 1 ? 'node' : 'nodes'}` : namesFor(job).map(name => devices.find(d => d.inventory_name === name)?.name || name).join(', ') }} <span v-if="job.finished_at">· {{ formatLongTime(job.finished_at) }}</span></p>
           <p v-if="jobActive" role="status">{{ jobProgress }}</p>
           <div v-if="pollError" class="callout callout-warn" role="alert">{{ pollError }} <button class="btn btn-ghost btn-sm" @click="pollJob(job.job_id)">Reconnect</button></div>
@@ -79,7 +80,7 @@ import {visibleStorageOutcomes} from '../utils/storage.js';
 import { getDevices, getOperations, runOperation, getJobs, getJob } from '../api.js';
 import { parseDeviceIds } from '../utils/fleetOverview.js';
 import { formatLongTime } from '../utils/time.js';
-import { CHECK, INSTALL, CLEANUP, REBOOT, STORAGE, GPU, PLAYBOOKS, ACTION_IDS, ACTIVE, namesFor, sameTargets, validPackageCheck, blockers, packageCount, statusLabel, updateLabel } from '../utils/maintenance.js';
+import { CHECK, INSTALL, CLEANUP, REBOOT, STORAGE, GPU, REACHY_RESTART, PLAYBOOKS, ACTION_IDS, ACTIVE, namesFor, sameTargets, validPackageCheck, blockers, packageCount, statusLabel, updateLabel } from '../utils/maintenance.js';
 
 
 const actions = [
@@ -88,6 +89,7 @@ const actions = [
   {id:CLEANUP,label:'Clear container cache',description:'Clear unused Docker and containerd/nerdctl images and build cache.',meta:'Keep containers and volumes',cta:'Clear cache…',icon:'fa-box'},
   {id:STORAGE,label:'Check storage',description:'See capacity for the filesystem containing /home and every mount in /etc/fstab.',meta:'Read only · Flags missing mounts',cta:'Check storage',icon:'fa-hard-drive'},
   {id:GPU,label:'Check GPU usage',description:'See GPU utilization, memory, process owners, and container or pod context.',meta:'Read only · NVIDIA GPU nodes',cta:'Check GPUs',icon:'fa-microchip'},
+  {id:REACHY_RESTART,label:'Restart Reachy Mini daemon',description:'Restart the daemon and verify the robot backend is ready.',meta:'Reachy Mini only · Interrupts connected apps',cta:'Restart daemon…',icon:'fa-robot'},
   {id:REBOOT,label:'Reboot nodes',description:'Restart selected nodes, even when no reboot is marked as required.',meta:'One node at a time · Interrupts running work',cta:'Reboot…',icon:'fa-power-off'},
 ];
 const route = useRoute(), router = useRouter();
@@ -97,6 +99,7 @@ const job = ref(null), check = ref(null), pollError = ref(''), now = ref(Date.no
 let installAfterCheck = false;
 let timer, clockTimer, disposed = false, generation = 0, selectionGeneration = 0, initialized = false;
 const selectedDevices = computed(() => devices.value.filter(d => selectedIds.value.includes(d.id)));
+const visibleActions = computed(() => actions.filter(action => action.id !== REACHY_RESTART || selectedDevices.value.some(device => device.transport === 'reachy_daemon' && device.kind === 'robot' && /^reachy[\s_-]+mini(?:[\s_-]|$)/i.test(device.model || ''))));
 const visibleDevices = computed(() => devices.value.filter(d => `${d.name} ${d.inventory_name} ${d.os_version}`.toLowerCase().includes(search.value.toLowerCase())));
 const missingTargets = computed(() => [...unresolvedNames.value, ...selectedIds.value.filter(id => !devices.value.some(d => d.id === id)).map(id => `#${id}`)]);
 const jobActive = computed(() => job.value && ACTIVE.includes(job.value.status));
@@ -109,11 +112,11 @@ const jobHeadline = computed(() => {
   if (job.value.phase === 'health_check_failed') return 'Device health check failed';
   if (job.value.status !== 'success') return job.value.status === 'partial' ? 'Some devices need attention' : 'This operation needs attention';
   if (job.value.playbook === 'package_preview.yml') return packageCount(job.value) ? `${packageCount(job.value)} package ${packageCount(job.value) === 1 ? "update" : "updates"} available` : 'All packages are up to date';
-  return job.value.playbook === 'system_update.yml' ? 'Apt updates installed' : job.value.playbook === 'docker_cleanup.yml' ? 'Cache cleanup completed' : job.value.playbook === 'reboot.yml' ? 'Nodes rebooted' : job.value.playbook === 'storage_analysis.yml' ? 'Storage check completed' : job.value.playbook === 'gpu_usage.yml' ? 'GPU check completed' : 'Device details verified';
+  return job.value.playbook === 'system_update.yml' ? 'Apt updates installed' : job.value.playbook === 'docker_cleanup.yml' ? 'Cache cleanup completed' : job.value.playbook === 'reboot.yml' ? 'Nodes rebooted' : job.value.playbook === 'storage_analysis.yml' ? 'Storage check completed' : job.value.playbook === 'gpu_usage.yml' ? 'GPU check completed' : job.value.playbook === REACHY_RESTART ? 'Reachy Mini daemon restarted' : 'Device details verified';
 });
 function selectVisible() { selectedIds.value = [...new Set([...selectedIds.value, ...visibleDevices.value.map(d => d.id)])]; }
 function clearMissing() { selectedIds.value = selectedIds.value.filter(id => devices.value.some(d => d.id === id)); unresolvedNames.value = []; }
-const jobProgress = computed(() => ({checking_health:'Checking services, storage mounts, package health, and detected GPUs after an unfinished operation. Your action will continue automatically.', checking_facts:'Refreshing device details before continuing automatically.', refreshing_facts:'The action finished. Refreshing device details…'})[job.value?.phase] || (job.value?.playbook === 'reboot.yml' ? 'Rebooting selected nodes one at a time and waiting for SSH to return. You can leave this page and follow progress in Activity.' : 'Working on the selected devices. You can leave this page and return to Activity at any time.'));
+const jobProgress = computed(() => ({checking_health:'Checking services, storage mounts, package health, and detected GPUs after an unfinished operation. Your action will continue automatically.', checking_facts:'Refreshing device details before continuing automatically.', refreshing_facts:'The action finished. Refreshing device details…'})[job.value?.phase] || (job.value?.playbook === 'reboot.yml' ? 'Rebooting selected nodes one at a time and waiting for SSH to return. You can leave this page and follow progress in Activity.' : job.value?.playbook === REACHY_RESTART ? 'Restarting Reachy Mini daemons one at a time and waiting for the robot backend to be ready. You can follow progress in Activity.' : 'Working on the selected devices. You can leave this page and return to Activity at any time.'));
 async function focusPanel(panel) { await nextTick(); panel.value?.focus({preventScroll:true}); panel.value?.scrollIntoView({behavior:'smooth',block:'nearest'}); }
 async function load() {
   loading.value = true; loadError.value = '';

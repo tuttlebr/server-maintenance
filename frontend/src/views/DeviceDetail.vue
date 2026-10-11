@@ -17,7 +17,7 @@
       </div>
     </div>
 
-    <p v-if="device.recovery_required" class="callout callout-warn" role="status">An earlier operation did not finish. The next install or cleanup checks device health automatically before making changes.<span v-if="device.recovery_reason"> {{ device.recovery_reason }}</span></p>
+    <p v-if="device.recovery_required" class="callout callout-warn" role="status">{{ device.transport === 'reachy_daemon' ? 'An earlier daemon operation did not finish. Scan to verify its recorded result and daemon health before restarting again.' : 'An earlier operation did not finish. The next install or cleanup checks device health automatically before making changes.' }}<span v-if="device.recovery_reason"> {{ device.recovery_reason }}</span></p>
     <p v-if="device.facts_stale" class="callout callout-warn" role="status">Displayed details may be out of date. Scan to refresh this view. Operations check their requirements automatically.</p>
     <nav class="detail-tabs" aria-label="Device sections">
       <button v-for="tab in tabs" :key="tab" :class="{ active: activeTab === tab }" @click="activeTab = tab">{{ tab }}</button>

@@ -4,8 +4,9 @@ export const CLEANUP = 'containers.cleanup';
 export const REBOOT = 'system.reboot';
 export const STORAGE = 'storage.inspect';
 export const GPU = 'gpu.inspect';
-export const ACTION_IDS = [CHECK, INSTALL, CLEANUP, REBOOT, STORAGE, GPU];
-export const PLAYBOOKS = {[CHECK]:'package_preview.yml',[INSTALL]:'system_update.yml',[CLEANUP]:'docker_cleanup.yml',[REBOOT]:'reboot.yml',[STORAGE]:'storage_analysis.yml',[GPU]:'gpu_usage.yml'};
+export const REACHY_RESTART = 'reachy.daemon.restart';
+export const ACTION_IDS = [CHECK, INSTALL, CLEANUP, REBOOT, STORAGE, GPU, REACHY_RESTART];
+export const PLAYBOOKS = {[CHECK]:'package_preview.yml',[INSTALL]:'system_update.yml',[CLEANUP]:'docker_cleanup.yml',[REBOOT]:'reboot.yml',[STORAGE]:'storage_analysis.yml',[GPU]:'gpu_usage.yml',[REACHY_RESTART]:REACHY_RESTART};
 export const ACTIVE = ['pending', 'running', 'cancelling'];
 export const namesFor = (job) => String(job?.target_devices || '').split(',').filter(Boolean);
 export function sameTargets(job, devices) {

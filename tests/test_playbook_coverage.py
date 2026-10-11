@@ -31,8 +31,8 @@ def imported_playbooks(playbook_name: str) -> set[str]:
 
 class PlaybookCoverageTests(unittest.TestCase):
     def test_public_operations_are_limited_to_requested_maintenance(self):
-        self.assertEqual({op.id for op in OPERATIONS}, {"system.packages.preview", "system.update", "containers.cleanup", "system.reboot", "storage.inspect", "gpu.inspect"})
-        self.assertEqual({op.playbook for op in OPERATIONS}, {"package_preview.yml", "system_update.yml", "docker_cleanup.yml", "reboot.yml", "storage_analysis.yml", "gpu_usage.yml"})
+        self.assertEqual({op.id for op in OPERATIONS}, {"system.packages.preview", "system.update", "containers.cleanup", "system.reboot", "storage.inspect", "gpu.inspect", "reachy.daemon.restart"})
+        self.assertEqual({op.playbook for op in OPERATIONS if op.playbook}, {"package_preview.yml", "system_update.yml", "docker_cleanup.yml", "reboot.yml", "storage_analysis.yml", "gpu_usage.yml"})
 
     def test_service_workflows_have_no_cluster_api_or_scheduling_dependency(self):
         visited = set()
