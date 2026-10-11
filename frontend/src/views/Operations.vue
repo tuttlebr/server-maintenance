@@ -1,12 +1,12 @@
 <template>
   <div class="maintenance">
     <header class="page-header">
-      <div><h2>Operations</h2><p class="page-subtitle">Update packages, clear container cache, and reboot nodes.</p></div>
+      <div><h2>Operations</h2><p class="page-subtitle">Check storage and GPU usage, update packages, clear cache, and reboot nodes.</p></div>
       <button class="btn btn-ghost btn-sm" :disabled="loading || busy" @click="load"><i :class="['fas', loading ? 'fa-spinner fa-spin' : 'fa-sync-alt']" aria-hidden="true"></i>Refresh</button>
     </header>
     <div v-if="loadError" class="callout callout-danger" role="alert">{{ loadError }} <button class="btn btn-ghost btn-sm" @click="load">Try again</button></div>
     <p v-if="loading && !devices.length" role="status" class="loading-state">Loading devices and operations…</p>
-    <div v-else-if="!devices.length && !loadError" class="empty-state card"><h3>Your maintenance workspace</h3><p>Add an SSH device to manage packages, container cache, and reboots.</p><router-link to="/devices?add=1" class="btn btn-primary">Add device</router-link></div>
+    <div v-else-if="!devices.length && !loadError" class="empty-state card"><h3>Your maintenance workspace</h3><p>Add an SSH device to check storage and GPU usage or run maintenance.</p><router-link to="/devices?add=1" class="btn btn-primary">Add device</router-link></div>
     <div v-else class="workspace">
       <aside class="card devices-panel" aria-labelledby="device-heading">
         <div class="panel-heading"><div><h3 id="device-heading">Devices</h3><p aria-live="polite">{{ selectedIds.length }} selected</p></div><router-link to="/devices" class="subtle-link">Manage</router-link></div>
@@ -51,19 +51,20 @@
         <div v-if="actionError" class="callout callout-danger action-error" role="alert"><div><strong>{{ actionError }}</strong><p v-if="retryRequest">The request may have been accepted. Retry safely to reconnect to the same job.</p><button v-if="retryRequest" class="btn btn-ghost btn-sm" :disabled="starting !== ''" @click="submit(retryRequest)">Reconnect to request</button></div></div>
 
         <section v-if="job && !(confirmation?.id === INSTALL && job.playbook === 'package_preview.yml')" ref="jobPanel" class="card result-panel" aria-labelledby="result-heading" tabindex="-1">
-          <div class="result-heading"><div><span class="eyebrow">{{ job.playbook === 'package_preview.yml' ? 'Package check' : job.playbook === 'docker_cleanup.yml' ? 'Cache cleanup' : job.playbook === 'system_update.yml' ? 'Package installation' : job.playbook === 'reboot.yml' ? 'Node reboot' : 'Device verification' }}</span><h3 id="result-heading">{{ jobHeadline }}</h3></div><span role="status" :class="['result-state', {failed:job.status !== 'success' && !jobActive}]"><i v-if="jobActive" class="fas fa-spinner fa-spin" aria-hidden="true"></i>{{ statusLabel(job.status) }}</span></div>
-          <p class="muted">{{ namesFor(job).map(name => devices.find(d => d.inventory_name === name)?.name || name).join(', ') }} <span v-if="job.finished_at">· {{ formatLongTime(job.finished_at) }}</span></p>
+          <div class="result-heading"><div><span class="eyebrow">{{ job.playbook === 'package_preview.yml' ? 'Package check' : job.playbook === 'docker_cleanup.yml' ? 'Cache cleanup' : job.playbook === 'system_update.yml' ? 'Package installation' : job.playbook === 'reboot.yml' ? 'Node reboot' : job.playbook === 'storage_analysis.yml' ? 'Storage check' : job.playbook === 'gpu_usage.yml' ? 'GPU check' : 'Device verification' }}</span><h3 id="result-heading">{{ jobHeadline }}</h3></div><span role="status" :class="['result-state', {failed:job.status !== 'success' && !jobActive}]"><i v-if="jobActive" class="fas fa-spinner fa-spin" aria-hidden="true"></i>{{ statusLabel(job.status) }}</span></div>
+          <p class="muted">{{ job.playbook === 'storage_analysis.yml' ? `${namesFor(job).length} ${namesFor(job).length === 1 ? 'node' : 'nodes'}` : namesFor(job).map(name => devices.find(d => d.inventory_name === name)?.name || name).join(', ') }} <span v-if="job.finished_at">· {{ formatLongTime(job.finished_at) }}</span></p>
           <p v-if="jobActive" role="status">{{ jobProgress }}</p>
           <div v-if="pollError" class="callout callout-warn" role="alert">{{ pollError }} <button class="btn btn-ghost btn-sm" @click="pollJob(job.job_id)">Reconnect</button></div>
           <p v-if="job.error_summary" class="warning-text">{{ job.error_summary }}</p>
-          <div v-for="outcome in job.device_results || []" :key="outcome.hostname" class="outcome"><strong>{{ devices.find(d => d.inventory_name === outcome.hostname)?.name || outcome.hostname }}</strong><span>{{ statusLabel(outcome.status) }}</span><p v-if="outcome.detail">{{ outcome.detail }}</p><p v-if="outcome.recovery_resolution">{{ outcome.recovery_resolution }}</p></div>
+          <div v-for="outcome in visibleStorageOutcomes(job)" :key="outcome.hostname" class="outcome"><strong>{{ devices.find(d => d.inventory_name === outcome.hostname)?.name || outcome.hostname }}</strong><span>{{ statusLabel(outcome.status) }}</span><p v-if="outcome.detail">{{ outcome.detail }}</p><p v-if="outcome.recovery_resolution">{{ outcome.recovery_resolution }}</p></div>
           <PackageResults v-if="job.playbook === 'package_preview.yml'" :reports="job.result_artifacts || []" :devices="devices" />
           <div v-for="report in (job.result_artifacts || []).filter(r => r.report_type === 'apt_install')" :key="report.hostname" class="install-summary"><strong>{{ report.hostname }}</strong>: {{ report.package_count }} {{ report.package_count === 1 ? 'package' : 'packages' }} installed.<span v-if="report.reboot_required" class="warning-text"> Reboot required. Use Reboot nodes when ready.</span></div>
           <div v-for="report in (job.result_artifacts || []).filter(r => r.report_type === 'cleanup')" :key="report.hostname" class="cleanup-summary"><h4>{{ report.hostname }}</h4><p>{{ report.summary }}</p><details v-for="step in report.steps" :key="step.label"><summary>{{ step.label }} · {{ step.status === 'skipped' ? 'Skipped' : statusLabel(step.status) }}</summary><pre>{{ step.output || 'Nothing to remove.' }}</pre></details></div>
+          <InspectionResults :reports="job.result_artifacts || []" :devices="devices" />
           <div v-if="!jobActive" class="result-actions"><button v-if="checkReady && packageCount(check) > 0 && job.playbook === 'package_preview.yml'" class="btn btn-primary" :disabled="busy" @click="choose(INSTALL)">Install {{ updateLabel(packageCount(check)) }}</button><button v-if="job.status !== 'success' && job.playbook === 'package_preview.yml'" class="btn btn-ghost" :disabled="busy" @click="choose(CHECK)">Check selected devices again</button><router-link :to="{path:'/activity',query:{job:job.job_id}}">View full activity</router-link></div>
           <details v-if="job.output_log" class="output-log"><summary>Technical log</summary><pre>{{ job.output_log }}</pre></details>
         </section>
-        <div v-else-if="!confirmation && !selectionBlockers.length" class="results-empty"><i class="fas fa-list-check" aria-hidden="true"></i><h3>Results stay right here</h3><p>Check updates, review packages, and follow each device without leaving this page.</p></div>
+        <div v-else-if="!confirmation && !selectionBlockers.length" class="results-empty"><i class="fas fa-list-check" aria-hidden="true"></i><h3>Results stay right here</h3><p>Run a check or maintenance action and follow each device without leaving this page.</p></div>
       </div>
     </div>
   </div>
@@ -73,16 +74,20 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import PackageResults from '../components/PackageResults.vue';
+import InspectionResults from '../components/InspectionResults.vue';
+import {visibleStorageOutcomes} from '../utils/storage.js';
 import { getDevices, getOperations, runOperation, getJobs, getJob } from '../api.js';
 import { parseDeviceIds } from '../utils/fleetOverview.js';
 import { formatLongTime } from '../utils/time.js';
-import { CHECK, INSTALL, CLEANUP, REBOOT, ACTION_IDS, ACTIVE, namesFor, sameTargets, validPackageCheck, blockers, packageCount, statusLabel, updateLabel } from '../utils/maintenance.js';
+import { CHECK, INSTALL, CLEANUP, REBOOT, STORAGE, GPU, PLAYBOOKS, ACTION_IDS, ACTIVE, namesFor, sameTargets, validPackageCheck, blockers, packageCount, statusLabel, updateLabel } from '../utils/maintenance.js';
 
 
 const actions = [
   {id:CHECK,label:'Check for apt updates',description:'See which packages can be updated on your Debian and Ubuntu devices.',meta:'No packages installed',cta:'Check now',icon:'fa-magnifying-glass'},
   {id:INSTALL,label:'Install apt updates',description:'Review available updates, then install the checked versions.',meta:'One device at a time · No reboot',cta:'Review & install',icon:'fa-arrow-down'},
   {id:CLEANUP,label:'Clear container cache',description:'Clear unused Docker and containerd/nerdctl images and build cache.',meta:'Keep containers and volumes',cta:'Clear cache…',icon:'fa-box'},
+  {id:STORAGE,label:'Check storage',description:'See capacity for the filesystem containing /home and every mount in /etc/fstab.',meta:'Read only · Flags missing mounts',cta:'Check storage',icon:'fa-hard-drive'},
+  {id:GPU,label:'Check GPU usage',description:'See GPU utilization, memory, process owners, and container or pod context.',meta:'Read only · NVIDIA GPU nodes',cta:'Check GPUs',icon:'fa-microchip'},
   {id:REBOOT,label:'Reboot nodes',description:'Restart selected nodes, even when no reboot is marked as required.',meta:'One node at a time · Interrupts running work',cta:'Reboot…',icon:'fa-power-off'},
 ];
 const route = useRoute(), router = useRouter();
@@ -104,7 +109,7 @@ const jobHeadline = computed(() => {
   if (job.value.phase === 'health_check_failed') return 'Device health check failed';
   if (job.value.status !== 'success') return job.value.status === 'partial' ? 'Some devices need attention' : 'This operation needs attention';
   if (job.value.playbook === 'package_preview.yml') return packageCount(job.value) ? `${packageCount(job.value)} package ${packageCount(job.value) === 1 ? "update" : "updates"} available` : 'All packages are up to date';
-  return job.value.playbook === 'system_update.yml' ? 'Apt updates installed' : job.value.playbook === 'docker_cleanup.yml' ? 'Cache cleanup completed' : job.value.playbook === 'reboot.yml' ? 'Nodes rebooted' : 'Device details verified';
+  return job.value.playbook === 'system_update.yml' ? 'Apt updates installed' : job.value.playbook === 'docker_cleanup.yml' ? 'Cache cleanup completed' : job.value.playbook === 'reboot.yml' ? 'Nodes rebooted' : job.value.playbook === 'storage_analysis.yml' ? 'Storage check completed' : job.value.playbook === 'gpu_usage.yml' ? 'GPU check completed' : 'Device details verified';
 });
 function selectVisible() { selectedIds.value = [...new Set([...selectedIds.value, ...visibleDevices.value.map(d => d.id)])]; }
 function clearMissing() { selectedIds.value = selectedIds.value.filter(id => devices.value.some(d => d.id === id)); unresolvedNames.value = []; }
@@ -151,7 +156,9 @@ async function choose(id) {
   if (busy.value || loading.value || loadError.value || !selectedIds.value.length || missingTargets.value.length) return;
   focused.value = id; actionError.value = ''; confirmation.value = null; installAfterCheck = id === INSTALL;
   if (selectionBlockers.value.length) return;
-  if (id === CHECK || (id === INSTALL && !checkReady.value)) {
+  if ([STORAGE, GPU].includes(id)) {
+    await submit(makeRequest(id));
+  } else if (id === CHECK || (id === INSTALL && !checkReady.value)) {
     // The installation entry point runs a check first, then opens its package
     // review in place. No background auto-install follows a check.
     await submit(makeRequest(CHECK));
@@ -175,7 +182,7 @@ async function submit(request) {
   starting.value = request.id; actionError.value = ''; retryRequest.value = null;
   try {
     const result = await runOperation(request.id, request.ids, request.parameters);
-    job.value = {job_id:result.job_id,status:'pending',playbook:request.id === CHECK ? 'package_preview.yml' : request.id === INSTALL ? 'system_update.yml' : request.id === REBOOT ? 'reboot.yml' : 'docker_cleanup.yml',target_devices:devices.value.filter(d => request.ids.includes(d.id)).map(d => d.inventory_name).join(',')};
+    job.value = {job_id:result.job_id,status:'pending',playbook:PLAYBOOKS[request.id],target_devices:devices.value.filter(d => request.ids.includes(d.id)).map(d => d.inventory_name).join(',')};
     if (request.id === INSTALL) check.value = null;
     await router.replace({query:{devices:request.ids.join(','),job:result.job_id}});
     await pollJob(result.job_id);
@@ -226,7 +233,7 @@ h3 { font-size:16px; margin:0; }.panel-heading p { margin:4px 0 0; color:var(--t
 .selection-tools { padding:0 20px 12px; }.selection-tools > div { display:flex; justify-content:space-between; padding-top:8px; }
 .device-list { max-height:52vh; overflow:auto; }.device-option { display:flex; align-items:flex-start; gap:12px; padding:15px 20px; border-top:1px solid var(--border-subtle); cursor:pointer; }.device-option.selected { background:var(--surface-info-soft); }.device-option input { margin-top:3px; width:17px; height:17px; accent-color:var(--color-accent); flex-shrink:0; }.device-copy { min-width:0; display:grid; gap:4px; }.device-copy strong { font-size:14px; overflow-wrap:anywhere; }.device-copy small { color:var(--text-secondary); font-size:12px; line-height:1.4; }.device-copy .warning-text { color:var(--status-warning-text); }
 .selection-note, .selection-warning { padding:14px 20px; margin:0; font-size:12px; color:var(--text-secondary); border-top:1px solid var(--border-subtle); }.selection-warning { color:var(--status-danger-text); }.list-empty { padding:16px; }
-.main-panel { min-width:0; }.action-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px; }.action-card { padding:20px; display:flex; flex-direction:column; align-items:flex-start; box-shadow:none; }.action-card.chosen { border-color:var(--focus-ring); }.action-icon { display:grid; place-items:center; width:36px; height:36px; border-radius:8px; color:var(--link-text); background:var(--surface-info-soft); margin-bottom:18px; }.action-card h3 { line-height:1.4; }.action-card p { font-size:13px; color:var(--text-secondary); line-height:1.6; margin:9px 0 16px; }.action-meta { font-size:11px; color:var(--text-secondary); margin-top:auto; margin-bottom:15px; line-height:1.5; }.action-card .btn { width:100%; min-height:40px; justify-content:center; }.selection-prompt { color:var(--text-secondary); font-size:13px; margin:14px 0; }
+.main-panel { min-width:0; }.action-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }.action-card { padding:20px; display:flex; flex-direction:column; align-items:flex-start; box-shadow:none; }.action-card.chosen { border-color:var(--focus-ring); }.action-icon { display:grid; place-items:center; width:36px; height:36px; border-radius:8px; color:var(--link-text); background:var(--surface-info-soft); margin-bottom:18px; }.action-card h3 { line-height:1.4; }.action-card p { font-size:13px; color:var(--text-secondary); line-height:1.6; margin:9px 0 16px; }.action-meta { font-size:11px; color:var(--text-secondary); margin-top:auto; margin-bottom:15px; line-height:1.5; }.action-card .btn { width:100%; min-height:40px; justify-content:center; }.selection-prompt { color:var(--text-secondary); font-size:13px; margin:14px 0; }
 .results-empty { text-align:center; padding:60px 24px; color:var(--text-secondary); }.results-empty i { font-size:24px; margin-bottom:16px; }.results-empty p { font-size:13px; line-height:1.6; max-width:400px; margin:8px auto; }.results-empty h3 { color:var(--text-primary); }
 .review-panel, .result-panel, .blocked-panel { margin-top:22px; padding:24px; box-shadow:none; }.review-panel { border-color:var(--focus-ring); }.review-panel h3, .result-panel h3 { margin:6px 0 12px; font-size:21px; }.review-panel p, .result-panel p, .blocked-panel p { font-size:13px; line-height:1.6; }.eyebrow { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:var(--text-secondary); }.target-line { font-weight:600; overflow-wrap:anywhere; }.warning-text { color:var(--status-warning-text); }.muted { color:var(--text-secondary); }.review-actions, .result-actions { display:flex; flex-wrap:wrap; align-items:center; gap:14px; margin-top:20px; }.result-actions a { font-size:13px; }.result-heading { display:flex; justify-content:space-between; gap:16px; align-items:center; }.result-state { padding:6px 10px; border-radius:20px; background:var(--surface-success-soft); font-size:12px; white-space:nowrap; }.result-state.failed { background:var(--surface-warning-soft); }.result-state i { margin-right:6px; }
 .outcome { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; padding:12px 0; border-bottom:1px solid var(--border-subtle); font-size:13px; }.outcome p { width:100%; margin:0; color:var(--status-warning-text); overflow-wrap:anywhere; }.install-summary { font-size:13px; padding:12px 0; }.cleanup-summary { margin-top:16px; }.cleanup-summary details { padding:8px 0; }

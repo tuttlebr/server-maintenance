@@ -15,6 +15,7 @@
     cmd: >-
       files/storage_discovery.py
       {{ '--scan-entries' if (storage_scan_entries | default(false) | bool) else '' }}
+      {{ '--home-fstab' if (storage_home_fstab | default(false) | bool) else '' }}
     executable: "{{ storage_discovery_executable }}"
   register: storage_discovery_raw
   failed_when: false

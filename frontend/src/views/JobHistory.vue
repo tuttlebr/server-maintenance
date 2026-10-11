@@ -53,7 +53,7 @@
                 aria-hidden="true"></i></button>
               </td>
             </tr>
-            <tr v-if="job.recap && expanded !== job.job_id" style="cursor: pointer" @click="toggleExpand(job.job_id)">
+            <tr v-if="job.recap && job.playbook !== 'storage_analysis.yml' && expanded !== job.job_id" style="cursor: pointer" @click="toggleExpand(job.job_id)">
               <td colspan="7" style="padding: 0">
                 <div class="job-recap"><pre>{{ job.recap }}</pre></div>
               </td>
@@ -65,11 +65,12 @@
                   <p v-if="expandedJob?.status === 'partial'" class="callout callout-warn">Some, but not all, devices completed successfully. Review the per-device outcomes and log below.</p>
                   <p v-if="expandedJob?.status === 'recovery_required'" class="callout callout-warn">This change did not finish with a confirmed result. The next install or cleanup checks device health automatically and continues if the check passes. Review device errors below and return to <router-link :to="{ path: '/operations', query: { targets: expandedJob.target_devices } }">Operations</router-link> when ready.</p>
                   <p v-if="expandedJob && ['pending', 'running', 'cancelling'].includes(expandedJob.status)">Phase: {{ expandedJob.phase?.replaceAll('_', ' ') }}. <button v-if="canCancel(expandedJob)" class="btn btn-ghost btn-sm" :disabled="cancelling" @click="requestCancel(expandedJob)">Cancel {{ expandedJob.status === 'pending' ? 'queued job' : 'inspection' }}</button><span v-else>Running changes finish under supervision; they cannot be safely cancelled.</span></p>
-                  <ul v-if="expandedJob?.device_results?.length" class="outcomes" aria-label="Per-device outcomes"><li v-for="result in expandedJob.device_results" :key="result.hostname"><strong>{{ result.hostname }}</strong>: {{ result.status.replaceAll('_', ' ') }}<p v-if="result.recovery_resolution">{{ result.recovery_resolution }}</p></li></ul>
+                  <ul v-if="visibleStorageOutcomes(expandedJob).length" class="outcomes" aria-label="Per-device outcomes"><li v-for="result in visibleStorageOutcomes(expandedJob)" :key="result.hostname"><strong>{{ result.hostname }}</strong>: {{ result.status.replaceAll('_', ' ') }}<p v-if="result.detail">{{ result.detail }}</p><p v-if="result.recovery_resolution">{{ result.recovery_resolution }}</p></li></ul>
                   <router-link v-if="expandedJob?.playbook === 'package_preview.yml' && expandedJob.status === 'success'" :to="`/operations?preview=${expandedJob.job_id}`" class="btn btn-primary btn-sm">Review and apply this preview</router-link>
-                  <div v-if="job.recap" class="job-recap-expanded"><pre>{{ job.recap }}</pre></div>
-                  <section v-if="expandedJob?.result_artifacts?.some(result => result.report_type !== 'execution')" class="result-grid" aria-label="Structured operation results">
-                    <article v-for="result in expandedJob.result_artifacts.filter(item => item.report_type !== 'execution')" :key="`${result.report_type}-${result.hostname}`" class="result-card">
+                  <div v-if="job.recap && job.playbook !== 'storage_analysis.yml'" class="job-recap-expanded"><pre>{{ job.recap }}</pre></div>
+                  <StorageResults :reports="expandedJob?.result_artifacts || []" />
+                  <section v-if="expandedJob?.result_artifacts?.some(result => !['execution','storage'].includes(result.report_type))" class="result-grid" aria-label="Structured operation results">
+                    <article v-for="result in expandedJob.result_artifacts.filter(item => !['execution','storage'].includes(item.report_type))" :key="`${result.report_type}-${result.hostname}`" class="result-card">
                       <div class="result-heading">
                         <span>{{ resultTitle(result.report_type) }}</span>
                         <strong>{{ result.hostname }}</strong>
@@ -87,21 +88,7 @@
                           <span class="metric-bad"><strong>{{ result.summary?.blocker_count || 0 }}</strong> blockers</span>
                         </div>
                       </template>
-                      <template v-else-if="result.report_type === 'gpu'">
-                        <div class="result-metrics">
-                          <span><strong>{{ result.active_gpus || 0 }}</strong> active</span>
-                          <span><strong>{{ result.idle_gpus || 0 }}</strong> idle</span>
-                          <span><strong>{{ result.free_gpus || 0 }}</strong> free</span>
-                        </div>
-                        <p v-if="result.user_summary?.length">Top owners: {{ result.user_summary.slice(0, 5).map(item => item.user).join(', ') }}</p>
-                      </template>
-                      <template v-else-if="result.report_type === 'storage'">
-                        <div class="result-metrics">
-                          <span :class="storagePressure(result).length ? 'metric-warn' : 'metric-good'"><strong>{{ storagePressure(result).length }}</strong> pressured mounts</span>
-                        </div>
-                        <p v-if="storagePressure(result).length">{{ storagePressure(result).map(item => `${item.mountpoint} ${item.use_pct}%`).join(' · ') }}</p>
-                        <p v-if="topStorageOwners(result).length">Largest: {{ topStorageOwners(result).map(item => `${item.path} (${item.size_mb} MB)`).join(' · ') }}</p>
-                      </template>
+                      <template v-else-if="result.report_type === 'gpu'"><InspectionResults :reports="[result]" /></template>
                       <template v-else-if="result.report_type === 'driver'">
                         <div class="driver-change"><code>{{ result.pre_driver_version || 'unknown' }}</code><i class="fas fa-arrow-right" aria-hidden="true"></i><code>{{ result.post_driver_version || 'unknown' }}</code></div>
                         <p>{{ result.reboot_performed ? 'Reboot completed' : 'No reboot performed' }}</p>
@@ -112,8 +99,9 @@
                     <strong>Parameters:</strong> {{ job.extra_vars }}
                   </div>
 
-                  <!-- Output log -->
-                  <div>
+                  <!-- Storage has a compact result above; keep its technical output expandable. -->
+                  <component :is="expandedJob?.playbook === 'storage_analysis.yml' ? 'details' : 'div'" class="technical-output">
+                    <summary v-if="expandedJob?.playbook === 'storage_analysis.yml'">Technical log</summary>
                     <div class="log-toolbar">
                       <strong>
                         Output
@@ -151,7 +139,7 @@
                       @scroll="onLogScroll"
                       v-html="renderedLog || '<span style=\'opacity:.5\'>No output available</span>'"
                     ></div>
-                  </div>
+                  </component>
                 </div>
               </td>
             </tr>
@@ -171,6 +159,9 @@
 </template>
 
 <script setup>
+import StorageResults from "../components/StorageResults.vue";
+import {visibleStorageOutcomes} from "../utils/storage.js";
+import InspectionResults from "../components/InspectionResults.vue";
 import PackageResults from "../components/PackageResults.vue";
 import { ref, watch, onMounted, onUnmounted, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -375,14 +366,6 @@ function resultTitle(type) {
   return ({ assessment: "Maintenance assessment", driver: "Driver update", gpu: "GPU usage", storage: "Storage analysis", packages: "Apt updates", apt_install: "Apt installation", cleanup: "Container cache", reboot: "Node reboot", services: "System services", accounts: "Account state", kubernetes: "Kubernetes recovery" })[type] || "Result";
 }
 
-function storagePressure(result) {
-  return (result?.mounts || []).filter((mount) => mount?.accessible && Number(mount.use_pct || 0) >= 85);
-}
-
-function topStorageOwners(result) {
-  return (result?.mounts || []).flatMap((mount) => mount?.entries || []).sort((a, b) => Number(b.size_mb || 0) - Number(a.size_mb || 0)).slice(0, 3);
-}
-
 onUnmounted(() => { disposed = true; loadSequence++; stopStream(); clearInterval(refreshTimer); });
 watch(() => [filterStatus.value, filterPlaybook.value, page.value], load);
 watch(() => route.query.job, showJob);
@@ -390,6 +373,7 @@ onMounted(async () => { await load(); if (disposed) return; await showJob(route.
 </script>
 
 <style scoped>
+.technical-output { margin-top:20px; }.technical-output > summary { cursor:pointer; font-size:13px; padding:10px 0; }
 .activity-filters { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }.activity-filters label { display: grid; gap: 5px; font-size: 12px; flex: 1; min-width: 180px; }.activity-coverage { color: var(--text-secondary); font-size: 12px; margin-bottom: 14px; }.activity-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 16px; margin-top: 16px; font-size: 13px; }
 
 .structured-text { white-space:pre-wrap; max-height:350px; overflow:auto; overflow-wrap:anywhere; }.service-results { max-height:350px; overflow:auto; }.outcomes { display:flex; flex-wrap:wrap; gap:8px 24px; }.job-detail {

@@ -31,20 +31,21 @@ async function compileView(url) {
 const {default:Operations}=await import(await compileView(new URL('./Operations.vue',import.meta.url)));
 const devices=[{id:1,name:'Node 1',inventory_name:'node-01',transport:'ssh',os_family:'Debian',maintenance_mode:'kubernetes'},{id:2,name:'Robot',inventory_name:'robot',transport:'reachy_daemon'}];
 const checkJob={job_id:'check-id',playbook:'package_preview.yml',target_devices:'node-01',status:'success',finished_at:new Date().toISOString(),device_results:[{hostname:'node-01',status:'success'}],result_artifacts:[{hostname:'node-01',report_type:'packages',fingerprint:'a'.repeat(64),changes:['Inst curl [1] (2 Ubuntu)'],package_count:1}]};
-async function mount(query={devices:'1'},failOnce=false,recovery=false,installPhase='complete') {
+async function mount(query={devices:'1'},failOnce=false,recovery=false,installPhase='complete',inspectionReports=[]) {
  global.localStorage={getItem:()=> 'test'};global.window={location:{hash:''}};
  const calls=[];let posted=0;let currentJob=checkJob;
  global.fetch=async(url,options={})=>{
   calls.push({url,options,body:options.body?JSON.parse(options.body):null});
   const respond=value=>new Response(JSON.stringify(value),{status:200,headers:{'Content-Type':'application/json'}});
   if(url==='/api/v2/devices')return respond(devices.map(device=>({...device,recovery_required:recovery&&device.id===1})));
-  if(url==='/api/v2/operations')return respond(['system.packages.preview','system.update','containers.cleanup','system.reboot'].map(id=>({id,eligible_device_ids:[1],excluded_devices:[{id:2,reason:'Requires SSH'}]})));
+  if(url==='/api/v2/operations')return respond(['system.packages.preview','system.update','containers.cleanup','system.reboot','storage.inspect','gpu.inspect'].map(id=>({id,eligible_device_ids:[1],excluded_devices:[{id:2,reason:'Requires SSH'}]})));
   if(url.startsWith('/api/v2/jobs?'))return respond([]);
   if(options.method==='POST') {
    posted++;
    if(failOnce&&posted===1)throw new Error('Connection lost');
    if(url.includes('system.update'))currentJob={...checkJob,job_id:'install-id',playbook:'system_update.yml',phase:installPhase,status:installPhase==='checking_health'?'running':installPhase==='health_check_failed'?'failed':'success',error_summary:installPhase==='health_check_failed'?'Automatic health check failed. The requested action did not start.':null,device_results:installPhase==='health_check_failed'?[{hostname:'node-01',status:'verification_failed',detail:'Required mounts are missing: /data'}]:checkJob.device_results,result_artifacts:[{report_type:'apt_install',hostname:'node-01',package_count:1,reboot_required:true}]};
    if(url.includes('system.reboot'))currentJob={...checkJob,job_id:'reboot-id',playbook:'reboot.yml',status:installPhase==='complete'?'success':installPhase,phase:'executing',error_summary:installPhase==='recovery_required'?'The node did not return over SSH.':null,result_artifacts:[{report_type:'reboot',hostname:'node-01',rebooted:true,elapsed_seconds:30}]};
+   if(url.includes('storage.inspect') || url.includes('gpu.inspect'))currentJob={...checkJob,job_id:'inspection-id',playbook:url.includes('storage.inspect')?'storage_analysis.yml':'gpu_usage.yml',status:installPhase==='complete'?'success':installPhase,result_artifacts:inspectionReports};
    return respond({job_id:currentJob.job_id});
   }
   if(url.startsWith('/api/v2/jobs/'))return respond(currentJob);
@@ -160,5 +161,45 @@ for (const state of ['complete','running','recovery_required']) {
 test('reboot confirmation can be cancelled without sending a request',async()=>{
  const view=await mount();
  try {await view.click('Reboot…');await view.click('Cancel');assert.equal(view.calls.filter(c=>c.options.method==='POST').length,0);}
+ finally {view.app.unmount();}
+});
+
+const storageReports=[{hostname:'node-01',report_type:'storage',timestamp:'2026-10-10T12:00:00Z',mounts:[
+ {mountpoint:'/',source:'/dev/sda1',fstype:'ext4',covers_home:true,in_fstab:true,status:'mounted',accessible:true,total_mb:1024,used_mb:0,avail_mb:1024,use_pct:0},
+ {mountpoint:'/data',configured_source:'nas:/data',status:'unmounted',accessible:false,optional:true,noauto:true},
+]}];
+const gpuReports=[{hostname:'node-01',report_type:'gpu',gpus:[{index:0,uuid:'GPU-a',name:'Test GPU',utilization_pct:null,memory_supported:false,status:'in_use',processes_known:true,processes:[
+ {pid:42,user:'alice',uid:1001,process_name:'/usr/bin/python',gpu_memory_mb:null,namespace:'team',pod_name:'inference',workload_owner:'bob',gpu_instance_id:'2',compute_instance_id:'1'},
+]}]}];
+for(const [id,cta,reports,expected] of [['storage.inspect','Check storage',storageReports,/Storage check completed/],['gpu.inspect','Check GPUs',gpuReports,/GPU check completed/]]) {
+ test(`${id} runs once without confirmation and renders detailed results`,async()=>{
+  const view=await mount({devices:'1',operation:id},false,true,'complete',reports);
+  try {
+   await view.click(cta);
+   const posts=view.calls.filter(c=>c.options.method==='POST');
+   assert.equal(posts.length,1);assert.ok(posts[0].url.includes(id));assert.deepEqual(posts[0].body.device_ids,[1]);
+   assert.equal(posts[0].body.preview_job_id,undefined);assert.match(text(view.root),expected);
+   assert.ok(!find(view.root,n=>n.props['aria-labelledby']==='review-heading'));
+   if(id==='storage.inspect') {
+    assert.match(text(view.root),/Contains \/home/);assert.match(text(view.root),/Not mounted/);
+    assert.match(text(view.root),/Optional \(nofail\)/);assert.match(text(view.root),/0%/);
+   } else {
+    assert.match(text(view.root),/Unavailable utilization/);assert.match(text(view.root),/alice/);
+    assert.match(text(view.root),/42/);assert.match(text(view.root),/team\/inference/);
+    assert.match(text(view.root),/Owner label: bob/);assert.doesNotMatch(text(view.root),/0% utilization/);
+   }
+  } finally {view.app.unmount();}
+ });
+}
+
+test('GPU check blocks incompatible selections instead of skipping them',async()=>{
+ const view=await mount({devices:'1,2',operation:'gpu.inspect'});
+ try {await view.click('Check GPUs');assert.match(text(view.root),/Requires SSH/);assert.equal(view.calls.filter(c=>c.options.method==='POST').length,0);}
+ finally {view.app.unmount();}
+});
+
+test('partial inspection preserves successful results and per-device errors',async()=>{
+ const view=await mount({devices:'1'},false,false,'partial',storageReports);
+ try {await view.click('Check storage');assert.match(text(view.root),/Some devices need attention/);assert.match(text(view.root),/Contains \/home/);}
  finally {view.app.unmount();}
 });

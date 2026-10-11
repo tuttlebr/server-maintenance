@@ -4,10 +4,10 @@
   become: true
   gather_facts: false
   tasks:
-    - name: Discover and analyze mounted storage
+    - name: Check home storage and configured fstab mounts
       ansible.builtin.include_tasks: tasks/discover_storage.yml
       vars:
-        storage_scan_entries: true
+        storage_home_fstab: true
         storage_discovery_required: true
 
     - name: Compile storage report
@@ -18,10 +18,9 @@
           hostname: "{{ inventory_hostname }}"
           timestamp: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
           mounts: "{{ storage_mounts }}"
-
-    - name: Output storage report
-      ansible.builtin.debug:
-        var: storage_report
+          notes:
+            - Capacity snapshot for the filesystem containing /home and all fstab mount targets. Swap entries are excluded.
+            - Unmounted entries are reported without mounting them. Optional and noauto entries may be intentionally unmounted.
 
     - name: Write storage report as JSON
       ansible.builtin.copy:

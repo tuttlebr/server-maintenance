@@ -23,7 +23,7 @@ const OPERATION_HINTS = {
   "reachy.software.update": "latest stable robot software",
   "services.inspect": "service names and current state",
   "services.manage": "start, stop, or restart a service",
-  "storage.inspect": "disk usage and large directories",
+  "storage.inspect": "/home capacity and configured fstab mounts",
   "system.assess": "maintenance blockers and warnings",
   "system.bootstrap": "sudo and container setup",
   "system.packages.preview": "review changes before installing",

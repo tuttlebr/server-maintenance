@@ -1,10 +1,12 @@
 # Fleet Manager
 
-Fleet maintenance focused on four operations: check for apt updates, install apt updates, clear Docker and containerd/nerdctl cache, and reboot nodes, plus bulk user management with CSV import. The backend uses FastAPI and Ansible; the frontend uses Vue 3.
+Fleet maintenance focused on six operations: check storage, inspect GPU usage, check for apt updates, install apt updates, clear Docker and containerd/nerdctl cache, and reboot nodes, plus bulk user management with CSV import. The backend uses FastAPI and Ansible; the frontend uses Vue 3.
 
 ## Features
 
 - **One maintenance workspace:** select devices once, run an action, and follow progress and per-device results on the same page.
+- **Storage checks:** capacity of the filesystem containing `/home` and each `/etc/fstab` mount. Missing, inaccessible, optional, manual, and pending automount entries remain visible. Swap is excluded; checks do not mount filesystems or scan directory trees.
+- **GPU checks:** NVIDIA GPU utilization and memory, process names, PIDs, effective Linux owners, and available Docker/containerd pod context. Unsupported metrics remain unavailable.
 - **APT checks:** refresh package lists and show exact candidate versions on Debian and Ubuntu, without requiring Python APT bindings.
 - **Reviewed installs:** one confirmation, exact package versions, a 30-minute check validity window, rolling execution, and no automatic reboots or package removals.
 - **Container cache cleanup:** unused Docker images and build cache, plus unused images in containerd namespaces through nerdctl. Containers, volumes, and networks are retained. BuildKit cache is cleared when available; skipped components are reported.
@@ -404,7 +406,7 @@ Key specs: Ubuntu 24.04 LTS, Blackwell Ultra GPU, 252 GB HBM3e, 496 GB LPDDR5X, 
 2. Confirm its daemon is available on port `8000`, or enter the configured port.
 3. Add it with **Reachy Mini Wireless** as the connection type.
 4. Discovery reads `/api/state/full` and never sends movement, torque, camera, audio, or app-control commands.
-Reachy daemon devices remain visible in inventory; the four maintenance operations require SSH and their respective discovered capabilities. Reachy app resets and daemon updates are no longer service operations.
+Reachy daemon devices remain visible in inventory; the six maintenance operations require SSH and their respective discovered capabilities. Reachy app resets and daemon updates are no longer service operations.
 
 ## Common Operations
 
@@ -479,7 +481,7 @@ ansible-playbook playbooks/package_preview.yml --limit ast-spark-01
 
 ### Kubernetes-aware maintenance in legacy CLI playbooks
 
-The service's four operations and recovery verification treat every device as standalone. They do not drain, cordon, uncordon, or require Kubernetes access. The following configuration applies only to legacy CLI playbooks such as driver maintenance and explicit drain/resume.
+The service's six operations and recovery verification treat every device as standalone. They do not drain, cordon, uncordon, or require Kubernetes access. The following configuration applies only to legacy CLI playbooks such as driver maintenance and explicit drain/resume.
 
 Kubernetes API work runs on the Ansible controller. Managed nodes do not need `kubectl` or a kubeconfig. Set the controller kubeconfig before running Ansible directly:
 

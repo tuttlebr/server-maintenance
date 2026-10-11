@@ -418,12 +418,82 @@ def build_storage_inventory(mounts, scan_entries=False, min_size_mb=100):
     return inventory
 
 
+def read_fstab(path="/etc/fstab"):
+    """Read configured mount targets, retaining escaped spaces and optional mounts."""
+    entries = []
+    with open(path, encoding="utf-8") as handle:
+        for number, line in enumerate(handle, 1):
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            fields = line.split()
+            if len(fields) < 4:
+                raise ValueError("Malformed fstab entry at line {}".format(number))
+            source, target, fstype, options = map(_unescape_mount_field, fields[:4])
+            if fstype == "swap" or target in ("none", "swap"):
+                continue
+            if not target.startswith("/"):
+                raise ValueError("Invalid fstab mount target at line {}".format(number))
+            entries.append(_normalized_mount({
+                "source": source, "target": target, "fstype": fstype, "options": options,
+            }))
+    return entries
+
+
+def build_home_fstab_inventory(mounts, fstab, home_path=None):
+    """Check /home's backing filesystem and each fstab target without mounting it.
+
+    Unlike discovery, this preserves small, virtual and duplicate/bind targets.
+    Never run df on an absent mount: that would report its parent's capacity.
+    """
+    live = {_normalized_mount(m)["target"]: _normalized_mount(m) for m in mounts}
+    home_path = home_path or os.path.realpath("/home")
+    parents = [m for target, m in live.items() if target == "/" or _under_tree(home_path, target)]
+    if not parents:
+        raise ValueError("Could not identify the filesystem containing /home")
+    home_mount = max(parents, key=lambda m: len(m["target"]))
+    requests = [(home_mount["target"], None)]
+    requests.extend((entry["target"], entry) for entry in fstab)
+    records = []
+    for target, configured in requests:
+        # Merge the initial home observation with its fstab entry, if present.
+        if configured and target == home_mount["target"] and not records[0].get("in_fstab"):
+            record = records[0]
+        else:
+            actual = live.get(target)
+            mounted = bool(actual and actual["fstype"] != "autofs")
+            usage = filesystem_usage(target) if mounted else None
+            record = {
+                "mountpoint": target, "mountpoints": [target],
+                "covers_home": target == home_mount["target"], "home_path": home_path,
+                "in_fstab": False, "mounted": mounted, "accessible": usage is not None,
+                "status": "mounted" if usage else "unavailable" if mounted else "automount_pending" if actual else "unmounted",
+                "source": actual["source"] if actual else None,
+                "fstype": actual["fstype"] if actual else None,
+                "type": classify_storage(actual) if actual else None,
+                "total_mb": None, "used_mb": None, "avail_mb": None, "use_pct": None,
+                "entries": [],
+            }
+            if usage:
+                record.update(usage)
+            records.append(record)
+        if configured:
+            options = set(configured["options"].split(","))
+            record.update({
+                "in_fstab": True, "configured_source": configured["source"],
+                "configured_fstype": configured["fstype"],
+                "optional": "nofail" in options, "noauto": "noauto" in options,
+                "automount": "x-systemd.automount" in options,
+            })
+    return records
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--scan-entries", action="store_true")
     parser.add_argument("--min-size-mb", type=int, default=100)
+    parser.add_argument("--home-fstab", action="store_true")
     args = parser.parse_args()
-    inventory = build_storage_inventory(
+    inventory = build_home_fstab_inventory(discover_mounts(), read_fstab()) if args.home_fstab else build_storage_inventory(
         discover_mounts(),
         scan_entries=args.scan_entries,
         min_size_mb=max(0, args.min_size_mb),

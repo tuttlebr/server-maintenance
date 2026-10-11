@@ -290,7 +290,7 @@ def _run_playbook_streaming(
         cmd = [
             "ansible-playbook",
             str(ansible_dir / "playbooks" / playbook),
-            "-v",
+            *(["-v"] if playbook != "storage_analysis.yml" else []),
             "--limit",
             ",".join(targets),
         ]

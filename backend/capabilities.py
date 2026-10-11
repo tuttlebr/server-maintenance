@@ -135,6 +135,16 @@ OPERATIONS = (
         "Reboot every selected node, one at a time, and wait for SSH to return. Running work is interrupted; no reboot-required flag or health preflight is needed.",
         "System", SYSTEM_REBOOT, "high", "confirm", "reboot.yml", "fa-power-off",
     ),
+    OperationDefinition(
+        "storage.inspect", "Check storage",
+        "Check capacity for the filesystem containing /home and every mount configured in /etc/fstab, including missing mounts.",
+        "Storage", STORAGE_INSPECT, "low", "none", "storage_analysis.yml", "fa-hard-drive",
+    ),
+    OperationDefinition(
+        "gpu.inspect", "Check GPU usage",
+        "Show NVIDIA GPU utilization, memory, process owners, and container or pod context.",
+        "GPU", GPU_INSPECT, "low", "none", "gpu_usage.yml", "fa-microchip",
+    ),
 )
 
 OPERATION_BY_ID = {operation.id: operation for operation in OPERATIONS}
