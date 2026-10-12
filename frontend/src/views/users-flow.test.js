@@ -29,15 +29,15 @@ async function compileView(url) {
  return `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`;
 }
 const {default:Users}=await import(await compileView(new URL('./UserManagement.vue',import.meta.url)));
-const devices=[{id:1,name:'Node 1',inventory_name:'node-01',transport:'ssh',capabilities:['users.manage'],os_family:'Debian',facts_stale:true,recovery_required:true},{id:2,name:'Node 2',inventory_name:'node-02',transport:'ssh',capabilities:['users.manage']}];
-async function mount({query={devices:'1'},failOnce=false,csvError=false,jobState='success'}={}) {
+const devices=[{id:1,name:'Node 1',inventory_name:'node-01',discovered_at:new Date().toISOString(),transport:'ssh',capabilities:['users.manage'],os_family:'Debian',facts_stale:false,recovery_required:true},{id:2,name:'Node 2',inventory_name:'node-02',discovered_at:new Date().toISOString(),transport:'ssh',capabilities:['users.manage']}];
+async function mount({query={devices:'1'},failOnce=false,csvError=false,jobState='success',stale=false}={}) {
  global.Document=class Document {};global.ShadowRoot=class ShadowRoot {};global.document={activeElement:null};global.localStorage={getItem:()=> 'test'};global.window={location:{hash:''}};
  const calls=[];let posted=0;
  global.fetch=async(url,options={})=>{
   const body=options.body instanceof FormData ? options.body : options.body?JSON.parse(options.body):null;
   calls.push({url,options,body});
   const respond=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json'}});
-  if(url==='/api/v2/devices')return respond(devices);
+  if(url==='/api/v2/devices')return respond(devices.map(d=>({...d,facts_stale:stale})));
   if(url==='/api/v2/users')return respond([{id:1,username:'jane',full_name:'Jane',placements:[{device_id:1,state:'observed',groups:'users',shell:'/bin/bash'}]}]);
   if(url==='/api/v2/users/csv-preview')return csvError?respond({detail:'Row 3: duplicate username jane'},400):respond({users:body.get('mode')==='edit'?[{username:'jane',groups:'dev,docker',shell:'/bin/bash'},{username:'sam',full_name:'Sam Updated'}]:[{username:'jane',full_name:'Doe, Jane',email:'jane@example.com'},{username:'sam',full_name:'Sam'}]});
   if(options.method==='POST'||options.method==='PUT'){
@@ -116,4 +116,16 @@ test('missing selected devices block review without shrinking the selection',asy
  const v=await mount({query:{devices:'1,99'}});try{
   assert.match(text(v.root),/Unavailable devices: 99/);assert.equal(find(v.root,n=>n.tag==='button'&&text(n)==='Review additions').props.disabled,true);assert.equal(mutations(v).length,0);
  }finally{v.app.unmount();}
+});
+
+test('account actions require a current scan and link to selected discovery targets',async()=>{
+ const view=await mount({query:{devices:'1,2'},stale:true});
+ try {
+  assert.match(text(view.root),/Scan devices before managing accounts/);
+  const button=find(view.root,n=>n.tag==='button'&&text(n)==='Review additions');
+  assert.equal(button.props.disabled,true);
+  const link=find(view.root,n=>n.tag==='a'&&text(n)==='Scan selected devices');
+  assert.match(link.props.href,/operation=system.scan/);assert.match(link.props.href,/devices=1,2/);
+  assert.equal(view.calls.filter(c=>c.options.method==='POST').length,0);
+ } finally {view.app.unmount();}
 });

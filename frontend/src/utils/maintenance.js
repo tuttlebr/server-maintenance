@@ -1,3 +1,4 @@
+export const SCAN = 'system.scan';
 export const CHECK = 'system.packages.preview';
 export const INSTALL = 'system.update';
 export const CLEANUP = 'containers.cleanup';
@@ -5,10 +6,15 @@ export const REBOOT = 'system.reboot';
 export const STORAGE = 'storage.inspect';
 export const GPU = 'gpu.inspect';
 export const REACHY_RESTART = 'reachy.daemon.restart';
-export const ACTION_IDS = [CHECK, INSTALL, CLEANUP, REBOOT, STORAGE, GPU, REACHY_RESTART];
-export const PLAYBOOKS = {[CHECK]:'package_preview.yml',[INSTALL]:'system_update.yml',[CLEANUP]:'docker_cleanup.yml',[REBOOT]:'reboot.yml',[STORAGE]:'storage_analysis.yml',[GPU]:'gpu_usage.yml',[REACHY_RESTART]:REACHY_RESTART};
+export const ACTION_IDS = [SCAN, CHECK, INSTALL, CLEANUP, REBOOT, STORAGE, GPU, REACHY_RESTART];
+export const PLAYBOOKS = {[SCAN]:'host_facts.yml',[CHECK]:'package_preview.yml',[INSTALL]:'system_update.yml',[CLEANUP]:'docker_cleanup.yml',[REBOOT]:'reboot.yml',[STORAGE]:'storage_analysis.yml',[GPU]:'gpu_usage.yml',[REACHY_RESTART]:REACHY_RESTART};
 export const ACTIVE = ['pending', 'running', 'cancelling'];
 export const namesFor = (job) => String(job?.target_devices || '').split(',').filter(Boolean);
+export function needsScan(device, now = Date.now()) {
+  const raw = device.discovered_at;
+  const observed = Date.parse(raw && !/(Z|[+-]\d\d:\d\d)$/.test(raw) ? `${raw}Z` : raw);
+  return !!device.facts_stale || !Number.isFinite(observed) || now - observed > 60 * 60_000;
+}
 export function sameTargets(job, devices) {
   const names = namesFor(job);
   return devices.length > 0 && names.length === devices.length && devices.every(d => names.includes(d.inventory_name));

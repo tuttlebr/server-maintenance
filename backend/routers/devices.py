@@ -420,25 +420,17 @@ async def scan_device(
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     if device.transport == "reachy_daemon":
-        from backend.routers.operations import _recover_reachy, _start_reachy_inspection
+        from backend.routers.operations import _recover_reachy
         if device.recovery_required:
             return await _recover_reachy(db, [device], user)
-        return _start_reachy_inspection(db, [device], user)
     job_id = await run_playbook(db=db, playbook="recovery_check.yml" if device.recovery_required else "host_facts.yml", hosts=[device.hostname], triggered_by=user)
     return {"job_id": job_id, "detail": f"Scanning {device.name}"}
 
 
 @router.post("/scan-all")
 async def scan_all_devices(db: Session = Depends(get_db), user: str = Depends(get_current_user)):
-    ssh_devices = db.query(Device).filter(Device.transport == "ssh").all()
-    reachy_devices = db.query(Device).filter(Device.transport == "reachy_daemon").all()
-    if any(db.get(DeviceReservation, device.id) for device in [*ssh_devices, *reachy_devices]):
+    devices = db.query(Device).order_by(Device.hostname).all()
+    if any(db.get(DeviceReservation, device.id) for device in devices):
         raise HTTPException(status_code=409, detail="Some devices have active operations. Wait or scan idle devices individually.")
-    from backend.routers.operations import _start_reachy_inspection
-    job_ids = []
-    if ssh_devices:
-        job_ids.append(await run_playbook(db=db, playbook="host_facts.yml", hosts=[device.hostname for device in ssh_devices], triggered_by=user))
-    if reachy_devices:
-        result = _start_reachy_inspection(db, reachy_devices, user)
-        job_ids.append(result["job_id"])
-    return {"job_id": job_ids[0] if job_ids else None, "job_ids": job_ids, "detail": f"Queued {len(job_ids)} fleet inspection job(s)"}
+    job_id = await run_playbook(db=db, playbook="host_facts.yml", hosts=[device.hostname for device in devices], triggered_by=user) if devices else None
+    return {"job_id": job_id, "job_ids": [job_id] if job_id else [], "detail": f"Scanning {len(devices)} device(s)"}

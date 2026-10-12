@@ -1,5 +1,6 @@
 import asyncio
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
@@ -365,7 +366,7 @@ class OperationEligibilityTests(unittest.TestCase):
     def tearDown(self):
         self.db.close()
 
-    def test_catalog_always_shows_seven_actions_with_eligibility(self):
+    def test_catalog_always_shows_eight_actions_with_eligibility(self):
         device = Device(
             hostname="reachy-lab",
             display_name="Reachy Lab",
@@ -381,7 +382,7 @@ class OperationEligibilityTests(unittest.TestCase):
         operation_ids = {operation.id for operation in list_operations(self.db, "admin")}
         self.assertEqual(
             operation_ids,
-            {"system.packages.preview", "system.update", "containers.cleanup", "system.reboot", "storage.inspect", "gpu.inspect", "reachy.daemon.restart"},
+            {"system.scan", "system.packages.preview", "system.update", "containers.cleanup", "system.reboot", "storage.inspect", "gpu.inspect", "reachy.daemon.restart"},
         )
 
     def test_capability_check_blocks_linux_operation_on_robot(self):
@@ -396,6 +397,9 @@ class OperationEligibilityTests(unittest.TestCase):
         self.db.add(device)
         self.db.commit()
 
+        device.facts_stale = False
+        device.discovered_at = datetime.now(timezone.utc)
+        self.db.commit()
         with self.assertRaisesRegex(HTTPException, "Required capability"):
             asyncio.run(
                 run_operation(
@@ -443,7 +447,7 @@ class OperationEligibilityTests(unittest.TestCase):
         self.assertEqual(response.ssh_user, "pollen")
         self.assertIn(REACHY_APP_RESET, response.capabilities)
 
-    def test_runner_only_allows_dual_transport_reachy_for_reset_playbook(self):
+    def test_runner_allows_reachy_discovery_and_verified_ssh_reset_only(self):
         device = Device(
             hostname="reachy-lab",
             transport="reachy_daemon",
@@ -462,8 +466,9 @@ class OperationEligibilityTests(unittest.TestCase):
         )
         self.assertEqual(hosts, ["reachy-lab"])
         self.assertEqual(targets, ["reachy-lab"])
+        self.assertEqual(_resolve_targets(self.db, ["reachy-lab"], False, "host_facts.yml")[1], ["reachy-lab"])
         with self.assertRaises(PlaybookRequestError):
-            _resolve_targets(self.db, ["reachy-lab"], False, "host_facts.yml")
+            _resolve_targets(self.db, ["reachy-lab"], False, "system_update.yml")
 
     def test_changing_reachy_endpoint_revokes_verified_ssh_access(self):
         device = Device(

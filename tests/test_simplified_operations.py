@@ -1,6 +1,7 @@
 import asyncio
 import importlib.util
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -26,7 +27,7 @@ def db():
     engine = create_engine('sqlite:///:memory:')
     Base.metadata.create_all(engine)
     with sessionmaker(bind=engine)() as session:
-        device = Device(hostname='node-01', transport='ssh', os_family='Debian', maintenance_mode='standalone')
+        device = Device(hostname='node-01', transport='ssh', os_family='Debian', maintenance_mode='standalone', facts_stale=False, discovered_at=datetime.now(timezone.utc))
         device.capabilities = ['system.update', 'containers.cleanup']
         session.add(device)
         session.commit()
@@ -34,25 +35,25 @@ def db():
     engine.dispose()
 
 
-def test_empty_fleet_still_explains_the_seven_actions(db):
+def test_empty_fleet_still_explains_the_eight_actions(db):
     db.query(Device).delete(); db.commit()
     catalog = list_operations(db, 'test')
-    assert [op.id for op in catalog] == ['system.packages.preview', 'system.update', 'containers.cleanup', 'system.reboot', 'storage.inspect', 'gpu.inspect', 'reachy.daemon.restart']
+    assert [op.id for op in catalog] == ['system.scan', 'system.packages.preview', 'system.update', 'containers.cleanup', 'system.reboot', 'storage.inspect', 'gpu.inspect', 'reachy.daemon.restart']
     assert all(op.eligible_count == 0 for op in catalog)
 
 
 @pytest.mark.parametrize('family', ['RedHat', 'Alpine', None])
 def test_package_actions_only_support_apt(db, family):
     host = db.query(Device).one(); host.os_family = family
-    for operation in OPERATIONS[:2]:
+    for operation in [OPERATION_BY_ID[key] for key in ('system.packages.preview', 'system.update')]:
         assert 'apt' in operation_ineligibility(host, operation)
 
 
-def test_stale_inventory_does_not_require_an_unrelated_scan(db):
+def test_stale_inventory_requires_discovery_even_during_recovery(db):
     host = db.query(Device).one(); host.facts_stale = True; host.discovered_at = None
-    assert operation_ineligibility(host, OPERATION_BY_ID['system.update']) is None
+    assert 'Scan devices first' in operation_ineligibility(host, OPERATION_BY_ID['system.update'])
     host.recovery_required = True
-    assert operation_ineligibility(host, OPERATION_BY_ID['system.update']) is None
+    assert 'Scan devices first' in operation_ineligibility(host, OPERATION_BY_ID['system.update'])
 
 
 def test_accepted_retry_survives_device_recovery_and_does_not_relaunch(db):

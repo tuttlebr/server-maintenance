@@ -134,10 +134,11 @@ def test_eligibility_checks_platform_freshness_and_recovery():
     assert operation_ineligibility(host, op) is None
     host.maintenance_mode = 'standalone'
     host.facts_stale = True
-    assert operation_ineligibility(host, op) is None
+    assert 'Scan devices first' in operation_ineligibility(host, op)
     host.facts_stale = False
     host.discovered_at = datetime.now(timezone.utc) - timedelta(hours=2)
-    assert operation_ineligibility(host, op) is None
+    assert 'Scan devices first' in operation_ineligibility(host, op)
+    host.discovered_at = datetime.now(timezone.utc)
     host.recovery_required = True
     assert operation_ineligibility(host, op) is None
     assert operation_ineligibility(host, OPERATION_BY_ID['system.packages.preview']) is None

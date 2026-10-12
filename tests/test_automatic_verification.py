@@ -2,6 +2,7 @@
 import asyncio
 import json
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import create_engine
@@ -25,7 +26,7 @@ def workflow(tmp_path, monkeypatch):
     monkeypatch.setattr(runner.job_log_indexer, 'ingest_completed_job', lambda job_id: None)
     with sessions() as db:
         for name, recovery in [('one', True), ('two', False), ('unselected', True)]:
-            db.add(Device(hostname=name, transport='ssh', os_family='Debian',
+            db.add(Device(hostname=name, transport='ssh', os_family='Debian', facts_stale=False, discovered_at=datetime.now(timezone.utc),
                           recovery_required=recovery, recovery_reason='Earlier incomplete job' if recovery else None))
         db.commit()
     behavior, calls = {}, []

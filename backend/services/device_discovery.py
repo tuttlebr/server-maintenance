@@ -121,6 +121,24 @@ def reachy_websocket_url(endpoint: str, port: int, path: str) -> str:
     return f"ws://{host}:{port}{path}"
 
 
+def apply_reachy_observation(device, result: dict) -> None:
+    device.status = "online" if result["reachable"] else "offline"
+    device.facts_stale = not result["reachable"]
+    if result["reachable"]:
+        device.facts = result.get("facts", {})
+        for field in ("kind", "vendor", "model"):
+            if result.get(field):
+                setattr(device, field, result[field])
+        if "capabilities" in result:
+            # Dedicated SSH maintenance enrollment remains independent.
+            capabilities = set(result["capabilities"])
+            if REACHY_APP_RESET in device.capabilities:
+                capabilities.add(REACHY_APP_RESET)
+            device.capabilities = normalize_capabilities(capabilities)
+        device.last_seen = datetime.now(timezone.utc)
+        device.discovered_at = device.last_seen
+
+
 def enrich_from_scan(device, report: dict) -> None:
     """Update identity and capabilities from portable scan facts."""
     capabilities = set(BASE_LINUX_CAPABILITIES)

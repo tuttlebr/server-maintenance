@@ -1,6 +1,7 @@
 import asyncio
 import itertools
 import json
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -19,7 +20,7 @@ from backend.services import ansible_runner
 
 def mini(hostname="reachy-mini", **values):
     device = Device(hostname=hostname, endpoint=f"{hostname}.local", daemon_port=8000,
-                    **{"transport": "reachy_daemon", "kind": "robot", "model": "Reachy Mini Wireless", **values})
+                    **{"facts_stale": False, "discovered_at": datetime.now(timezone.utc), "transport": "reachy_daemon", "kind": "robot", "model": "Reachy Mini Wireless", **values})
     device.capabilities = [REACHY_DAEMON_RESTART]
     return device
 

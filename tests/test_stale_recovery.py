@@ -55,7 +55,7 @@ def test_startup_repairs_legacy_preflight_without_running_a_remote_check(state):
     assert host.facts_stale  # Clearing a false lock doesn't invent fresh facts.
     assert job.status == 'failed' and job.output_log == log
     assert 'before any device changes' in job.device_results[0]['recovery_resolution']
-    assert operation_ineligibility(host, OPERATION_BY_ID['system.update']) is None
+    assert 'Scan devices first' in operation_ineligibility(host, OPERATION_BY_ID['system.update'])
     assert recovery_state.reconcile_stale_recovery(db) == []
 
 

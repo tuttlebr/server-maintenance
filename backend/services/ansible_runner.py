@@ -19,8 +19,8 @@ from backend.models import Host, Job, ManagedUser, UserHostAssociation
 from backend.services.execution_state import (ExecutionConflict, completed_status, is_read_only, parse_host_outcomes, request_fingerprint, reserve_devices, release_devices)
 from backend.services.job_results import get_job_results
 from backend.services import job_log_indexer
-from backend.capabilities import NVIDIA_FABRIC_MANAGER, REACHY_APP_RESET, has_capability
-from backend.services.device_discovery import enrich_from_scan
+from backend.capabilities import NVIDIA_FABRIC_MANAGER, REACHY_APP_RESET, facts_are_stale, has_capability
+from backend.services.device_discovery import apply_reachy_observation, enrich_from_scan, probe_reachy
 from backend.services.inventory_writer import regenerate_inventory
 from backend.services.secret_store import decrypt_secret
 
@@ -600,7 +600,7 @@ def _resolve_targets(
     existing = set()
     for host in candidates:
         transport = host.transport or "ssh"
-        if transport == "ssh":
+        if transport == "ssh" or (playbook == "host_facts.yml" and transport == "reachy_daemon"):
             existing.add(host.hostname)
         elif (
             playbook == "reachy_app_reset.yml"
@@ -685,6 +685,48 @@ async def _verify_before_change(job_id, targets, host_credentials):
     return unverified, details, output
 
 
+async def _scan_reachy_targets(job_id, targets, previous_outcomes=()):
+    outcomes = []
+    for hostname, (endpoint, port) in targets.items():
+        if job_id in _CANCELLED_JOBS:
+            _invalidate_devices([hostname])
+            outcomes.append({"hostname": hostname, "status": "cancelled"})
+            continue
+        try:
+            result = await asyncio.to_thread(probe_reachy, endpoint, port)
+            with SessionLocal() as db:
+                host = db.query(Host).filter_by(hostname=hostname).one()
+                apply_reachy_observation(host, result)
+                db.commit()
+            outcomes.append({"hostname": hostname, "status": "success" if result["reachable"] else "unreachable", "detail": result["detail"]})
+        except Exception as exc:
+            _invalidate_devices([hostname])
+            outcomes.append({"hostname": hostname, "status": "failed", "detail": str(exc)})
+        with get_log_path(job_id).open("a") as log:
+            log.write(f"\n[{hostname}] {outcomes[-1]['detail']}\n")
+        _update_job(job_id, outcomes_json=json.dumps([*previous_outcomes, *outcomes]))
+    return outcomes
+
+
+def _save_discovery_result(job_id, host):
+    """Keep an allowlisted snapshot in Activity after raw scan files are consumed."""
+    report = {
+        "schema_version": 1, "report_type": "discovery", "hostname": host.hostname,
+        "device_id": host.id, "observed_at": host.discovered_at.isoformat(),
+        "transport": host.transport or "ssh", "kind": host.kind,
+        "vendor": host.vendor, "model": host.model, "architecture": host.architecture,
+        "os_version": host.os_version, "memory_gb": host.memory_gb,
+        "gpu_model": host.gpu_model, "driver_version": host.driver_version,
+        "reboot_required": host.reboot_required, "capabilities": host.capabilities,
+        "facts": host.facts,
+    }
+    directory = settings.data_dir / "job-results" / job_id
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"discovery_{host.hostname}.json"
+    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as stream:
+        json.dump(report, stream)
+
+
 async def run_playbook(
     db, playbook: str, hosts: list[str] | None = None, all_hosts: bool = False,
     extra_vars: dict | None = None, triggered_by: str = "admin",
@@ -703,6 +745,10 @@ async def run_playbook(
                 raise PlaybookRequestError("Request key already used for a different operation", 409)
             return previous.job_id
     devices = db.query(Host).filter(Host.hostname.in_(targets)).all()
+    if playbook not in {"host_facts.yml", "recovery_check.yml"}:
+        stale = [host.name for host in devices if facts_are_stale(host)]
+        if stale:
+            raise PlaybookRequestError(f"Scan devices first. Facts are missing or stale for: {', '.join(stale)}", 409)
     host_credentials = {}
     for host in devices:
         credentials = {}
@@ -738,6 +784,14 @@ async def run_playbook(
                     return
                 started_at = datetime.now(timezone.utc)
                 with SessionLocal() as state_db:
+                    # A queued job may outlive the facts that authorized it.
+                    if playbook not in {"host_facts.yml", "recovery_check.yml"}:
+                        stale = [host.name for host in state_db.query(Host).filter(Host.hostname.in_(targets)).all() if facts_are_stale(host)]
+                        if stale:
+                            _update_job(job_id, status="failed", phase="discovery_required", finished_at=datetime.now(timezone.utc),
+                                        error_summary=f"Scan devices first. Facts expired while queued for: {', '.join(stale)}. The action did not start.",
+                                        outcomes_json=json.dumps([{"hostname": name, "status": "not_started"} for name in targets]))
+                            return
                     recovery_targets = [host.hostname for host in state_db.query(Host).filter(
                         Host.hostname.in_(targets), Host.recovery_required.is_(True)).all()] if automatic_recovery else []
                 if recovery_targets:
@@ -757,17 +811,21 @@ async def run_playbook(
                     if job_id in _CANCELLED_JOBS:
                         _update_job(job_id, status="cancelled", phase="cancelled", finished_at=datetime.now(timezone.utc), output_log=output)
                         return
-                _update_job(job_id, status="running", phase="executing", started_at=started_at)
+                _update_job(job_id, status="running", phase="scanning" if playbook == "host_facts.yml" else "executing", started_at=started_at)
                 started = True
                 if not readonly:
                     _invalidate_devices(targets)
-                execution_args = (playbook, targets, extra_vars, host_credentials, job_id, settings.ansible_job_timeout_seconds)
-                rc = await _execute(*execution_args, "--- Requested operation ---") if checking_recovery else await _execute(*execution_args)
+                execution_targets = [name for name in targets if name not in daemon_targets] if playbook == "host_facts.yml" else targets
+                execution_args = (playbook, execution_targets, extra_vars, host_credentials, job_id, settings.ansible_job_timeout_seconds)
+                if execution_targets:
+                    rc = await _execute(*execution_args, "--- Requested operation ---") if checking_recovery else await _execute(*execution_args)
+                else:
+                    rc = 0
                 output = log_path.read_text() if log_path.exists() else ""
                 action_output = output.partition("--- Requested operation ---")[2] if checking_recovery else output
-                outcomes = parse_host_outcomes(action_output, targets)
+                outcomes = parse_host_outcomes(action_output, execution_targets)
                 successful = [item["hostname"] for item in outcomes if item["status"] == "success"]
-                failed = [name for name in targets if name not in successful]
+                failed = [name for name in execution_targets if name not in successful]
                 cancelled = job_id in _CANCELLED_JOBS
                 errors = []
                 if rc or failed:
@@ -779,12 +837,26 @@ async def run_playbook(
                 # Access reports are collected even when other hosts fail.
                 _reconcile_accounts(job_id, targets)
                 if playbook == "host_facts.yml":
-                    errors.extend(_process_scan_results(targets, _extract_unreachable_hosts(output), settings.data_dir / "scans" / job_id))
+                    # A report alone cannot certify a failed or interrupted scan.
+                    scan_dir = settings.data_dir / "scans" / job_id
+                    unverified = set(execution_targets) - set(successful)
+                    if cancelled or rc == 124 or (rc and not unverified):
+                        unverified.update(execution_targets)
+                    for name in unverified:
+                        (scan_dir / f"{name}.json").unlink(missing_ok=True)
+                    errors.extend(_process_scan_results(execution_targets, _extract_unreachable_hosts(output), scan_dir))
+                    outcomes.extend(await _scan_reachy_targets(job_id, daemon_targets, outcomes))
+                    cancelled = job_id in _CANCELLED_JOBS
+                    successful = [item["hostname"] for item in outcomes if item["status"] == "success"]
+                    failed = [name for name in targets if name not in successful]
                     with SessionLocal() as state_db:
                         for host in state_db.query(Host).filter(Host.hostname.in_(successful)).all():
                             if host.facts_stale:
                                 failed.append(host.hostname)
                                 errors.append(f"{host.hostname}: scan report missing or invalid")
+                            else:
+                                _save_discovery_result(job_id, host)
+                    output = log_path.read_text() if log_path.exists() else ""
                 elif playbook == "reachy_app_reset.yml" and successful:
                     from backend.services.device_discovery import probe_reachy
                     for name in successful:
@@ -816,6 +888,8 @@ async def run_playbook(
                 for item in outcomes:
                     if item["hostname"] in failed and item["status"] == "success":
                         item["status"] = "verification_failed"
+                        if playbook == "host_facts.yml":
+                            item["detail"] = "Scan report missing or invalid. Check device access and scan again."
                 recovery_targets = failed or (targets if rc else [])
                 if playbook in {"system_update.yml", "docker_cleanup.yml", "reboot.yml", "user_management.yml"} and rc != 124:
                     # A rejected plan or SSH failure before the mutation marker
@@ -850,6 +924,8 @@ async def run_playbook(
                             error_summary="\n".join(errors) or None)
         except (Exception, asyncio.CancelledError) as exc:
             uncertain = started and not readonly
+            if started and playbook == "host_facts.yml":
+                _invalidate_devices(targets)
             if uncertain:
                 _invalidate_devices(targets, recovery_reason=f"Interrupted job {job_id} ({playbook})")
             logger.warning("Job %s interrupted: %s", job_id, exc, exc_info=True)

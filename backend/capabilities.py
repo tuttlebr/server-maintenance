@@ -116,6 +116,11 @@ class OperationDefinition:
 
 OPERATIONS = (
     OperationDefinition(
+        SYSTEM_SCAN, "Scan devices",
+        "Discover hardware, software, health, and supported capabilities before running other actions. Scan again when facts are missing or stale.",
+        "Discovery", SYSTEM_SCAN, "low", "none", "host_facts.yml", "fa-magnifying-glass",
+    ),
+    OperationDefinition(
         "system.packages.preview", "Check for apt updates",
         "Refresh package lists and show available updates. No packages are installed.",
         "Packages", SYSTEM_UPDATE, "low", "none", "package_preview.yml", "fa-magnifying-glass",
@@ -162,6 +167,10 @@ def facts_are_stale(device) -> bool:
 
 
 def operation_ineligibility(device, operation) -> str | None:
+    if operation.id == SYSTEM_SCAN:
+        return None if (device.transport or "ssh") in {"ssh", "reachy_daemon"} else "Unsupported discovery transport"
+    if facts_are_stale(device):
+        return "Scan devices first. Device facts are missing or stale (valid for one hour)."
     if operation.id == REACHY_DAEMON_RESTART:
         if (device.transport != "reachy_daemon" or device.kind != "robot" or
                 not re.match(r"^reachy[\s_-]+mini(?:[\s_-]|$)", device.model or "", re.IGNORECASE)):
@@ -177,6 +186,4 @@ def operation_ineligibility(device, operation) -> str | None:
     family = device.os_family or device.facts.get("os_family")
     if operation.id in {"system.update", "system.packages.preview"} and family != "Debian":
         return "Requires apt on a Debian or Ubuntu device. Refresh device details if the OS is unknown."
-    # Each action checks live prerequisites. A stale dashboard observation must
-    # not force an unrelated full discovery job before routine maintenance.
     return None

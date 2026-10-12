@@ -14,6 +14,7 @@
         <p class="scope-note">Every row applies to every selected device. Debian and Red Hat family Linux supported. No node draining.</p>
       </aside>
       <main class="main-panel">
+        <div v-if="scanRequired.length" class="callout callout-warn" role="status"><div><strong>Scan devices before managing accounts</strong><p>{{ scanRequired.map(d => d.name).join(', ') }}: facts are missing or stale.</p><router-link :to="{path:'/operations',query:{operation:'system.scan',devices:selectedIds.join(',')}}">Scan selected devices</router-link></div></div>
         <div class="tabs" aria-label="User management mode"><button v-for="item in modes" :key="item.id" :class="['tab',{active:mode === item.id}]" :aria-pressed="mode === item.id" :disabled="locked || !!pending" @click="changeMode(item.id)">{{ item.label }}</button></div>
         <section v-if="!pending && mode !== 'accounts'" class="card editor" aria-labelledby="editor-heading">
           <h3 id="editor-heading">{{ mode === 'add' ? 'Add users' : 'Edit users' }}</h3>
@@ -33,10 +34,10 @@
             <details v-if="mode === 'add'" class="initial-password"><summary>Set an initial password (optional)</summary><label class="form-label" for="initial-password">Initial password for new accounts</label><input id="initial-password" v-model="password" class="form-input" type="password" autocomplete="new-password" minlength="12" /><p class="muted">At least 12 characters. A password change is required at first login. Without a password, new accounts have password login locked.</p></details>
           </fieldset>
           <div v-if="validationErrors.length" class="callout callout-danger" role="alert"><p v-for="error in validationErrors" :key="error">{{ error }}</p></div>
-          <div class="editor-footer"><p class="muted">{{ selectedIds.length ? `${selectedIds.length} selected devices` : 'Select target devices to continue.' }}</p><button class="btn btn-primary" :disabled="locked || loading || !!loadError || !selectedIds.length || !!missingIds.length" @click="review">Review {{ mode === 'add' ? 'additions' : 'changes' }}</button></div>
+          <div class="editor-footer"><p class="muted">{{ selectedIds.length ? `${selectedIds.length} selected devices` : 'Select target devices to continue.' }}</p><button class="btn btn-primary" :disabled="locked || loading || !!loadError || !selectedIds.length || !!missingIds.length || !!scanRequired.length" @click="review">Review {{ mode === 'add' ? 'additions' : 'changes' }}</button></div>
         </section>
         <section v-else-if="!pending" class="card accounts-panel">
-          <div class="accounts-toolbar"><input v-model="accountSearch" class="form-input" aria-label="Search users" type="search" placeholder="Search users…" /><button class="btn btn-ghost btn-sm" :disabled="locked || loading || !!loadError || !selectedIds.length || !!missingIds.length" @click="inspect">Refresh accounts</button><button class="btn btn-primary btn-sm" :disabled="locked || !selectedUsers.length" @click="editSelected">Edit {{ selectedUsers.length || 'selected' }} users</button></div>
+          <div class="accounts-toolbar"><input v-model="accountSearch" class="form-input" aria-label="Search users" type="search" placeholder="Search users…" /><button class="btn btn-ghost btn-sm" :disabled="locked || loading || !!loadError || !selectedIds.length || !!missingIds.length || !!scanRequired.length" @click="inspect">Refresh accounts</button><button class="btn btn-primary btn-sm" :disabled="locked || !selectedUsers.length" @click="editSelected">Edit {{ selectedUsers.length || 'selected' }} users</button></div>
           <p class="muted">Account state from the last observation on your selected devices. Refresh accounts to discover existing users.</p>
           <div class="table-wrapper"><table><thead><tr><th><input type="checkbox" :checked="allVisibleSelected" :disabled="locked || !filteredUsers.length" aria-label="Select all visible users" @change="selectUsers($event.target.checked)" /></th><th>User</th><th>State on selected devices</th></tr></thead><tbody><tr v-for="user in filteredUsers" :key="user.id"><td><input v-model="selectedUsers" type="checkbox" :value="user.username" :disabled="locked" :aria-label="`Select ${user.username}`" /></td><td><strong>{{ user.username }}</strong><small>{{ user.full_name }}</small><small>{{ user.email }}</small></td><td><div v-for="device in selectedDevices" :key="device.id" class="placement"><strong>{{ device.name }}</strong><template v-if="accountPlacement(user,device.id).state === 'observed'"><span>{{ accountPlacement(user,device.id).groups || 'No supplementary groups' }} · {{ accountPlacement(user,device.id).shell }}</span><small>Observed {{ formatLongTime(accountPlacement(user,device.id).observed_at) }}</small></template><span v-else>{{ accountPlacement(user,device.id).state === 'absent' ? 'Account absent' : 'Not yet observed' }}</span></div></td></tr></tbody></table></div>
           <p v-if="!selectedIds.length" class="empty-state">Select devices to view their accounts.</p><p v-else-if="!filteredUsers.length" class="empty-state">No matching accounts. Refresh accounts to discover them, or add users.</p>
@@ -70,7 +71,7 @@ import StatusBadge from '../components/StatusBadge.vue';
 import {accountPlacement} from '../utils/access.js';
 import {parseDeviceIds} from '../utils/fleetOverview.js';
 import {formatLongTime} from '../utils/time.js';
-import {ACTIVE,statusLabel} from '../utils/maintenance.js';
+import {ACTIVE,statusLabel,needsScan} from '../utils/maintenance.js';
 import {SHELLS,blankUser,validateUserRows} from '../utils/users.js';
 const route=useRoute(),router=useRouter();
 const modes=[{id:'add',label:'Add users'},{id:'edit',label:'Edit users'},{id:'accounts',label:'Accounts'}];
@@ -83,6 +84,7 @@ let disposed=false,timer,inspectionRequest=null;
 const jobActive=computed(()=>job.value && ACTIVE.includes(job.value.status));
 const locked=computed(()=>starting.value || importing.value || jobActive.value || uncertain.value);
 const selectedDevices=computed(()=>devices.value.filter(d=>selectedIds.value.includes(d.id)));
+const scanRequired=computed(()=>selectedDevices.value.filter(d=>needsScan(d)));
 const visibleDevices=computed(()=>devices.value.filter(d=>`${d.name} ${d.inventory_name}`.toLowerCase().includes(deviceSearch.value.toLowerCase())));
 const missingIds=computed(()=>selectedIds.value.filter(id=>!devices.value.some(d=>d.id===id)));
 const filteredUsers=computed(()=>users.value.filter(u=>(u.placements || []).some(p=>selectedIds.value.includes(p.device_id)) && `${u.username} ${u.full_name || ''} ${u.email || ''}`.toLowerCase().includes(accountSearch.value.toLowerCase())));
@@ -97,7 +99,7 @@ function applyShared(){rows.value=rows.value.map(row=>({...row,...(sharedGroups.
 function selectUsers(checked){selectedUsers.value=checked ? [...new Set([...selectedUsers.value,...filteredUsers.value.map(u=>u.username)])] : selectedUsers.value.filter(name=>!filteredUsers.value.some(u=>u.username===name));}
 function editSelected(){const names=[...selectedUsers.value];changeMode('edit');rows.value=names.map(blankUser);}
 async function review(){
-  if(locked.value || loading.value || loadError.value || !selectedIds.value.length || missingIds.value.length)return;
+  if(locked.value || loading.value || loadError.value || !selectedIds.value.length || missingIds.value.length || scanRequired.value.length)return;
   const checked=validateUserRows(rows.value,mode.value);validationErrors.value=checked.errors;
   if(mode.value==='add' && password.value && password.value.length<12)validationErrors.value.push('Initial password must be at least 12 characters.');
   if(validationErrors.value.length)return;
@@ -120,7 +122,7 @@ async function submit(){
   finally{starting.value=false;}
 }
 async function inspect(){
-  if(starting.value || jobActive.value || importing.value || loading.value || !!loadError.value || !selectedIds.value.length || missingIds.value.length)return;
+  if(starting.value || jobActive.value || importing.value || loading.value || !!loadError.value || !selectedIds.value.length || missingIds.value.length || scanRequired.value.length)return;
   starting.value=true;actionError.value='';
   inspectionRequest ||= {device_ids:[...selectedIds.value],request_key:crypto.randomUUID()};
   try{await accept(await inspectAccounts(inspectionRequest));}

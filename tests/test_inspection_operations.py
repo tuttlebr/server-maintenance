@@ -2,6 +2,7 @@
 import asyncio
 import importlib.util
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -151,7 +152,7 @@ def test_gpu_empty_output_is_a_failure():
 def test_inspection_launches_without_confirmation_or_recovery_prerequisites(operation_id):
     engine = create_engine('sqlite:///:memory:'); Base.metadata.create_all(engine)
     with sessionmaker(bind=engine)() as db:
-        host = Device(hostname='gpu-node', transport='ssh', facts_stale=True, recovery_required=True)
+        host = Device(hostname='gpu-node', transport='ssh', facts_stale=False, discovered_at=datetime.now(timezone.utc), recovery_required=True)
         host.capabilities = ['gpu.inspect']; db.add(host); db.commit()
         operation = OPERATION_BY_ID[operation_id]
         assert operation_ineligibility(host, operation) is None

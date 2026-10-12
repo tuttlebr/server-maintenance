@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.auth import get_current_user
-from backend.capabilities import OPERATION_BY_ID, OPERATIONS, REACHY_DAEMON_RESTART, operation_ineligibility
+from backend.capabilities import OPERATION_BY_ID, OPERATIONS, REACHY_DAEMON_RESTART, facts_are_stale, operation_ineligibility
 from backend.database import SessionLocal, get_db
 from backend.models import Device, Job, DeviceReservation
 from backend.schemas import OperationResponse, OperationRunRequest
@@ -19,6 +19,7 @@ from backend.services.ansible_runner import get_log_path, run_playbook, track_ta
 from backend.services.job_results import get_job_results
 from backend.services.execution_state import TERMINAL_STATUSES, ExecutionConflict, completed_status, reserve_devices, release_devices, request_fingerprint
 from backend.services.device_discovery import (
+    apply_reachy_observation as _apply_reachy_observation,
     probe_reachy,
     reachy_request,
     reachy_websocket_url,
@@ -132,15 +133,6 @@ def _approved_package_plans(db, preview_job_id, devices):
     if set(plans) != targets:
         raise HTTPException(status_code=409, detail="The package check is incomplete. Check for updates again")
     return plans
-
-
-def _apply_reachy_observation(device, result):
-    device.status = "online" if result["reachable"] else "offline"
-    device.facts_stale = not result["reachable"]
-    if result["reachable"]:
-        device.facts = result.get("facts", {})
-        device.last_seen = datetime.now(timezone.utc)
-        device.discovered_at = device.last_seen
 
 
 async def _recover_reachy(db, devices, user):
@@ -296,6 +288,12 @@ async def _run_reachy_remote_jobs(job_id, targets, operation_id, label, started)
         with SessionLocal() as db:
             job = db.query(Job).filter_by(job_id=job_id).first()
             if not job or job.status != "pending":
+                return
+            names = [hostname for hostname, _, _, _ in targets]
+            if any(facts_are_stale(device) for device in db.query(Device).filter(Device.hostname.in_(names)).all()):
+                _update_reachy_job(job_id, status="failed", phase="discovery_required", finished_at=datetime.now(timezone.utc),
+                    error_summary="Scan devices first. Facts expired while queued. The action did not start.",
+                    outcomes_json=json.dumps([{"hostname": name, "status": "not_started"} for name in names]))
                 return
         await _execute_reachy_remote_jobs(job_id, targets, operation_id, label, started)
 

@@ -42,7 +42,7 @@ export const OPERATION_LABELS = {
   "service_control.yml": "System services",
   "recovery_check.yml": "Check device health",
   "access_inspect.yml": "Inspect accounts",
-  "host_facts.yml": "Scan device",
+  "host_facts.yml": "Scan devices",
   "maintenance_assessment.yml": "Assess maintenance readiness",
   "storage_analysis.yml": "Check storage",
   "gpu_usage.yml": "Check GPU usage",

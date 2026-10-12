@@ -68,9 +68,10 @@
                   <ul v-if="visibleStorageOutcomes(expandedJob).length" class="outcomes" aria-label="Per-device outcomes"><li v-for="result in visibleStorageOutcomes(expandedJob)" :key="result.hostname"><strong>{{ result.hostname }}</strong>: {{ result.status.replaceAll('_', ' ') }}<p v-if="result.detail">{{ result.detail }}</p><p v-if="result.recovery_resolution">{{ result.recovery_resolution }}</p></li></ul>
                   <router-link v-if="expandedJob?.playbook === 'package_preview.yml' && expandedJob.status === 'success'" :to="`/operations?preview=${expandedJob.job_id}`" class="btn btn-primary btn-sm">Review and apply this preview</router-link>
                   <div v-if="job.recap && job.playbook !== 'storage_analysis.yml'" class="job-recap-expanded"><pre>{{ job.recap }}</pre></div>
+                  <DiscoveryResults :reports="expandedJob?.result_artifacts || []" />
                   <StorageResults :reports="expandedJob?.result_artifacts || []" />
-                  <section v-if="expandedJob?.result_artifacts?.some(result => !['execution','storage'].includes(result.report_type))" class="result-grid" aria-label="Structured operation results">
-                    <article v-for="result in expandedJob.result_artifacts.filter(item => !['execution','storage'].includes(item.report_type))" :key="`${result.report_type}-${result.hostname}`" class="result-card">
+                  <section v-if="expandedJob?.result_artifacts?.some(result => !['execution','storage','discovery'].includes(result.report_type))" class="result-grid" aria-label="Structured operation results">
+                    <article v-for="result in expandedJob.result_artifacts.filter(item => !['execution','storage','discovery'].includes(item.report_type))" :key="`${result.report_type}-${result.hostname}`" class="result-card">
                       <div class="result-heading">
                         <span>{{ resultTitle(result.report_type) }}</span>
                         <strong>{{ result.hostname }}</strong>
@@ -159,6 +160,7 @@
 </template>
 
 <script setup>
+import DiscoveryResults from '../components/DiscoveryResults.vue';
 import StorageResults from "../components/StorageResults.vue";
 import {visibleStorageOutcomes} from "../utils/storage.js";
 import InspectionResults from "../components/InspectionResults.vue";

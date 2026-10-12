@@ -160,7 +160,7 @@ class RunnerIngestionHookTests(unittest.IsolatedAsyncioTestCase):
     async def test_runner_indexes_a_failed_terminal_outcome(self):
         sessions = _test_session_factory()
         db = sessions()
-        db.add(Host(hostname="dgx-01", ansible_user="fleet"))
+        db.add(Host(hostname="dgx-01", ansible_user="fleet", facts_stale=False, discovered_at=datetime.now(timezone.utc)))
         db.commit()
 
         with tempfile.TemporaryDirectory() as directory:

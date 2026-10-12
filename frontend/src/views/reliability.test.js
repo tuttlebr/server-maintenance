@@ -10,7 +10,7 @@ import {createRouter, createMemoryHistory} from 'vue-router';
 test('maintenance views initialize with empty fleet data', async () => {
   const server = await createServer({server:{middlewareMode:true,hmr:false,ws:false}, appType:'custom'});
   try {
-    for (const [name, expected] of [['Operations', 'Run checks and maintenance on your selected devices'], ['UserManagement', 'Loading users and devices'], ['JobHistory', 'Activity']]) {
+    for (const [name, expected] of [['Operations', 'Scan devices first, then run checks and maintenance'], ['UserManagement', 'Loading users and devices'], ['JobHistory', 'Activity']]) {
       const {default: component} = await server.ssrLoadModule(`/src/views/${name}.vue`);
       const router=createRouter({history:createMemoryHistory(),routes:[{path:'/',component}]});
       await router.push('/'); await router.isReady();
