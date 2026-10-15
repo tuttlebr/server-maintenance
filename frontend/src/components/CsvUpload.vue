@@ -2,7 +2,7 @@
   <div class="csv-import">
     <label :for="`csv-${mode}`" class="form-label">Upload CSV</label>
     <div class="file-controls"><input :id="`csv-${mode}`" type="file" accept=".csv,text/csv" :disabled="disabled || importing" @change="selectFile" /><a :href="templateUrl" :download="`users-${mode}-template.csv`">Download template</a></div>
-    <p class="muted">{{ mode === 'add' ? 'Columns: username, full_name, email, groups, shell. Username can be derived from email.' : 'Use username and any fields to change: full_name, email, groups, shell. Blank fields stay unchanged.' }} Upload replaces the current rows. Quote groups containing commas. Up to 500 users / 1 MB.</p>
+    <p class="muted">{{ mode === 'add' ? 'Columns: username, full_name, email, groups, shell, grant_sudo. Username can be derived from email.' : 'Use username and any fields to change: full_name, email, groups, shell, grant_sudo. Blank fields stay unchanged.' }} Set grant_sudo to true to grant passwordless sudo. False or blank keeps existing access. Upload replaces the current rows. Quote groups containing commas. Up to 500 users / 1 MB.</p>
     <p v-if="importing" role="status">Validating CSV…</p>
     <p v-else-if="imported" role="status">{{ imported }} users imported into the editable rows below. Review them before applying.</p>
     <p v-if="error" role="alert" class="callout callout-danger csv-error">{{ error }}</p>

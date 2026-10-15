@@ -70,6 +70,7 @@
       ansible.builtin.set_fact:
         fleet_requested_groups: "{{ ((fleet_new_accounts + fleet_user_updates) | map(attribute='groups', default='') | join(',')).split(',') | reject('equalto', '') | unique | list }}"
         fleet_requested_shells: "{{ (fleet_new_accounts + fleet_user_updates) | map(attribute='shell', default='') | reject('equalto', '') | unique | list }}"
+        fleet_sudo_accounts: "{{ (fleet_new_accounts + fleet_user_updates) | selectattr('grant_sudo', 'defined') | selectattr('grant_sudo', 'equalto', true) | list }}"
 
     - name: Validate supplementary groups
       ansible.builtin.assert:
@@ -81,6 +82,12 @@
         argv: [test, -x, "{{ item }}"]
       changed_when: false
       loop: "{{ fleet_requested_shells }}"
+
+    - name: Require sudo policy validation before granting access
+      ansible.builtin.command:
+        argv: [test, -x, /usr/sbin/visudo]
+      changed_when: false
+      when: fleet_sudo_accounts | length > 0
 
     - name: Record that account changes are about to begin
       ansible.builtin.include_tasks: tasks/save_operation_report.yml
@@ -128,6 +135,29 @@
         - default_password | default('') | length > 0
         - force_password_change | bool
       changed_when: true
+
+    - name: Ensure the sudoers directory exists for requested grants
+      ansible.builtin.file:
+        path: /etc/sudoers.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: fleet_sudo_accounts | length > 0
+
+    - name: Grant explicitly requested passwordless sudo access
+      ansible.builtin.lineinfile:
+        path: "/etc/sudoers.d/{{ item.username }}"
+        line: "{{ item.username }} ALL=(ALL) NOPASSWD:ALL"
+        state: present
+        create: true
+        owner: root
+        group: root
+        mode: "0440"
+        validate: "/usr/sbin/visudo -cf %s"
+      loop: "{{ fleet_sudo_accounts }}"
+      loop_control:
+        label: "{{ item.username }}"
 
     - name: Observe resulting accounts
       ansible.builtin.include_tasks: tasks/account_report.yml

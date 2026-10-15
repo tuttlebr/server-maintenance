@@ -1,12 +1,13 @@
 export const SHELLS = ['/bin/bash', '/bin/sh', '/bin/zsh', '/usr/bin/bash', '/usr/bin/zsh', '/usr/sbin/nologin', '/bin/false'];
 export const USER_FIELDS = ['username', 'full_name', 'email', 'groups', 'shell'];
 const linuxName = /^[a-z_][a-z0-9_-]{0,31}$/;
-export function blankUser(username = '') { return {username, full_name:'', email:'', groups:'', shell:''}; }
+export function blankUser(username = '') { return {username, full_name:'', email:'', groups:'', shell:'', grant_sudo:false}; }
 export function validateUserRows(rows, mode) {
   const errors = [], users = [], seen = new Set();
   if (!rows.length || rows.length > 500) errors.push('Use between 1 and 500 users per operation.');
   rows.forEach((row, index) => {
     const user = Object.fromEntries(USER_FIELDS.map(key => [key, String(row[key] || '').trim()]).filter(([,value]) => value));
+    if (row.grant_sudo === true) user.grant_sudo = true;
     if (user.email) user.email = user.email.toLowerCase();
     if (!user.username && mode === 'add' && user.email) user.username = user.email.split('@')[0];
     const fail = message => errors.push(`Row ${index + 1}: ${message}`);
@@ -22,13 +23,13 @@ export function validateUserRows(rows, mode) {
       if (!user.groups || !user.groups.split(',').every(g => linuxName.test(g))) fail('Groups must be comma-separated Linux group names.');
     }
     if (user.shell && !SHELLS.includes(user.shell)) fail('Choose a supported login shell.');
-    if (mode === 'edit' && !['full_name','email','groups','shell'].some(key => user[key])) fail('Enter at least one change. Blank fields keep their current value.');
+    if (mode === 'edit' && !['full_name','email','groups','shell','grant_sudo'].some(key => user[key])) fail('Enter at least one change. Blank fields keep their current value.');
     users.push(user);
   });
   return {users, errors};
 }
 export function csvTemplate(mode) {
-  return 'username,full_name,email,groups,shell\n' + (mode === 'edit'
-    ? 'jane,,,"developers,docker",/bin/bash\n'
-    : 'jane,Jane Example,jane@example.com,developers,/bin/bash\n');
+  return 'username,full_name,email,groups,shell,grant_sudo\n' + (mode === 'edit'
+    ? 'jane,,,"developers,docker",/bin/bash,\n'
+    : 'jane,Jane Example,jane@example.com,developers,/bin/bash,false\n');
 }

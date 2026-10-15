@@ -34,7 +34,7 @@ def _user_to_response(db: Session, user: ManagedUser) -> dict:
         "username": user.username,
         "full_name": user.full_name,
         "email": user.email,
-        "placements": [{"device_id": a.host_id, "groups": a.groups, "shell": a.shell, "managed_sudo": a.managed_sudo, "sudo_policy": a.sudo_policy, "observed_at": a.observed_at, "state": a.state} for a in db.query(UserHostAssociation).filter_by(user_id=user.id).all()],
+        "placements": [{"device_id": a.host_id, "full_name": a.full_name, "uid": a.uid, "home": a.home, "groups": a.groups, "shell": a.shell, "managed_sudo": a.managed_sudo, "sudo_policy": a.sudo_policy, "observed_at": a.observed_at, "state": a.state} for a in db.query(UserHostAssociation).filter_by(user_id=user.id).all()],
         "device_ids": _get_user_devices(db, user.id),
         "created_at": user.created_at,
     }

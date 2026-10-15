@@ -156,7 +156,7 @@ def test_every_other_operation_requires_current_discovery(fleet, staleness, monk
         fake.assert_not_awaited()
 
 
-@pytest.mark.parametrize("playbook", ["package_preview.yml", "reboot.yml", "access_inspect.yml", "user_management.yml"])
+@pytest.mark.parametrize("playbook", ["package_preview.yml", "reboot.yml", "user_management.yml"])
 def test_runner_rejects_unscanned_targets_without_reserving(fleet, playbook):
     sessions, calls, _, _ = fleet
     with sessions() as db:

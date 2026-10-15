@@ -8,7 +8,7 @@ from backend.schemas import UserEdit, UserInfo
 
 MAX_CSV_BYTES = 1024 * 1024
 MAX_CSV_USERS = 500
-COLUMNS = {"username", "full_name", "email", "groups", "shell"}
+COLUMNS = {"username", "full_name", "email", "groups", "shell", "grant_sudo"}
 ALIASES = {"name": "full_name", "full name": "full_name", "email_address": "email", "mail": "email"}
 
 
@@ -37,7 +37,7 @@ def parse_csv(content: str, mode: str = "add") -> list[UserInfo | UserEdit]:
                         raise CsvValidationError("CSV has duplicate column headers")
                     unknown = set(header) - COLUMNS
                     if unknown:
-                        raise CsvValidationError(f"Unknown CSV columns: {', '.join(sorted(unknown))}. Use username, full_name, email, groups, shell.")
+                        raise CsvValidationError(f"Unknown CSV columns: {', '.join(sorted(unknown))}. Use username, full_name, email, groups, shell, grant_sudo.")
                     if mode == "edit" and "username" not in header:
                         raise CsvValidationError("Edit CSV requires a username column")
                     if mode == "add" and ("full_name" not in header or not {"username", "email"} & set(header)):
@@ -53,7 +53,15 @@ def parse_csv(content: str, mode: str = "add") -> list[UserInfo | UserEdit]:
                 continue
             try:
                 model = UserInfo if mode == "add" else UserEdit
-                record = model(**{key: value.strip() for key, value in zip(header, row)})
+                values = {key: value.strip() for key, value in zip(header, row)}
+                if "grant_sudo" in values:
+                    flag = values.pop("grant_sudo").lower()
+                    if flag not in {"", "true", "false"}:
+                        errors.append(f"Row {line}: grant_sudo must be true, false, or blank")
+                        continue
+                    if flag:
+                        values["grant_sudo"] = flag == "true"
+                record = model(**values)
                 if record.username in seen:
                     errors.append(f"Row {line}: duplicate username '{record.username}'")
                 else:

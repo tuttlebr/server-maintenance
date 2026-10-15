@@ -669,3 +669,30 @@ def test_package_failure_requires_recovery_only_after_mutation_or_timeout(databa
         assert completed.status == expected
         assert db.query(Device).one().recovery_required is (expected == 'recovery_required')
         assert completed.device_results[0]['detail'] == 'Package plan changed'
+
+
+def test_account_inventory_executes_with_stale_facts_without_mutations(database, monkeypatch):
+    with database() as db:
+        host=device()
+        host.facts_stale=True
+        host.discovered_at=None
+        host.recovery_required=True
+        db.add(host);db.commit()
+    calls=[]
+    def execute(playbook, targets, values, credentials, job_id, timeout):
+        calls.append(playbook)
+        runner.get_log_path(job_id).write_text('PLAY RECAP\nnode-01 : ok=4 changed=0 unreachable=0 failed=0\n')
+        return 0
+    monkeypatch.setattr(runner,'_run_playbook_streaming',execute)
+    async def scenario():
+        with database() as db:
+            job_id=await runner.run_playbook(db,'access_inspect.yml',hosts=['node-01'])
+        await asyncio.gather(*list(runner._BACKGROUND_TASKS))
+        return job_id
+    job_id=asyncio.run(scenario())
+    with database() as db:
+        completed=db.query(Job).filter_by(job_id=job_id).one()
+        assert completed.status=='success' and completed.execution_kind=='read_only'
+        assert db.query(Device).one().facts_stale and db.query(Device).one().recovery_required
+        assert db.query(DeviceReservation).count()==0
+    assert calls==['access_inspect.yml']

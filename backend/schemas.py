@@ -335,6 +335,7 @@ class AccountFields(BaseModel):
     email: str | None = None
     groups: str | None = None
     shell: str | None = None
+    grant_sudo: bool | None = Field(default=None, strict=True)
 
     @field_validator("full_name")
     @classmethod
@@ -405,7 +406,7 @@ class UserEdit(AccountFields):
 
     @model_validator(mode="after")
     def require_change(self):
-        if not any((self.full_name, self.email, self.groups, self.shell)):
+        if not any((self.full_name, self.email, self.groups, self.shell, self.grant_sudo)):
             raise ValueError("provide at least one update field; blank fields keep their current value")
         return self
 
@@ -461,7 +462,7 @@ class BulkUserUpdate(AccountFields):
     @property
     def updates(self) -> list[UserEdit]:
         return self.users or [UserEdit(username=name, full_name=self.full_name,
-                                      email=self.email, groups=self.groups, shell=self.shell)
+                                      email=self.email, groups=self.groups, shell=self.shell, grant_sudo=self.grant_sudo)
                               for name in self.usernames or []]
 
     @model_validator(mode="after")
@@ -469,7 +470,7 @@ class BulkUserUpdate(AccountFields):
         _validate_device_targeting(self.device_ids, self.all_devices)
         if bool(self.users) == bool(self.usernames):
             raise ValueError("provide either per-user records or usernames with shared changes")
-        if self.users and any((self.full_name, self.email, self.groups, self.shell)):
+        if self.users and any((self.full_name, self.email, self.groups, self.shell, self.grant_sudo is not None)):
             raise ValueError("shared changes cannot be combined with per-user records")
         _validate_unique_accounts(self.updates)
         return self

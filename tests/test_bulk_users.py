@@ -143,3 +143,43 @@ def test_edit_metadata_updates_only_after_remote_completion(api):
         account=db.query(ManagedUser).one()
         assert account.full_name=='Jane Changed'
         assert account.email=='jane@example.com'
+
+
+def test_sudo_csv_import_and_api_preserve_explicit_per_user_grants(api):
+    client,runner,_=api
+    preview=client.post('/api/v2/users/csv-preview',files={'file':('users.csv',b'username,full_name,grant_sudo\nsam,Sam,true\nalice,Alice,false\nbob,Bob,\n')},data={'mode':'add'})
+    assert preview.status_code==200,preview.text
+    records=preview.json()['users']
+    assert records[0]['grant_sudo'] is True
+    assert records[1]['grant_sudo'] is False
+    assert 'grant_sudo' not in records[2]
+    response=client.post('/api/v2/users/bulk-add',json={'device_ids':[1], 'users':records})
+    assert response.status_code==200,response.text
+    assert runner.call_args.kwargs['extra_vars']['user_records']==records
+    response=client.put('/api/v2/users/bulk-update',json={'device_ids':[1], 'users':[{'username':'jane','grant_sudo':True}]})
+    assert response.status_code==200,response.text
+    assert runner.call_args.kwargs['extra_vars']['user_updates']==[{'username':'jane','grant_sudo':True}]
+
+
+@pytest.mark.parametrize('value',['true','false','yes',1])
+def test_json_sudo_grant_requires_a_boolean(value):
+    with pytest.raises(ValidationError):
+        UserInfo(username='sam',full_name='Sam',grant_sudo=value)
+
+
+def test_sudo_edit_validation_rejects_ambiguous_or_empty_requests():
+    with pytest.raises(ValidationError,match='at least one update'):
+        BulkUserUpdate(users=[dict(username='jane',grant_sudo=False)],device_ids=[1])
+    with pytest.raises(ValidationError,match='shared changes'):
+        BulkUserUpdate(users=[dict(username='jane',grant_sudo=True)],grant_sudo=False,device_ids=[1])
+    assert BulkUserUpdate(usernames=['jane'],grant_sudo=True,device_ids=[1]).updates[0].grant_sudo is True
+    with pytest.raises(CsvValidationError,match='grant_sudo must be'):
+        parse_csv('username,grant_sudo\njane,maybe\n','edit')
+
+
+def test_inspection_accepts_explicit_devices_with_stale_facts(api):
+    client,runner,_=api
+    response=client.post('/api/v2/users/inspect',json={'device_ids':[1,2]})
+    assert response.status_code==200,response.text
+    assert runner.call_args.args[1]=='access_inspect.yml'
+    assert runner.call_args.kwargs['hosts']==['one','two']

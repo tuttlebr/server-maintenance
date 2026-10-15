@@ -745,7 +745,7 @@ async def run_playbook(
                 raise PlaybookRequestError("Request key already used for a different operation", 409)
             return previous.job_id
     devices = db.query(Host).filter(Host.hostname.in_(targets)).all()
-    if playbook not in {"host_facts.yml", "recovery_check.yml"}:
+    if playbook not in {"host_facts.yml", "recovery_check.yml", "access_inspect.yml"}:
         stale = [host.name for host in devices if facts_are_stale(host)]
         if stale:
             raise PlaybookRequestError(f"Scan devices first. Facts are missing or stale for: {', '.join(stale)}", 409)
@@ -785,7 +785,7 @@ async def run_playbook(
                 started_at = datetime.now(timezone.utc)
                 with SessionLocal() as state_db:
                     # A queued job may outlive the facts that authorized it.
-                    if playbook not in {"host_facts.yml", "recovery_check.yml"}:
+                    if playbook not in {"host_facts.yml", "recovery_check.yml", "access_inspect.yml"}:
                         stale = [host.name for host in state_db.query(Host).filter(Host.hostname.in_(targets)).all() if facts_are_stale(host)]
                         if stale:
                             _update_job(job_id, status="failed", phase="discovery_required", finished_at=datetime.now(timezone.utc),

@@ -18,7 +18,7 @@
 
 - name: Save observed account state
   ansible.builtin.copy:
-    content: "{{ {'schema_version': 1, 'report_type': 'accounts', 'hostname': inventory_hostname, 'accounts': fleet_account_observations.stdout | from_json} | to_json }}"
+    content: "{{ {'schema_version': 1, 'report_type': 'accounts', 'hostname': inventory_hostname, 'scope': ('all' if fleet_account_names | default([]) | length == 0 else 'selected'), 'accounts': fleet_account_observations.stdout | from_json} | to_json }}"
     dest: "{{ __fleet_results_dir }}/{{ __fleet_job_id }}/accounts_{{ inventory_hostname }}.json"
     mode: "0600"
   delegate_to: localhost
