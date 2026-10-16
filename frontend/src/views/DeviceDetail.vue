@@ -24,7 +24,7 @@
     </nav>
 
     <section v-if="activeTab === 'Summary'" class="detail-grid">
-      <article class="card"><div class="card-body"><h3>Identity</h3><dl class="facts-list"><template v-for="item in identityFacts" :key="item.label"><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></template></dl></div></article>
+      <article class="card"><div class="card-body"><h3>Identity</h3><dl class="facts-list"><template v-for="item in identityFacts" :key="item.label"><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></template></dl><RecommendedHostname :facts="device.facts || {}" /></div></article>
       <article class="card"><div class="card-body"><h3>Health</h3><dl class="facts-list"><dt>Status</dt><dd><StatusBadge :status="device.status" /></dd><dt>Last seen</dt><dd>{{ formatLongTime(device.last_seen) }}</dd><dt>Last discovery</dt><dd>{{ formatLongTime(device.discovered_at) }}</dd><template v-if="device.transport === 'ssh'"><dt>Maintenance</dt><dd>Standalone · No node draining</dd><dt>Reboot</dt><dd>{{ device.reboot_required ? 'Required' : 'Not required' }}</dd></template></dl></div></article>
       <article v-if="hardwareFacts.length" class="card full"><div class="card-body"><h3>Hardware</h3><div class="hardware-grid"><div v-for="item in hardwareFacts" :key="item.label"><span>{{ item.label }}</span><strong>{{ item.value }}</strong></div></div></div></article>
     </section>
@@ -84,6 +84,7 @@ import { configureDeviceSsh, deleteDevice, getDevice, previewDeviceSsh, scanDevi
 import StatusBadge from "../components/StatusBadge.vue";
 import BaseModal from "../components/BaseModal.vue";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
+import RecommendedHostname from "../components/RecommendedHostname.vue";
 import { deviceKind, devicePlatformName } from "../utils/devices.js";
 import { formatLongTime } from "../utils/time.js";
 const props = defineProps({ id: { type: String, required: true } });

@@ -170,6 +170,8 @@ def enrich_from_scan(device, report: dict) -> None:
 
     vendor = _clean_fact(report.get("system_vendor"))
     model = _clean_fact(report.get("product_name"))
+    device_tree_model = _clean_fact(str(report.get("device_tree_model") or "").rstrip("\x00"))
+    model = model or device_tree_model
     architecture = _clean_fact(report.get("architecture"))
     os_family = _clean_fact(report.get("os_family"))
     dgx_name = _clean_fact(report.get("dgx_name"))
@@ -210,7 +212,20 @@ def enrich_from_scan(device, report: dict) -> None:
     else:
         device.machine_type = "gpu_node" if GPU_INSPECT in capabilities else "cpu_node"
     device.capabilities = normalize_capabilities(capabilities)
+    hostname_model = None
+    if is_dgx_spark:
+        hostname_model = "spark"
+    elif any(
+        re.match(r"^(?:nvidia\s+)?jetson(?:\s|$)", _normalize_identity(value))
+        for value in (model, device_tree_model)
+    ):
+        hostname_model = "jetson"
+    elif any(_is_dgx_product(value) for value in (model, dgx_name, dgx_pretty_name)):
+        # An unverified Spark must not fall through to the generic DGX label.
+        if not any("spark" in _fact_tokens(value) for value in (model, dgx_name, dgx_pretty_name)):
+            hostname_model = "dgx"
     facts = {
+        **_hostname_recommendation(report, hostname_model),
         "distribution": _clean_fact(report.get("distribution")),
         "service_manager": _clean_fact(report.get("service_manager")),
         "package_manager": _clean_fact(report.get("package_manager")),
@@ -230,6 +245,11 @@ def enrich_from_scan(device, report: dict) -> None:
             "vendor": _clean_fact(report.get("motherboard_vendor")),
             "model": _clean_fact(report.get("motherboard_model")),
             "version": _clean_fact(report.get("motherboard_version")),
+            "serial": _serial_number(report.get("motherboard_serial")),
+        },
+        "device_tree": {
+            "model": device_tree_model,
+            "serial": _serial_number(report.get("device_tree_serial")),
         },
         "bios": {
             "vendor": _clean_fact(report.get("bios_vendor")),
@@ -332,9 +352,48 @@ def infer_kind(
 
 def _clean_fact(value) -> str | None:
     text = str(value or "").strip()
-    if not text or text.lower() in {"unknown", "none", "n/a", "not specified"}:
+    if not text or text.lower() in {"unknown", "none", "n/a", "na", "not specified", "to be filled by o.e.m."}:
         return None
     return text[:160]
+
+
+def _serial_number(value) -> str | None:
+    """Preserve the serial suffix; never turn a placeholder into a hostname."""
+    serial = re.sub(r"\s+", "", str(value or "").rstrip("\x00"))
+    placeholder = re.sub(r"[^a-z0-9]", "", serial.lower())
+    if placeholder in {
+        "", "unknown", "none", "na", "notspecified", "notavailable", "notapplicable",
+        "tobefilledbyoem", "defaultstring", "systemserialnumber", "serialnumber",
+        "baseboardserialnumber", "boardserialnumber", "invalid", "oem",
+    } or set(placeholder) in ({"0"}, {"f"}):
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9._-]{6,160}", serial):
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9]{6}", serial[-6:]):
+        return None
+    return serial
+
+
+def _hostname_recommendation(report: dict, model: str | None) -> dict:
+    result = {
+        "recommended_hostname": None,
+        "hostname_recommendation_source": None,
+        "hostname_recommendation_reason": None,
+    }
+    if model is None:
+        result["hostname_recommendation_reason"] = "Model was not identified as Spark, DGX, or Jetson."
+        return result
+    serial = _serial_number(report.get("motherboard_serial"))
+    source = "Baseboard serial number"
+    if serial is None and model == "jetson":
+        serial = _serial_number(report.get("device_tree_serial"))
+        source = "Jetson device tree serial number"
+    if serial is None:
+        result["hostname_recommendation_reason"] = "No usable hardware serial number with a six-character suffix was reported."
+        return result
+    result["recommended_hostname"] = f"ai-sae-{model}-{serial[-6:].lower()}"
+    result["hostname_recommendation_source"] = source
+    return result
 
 
 def _fact_tokens(value) -> set[str]:

@@ -79,6 +79,22 @@
     - name: Detect DGX Spark for first-scan platform tasks
       ansible.builtin.include_tasks: tasks/detect_dgx_spark.yml
 
+    - name: Read device tree model when available
+      ansible.builtin.command:
+        argv: [head, -c, '256', /proc/device-tree/model]
+      register: device_tree_model
+      when: ansible_facts['architecture'] | default('') in ['aarch64', 'arm64', 'armv7l']
+      changed_when: false
+      failed_when: false
+
+    - name: Read device tree serial number when available
+      ansible.builtin.command:
+        argv: [head, -c, '256', /proc/device-tree/serial-number]
+      register: device_tree_serial
+      when: ansible_facts['architecture'] | default('') in ['aarch64', 'arm64', 'armv7l']
+      changed_when: false
+      failed_when: false
+
     - name: Get CUDA version
       shell: nvcc --version 2>/dev/null | grep "release" | sed 's/.*release //' | sed 's/,.*//'
       register: cuda_info
@@ -226,6 +242,9 @@
           motherboard_vendor: "{{ ansible_facts['board_vendor'] | default('unknown') }}"
           motherboard_model: "{{ ansible_facts['board_name'] | default('unknown') }}"
           motherboard_version: "{{ ansible_facts['board_version'] | default('unknown') }}"
+          motherboard_serial: "{{ ansible_facts['board_serial'] | default('') }}"
+          device_tree_model: "{{ device_tree_model.stdout | default('') if (device_tree_model.rc | default(1)) == 0 else '' }}"
+          device_tree_serial: "{{ device_tree_serial.stdout | default('') if (device_tree_serial.rc | default(1)) == 0 else '' }}"
           bios_vendor: "{{ ansible_facts['bios_vendor'] | default('unknown') }}"
           bios_version: "{{ ansible_facts['bios_version'] | default('unknown') }}"
           bios_date: "{{ ansible_facts['bios_date'] | default('unknown') }}"

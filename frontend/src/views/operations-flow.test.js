@@ -307,3 +307,36 @@ test('failed scan leaves the prerequisite visible and blocks actions',async()=>{
   assert.equal(view.calls.filter(c=>c.options.method==='POST').length,1);
  } finally {view.app.unmount();}
 });
+
+test('scan shows the recommended hostname and copies its command without another operation',async()=>{
+ const reports=[{report_type:'discovery',hostname:'node-01',device_id:1,facts:{recommended_hostname:'ai-sae-spark-abc123',hostname_recommendation_source:'Baseboard serial number'}}];
+ const copied=[];
+ const originalNavigator=Object.getOwnPropertyDescriptor(globalThis,'navigator');
+ Object.defineProperty(globalThis,'navigator',{configurable:true,value:{clipboard:{writeText:async value=>copied.push(value)}}});
+ const view=await mount({devices:'1',operation:'system.scan'},false,false,'complete',reports);
+ try {
+  await view.click('Scan now');
+  assert.match(text(view.root),/Recommended hostname/);
+  assert.match(text(view.root),/ai-sae-spark-abc123/);
+  assert.match(text(view.root),/Last six characters of baseboard serial number/);
+  await view.click('Copy command');
+  assert.deepEqual(copied,['sudo hostnamectl set-hostname ai-sae-spark-abc123']);
+  assert.match(text(view.root),/Command copied/);
+  assert.equal(view.calls.filter(c=>c.options.method==='POST').length,1);
+ } finally {
+  view.app.unmount();
+  if(originalNavigator)Object.defineProperty(globalThis,'navigator',originalNavigator);
+  else delete globalThis.navigator;
+ }
+});
+
+test('scan explains an unavailable recommendation and does not offer a command',async()=>{
+ const reports=[{report_type:'discovery',hostname:'node-01',device_id:1,facts:{recommended_hostname:null,hostname_recommendation_reason:'No usable hardware serial number with a six-character suffix was reported.'}}];
+ const view=await mount({devices:'1',operation:'system.scan'},false,false,'complete',reports);
+ try {
+  await view.click('Scan now');
+  assert.match(text(view.root),/Recommended hostname/);
+  assert.match(text(view.root),/Unavailable: No usable hardware serial number/);
+  assert.ok(!find(view.root,n=>n.tag==='button'&&text(n)==='Copy command'));
+ } finally {view.app.unmount();}
+});

@@ -4,6 +4,7 @@
       <h4>{{ devices.find(d => d.inventory_name === report.hostname)?.name || report.hostname }}</h4>
       <p class="observed">Observed {{ formatLongTime(report.observed_at) }}</p>
       <dl><template v-for="item in summary(report)" :key="item.label"><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></template></dl>
+      <RecommendedHostname :facts="report.facts || {}" />
       <details><summary>{{ report.capabilities?.length || 0 }} supported {{ report.capabilities?.length === 1 ? 'capability' : 'capabilities' }}</summary><ul><li v-for="capability in report.capabilities || []" :key="capability">{{ capability }}</li></ul></details>
       <router-link v-if="devices.some(d => d.id === report.device_id)" :to="`/devices/${report.device_id}`">View device facts</router-link>
     </article>
@@ -12,6 +13,7 @@
 <script setup>
 import {computed} from 'vue';
 import {formatLongTime} from '../utils/time.js';
+import RecommendedHostname from './RecommendedHostname.vue';
 const props = defineProps({reports:{type:Array,default:()=>[]},devices:{type:Array,default:()=>[]}});
 const discoveries = computed(() => props.reports.filter(r => r.report_type === 'discovery'));
 function summary(report) {

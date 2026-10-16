@@ -48,6 +48,7 @@ def fleet(tmp_path, monkeypatch):
                 "hostname": "node", "os_family": "Debian", "os_version": "Ubuntu 24.04",
                 "architecture": "x86_64", "service_manager": "systemd", "package_manager": "apt",
                 "docker_available": True, "gpu_model": "NVIDIA test GPU", "gpu_vendor": "NVIDIA",
+                "product_name": "DGX H100", "motherboard_serial": "SN0123456789",
             }))
         failed = behavior.get("ssh_failed", False)
         runner.get_log_path(job_id).write_text(f"PLAY RECAP\nnode : ok=4 changed=0 unreachable=0 failed={int(failed)}\n")
@@ -96,6 +97,9 @@ def test_mixed_scan_persists_facts_and_unlocks_capabilities_once(fleet):
         reports = get_job_results(job_id)
         assert {r["hostname"] for r in reports} == {"node", "robot"}
         assert all(r["report_type"] == "discovery" and r["observed_at"] for r in reports)
+        assert node.hostname == "node"
+        assert node.facts["recommended_hostname"] == "ai-sae-dgx-456789"
+        assert next(r for r in reports if r["hostname"] == "node")["facts"]["recommended_hostname"] == "ai-sae-dgx-456789"
 
 
 @pytest.mark.parametrize("failure", ["ssh_failed", "missing_report", "process_failure", "daemon_failed"])
