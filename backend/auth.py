@@ -11,10 +11,9 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v2/auth/login")
 
 
 def verify_admin(username: str, password: str) -> bool:
-    return hmac.compare_digest(username, settings.admin_username) and hmac.compare_digest(
-        password,
-        settings.admin_password,
-    )
+    username_matches = hmac.compare_digest(username.encode(), settings.admin_username.encode())
+    password_matches = hmac.compare_digest(password.encode(), settings.admin_password.encode())
+    return username_matches and password_matches
 
 
 def create_access_token(username: str) -> str:

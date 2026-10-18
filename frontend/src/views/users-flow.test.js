@@ -1,33 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFile} from 'node:fs/promises';
-import {parse,compileScript} from '@vue/compiler-sfc';
-import {createRenderer,nextTick} from 'vue';
 import {createRouter,createMemoryHistory} from 'vue-router';
 
-function element(tag,text='') { return {tag,text,props:{},children:[],parent:null,get options(){return this.children.filter(c=>c.tag==='option');},get value(){return this.props.value;},set value(v){this.props.value=v;},getRootNode(){return {activeElement:null};},focus(){},scrollIntoView(){},addEventListener(){},removeEventListener(){},setAttribute(){},removeAttribute(){}}; }
-const renderer=createRenderer({
- createElement:tag=>element(tag), createText:text=>element('#text',text), createComment:text=>element('#comment',text),
- setText:(node,text)=>node.text=text,setElementText:(node,text)=>{node.text=text;node.children=[];},
- patchProp:(node,key,old,value)=>node.props[key]=value,
- insert(node,parent,anchor=null){if(node.parent){node.parent.children=node.parent.children.filter(c=>c!==node);}node.parent=parent;const i=anchor?parent.children.indexOf(anchor):-1;i<0?parent.children.push(node):parent.children.splice(i,0,node);},
- remove(node){if(node.parent)node.parent.children=node.parent.children.filter(c=>c!==node);},
- parentNode:node=>node.parent,nextSibling:node=>node.parent?.children[node.parent.children.indexOf(node)+1],
-});
-function text(node) { return node.tag==='#comment'?'':node.text+node.children.map(text).join(''); }
-function find(node,predicate) { if(predicate(node))return node;for(const child of node.children){const match=find(child,predicate);if(match)return match;} }
-const flush=async()=>{for(let i=0;i<12;i++){await new Promise(resolve=>setImmediate(resolve));await nextTick();}};
-async function compileView(url) {
- const source=await readFile(url,'utf8');
- const {descriptor}=parse(source);
- let code=compileScript(descriptor,{id:url.pathname,inlineTemplate:true}).content;
- const imports=[...code.matchAll(/from ['"]([^'"]+)['"]/g)];
- for(const [,name] of imports) {
-  const resolved=name.endsWith('.vue')?await compileView(new URL(name,url)):name.startsWith('.')?new URL(name,url).href:import.meta.resolve(name);
-  code=code.replaceAll(`from "${name}"`,`from ${JSON.stringify(resolved)}`).replaceAll(`from '${name}'`,`from ${JSON.stringify(resolved)}`);
- }
- return `data:text/javascript;base64,${Buffer.from(code).toString('base64')}`;
-}
+import {element,renderer,text,find,flush,compileView} from '../../test-support/vue.js';
+
 const {default:Users}=await import(await compileView(new URL('./UserManagement.vue',import.meta.url)));
 const devices=[{id:1,name:'Node 1',inventory_name:'node-01',discovered_at:new Date().toISOString(),transport:'ssh',capabilities:['users.manage'],os_family:'Debian',facts_stale:false,recovery_required:true},{id:2,name:'Node 2',inventory_name:'node-02',discovered_at:new Date().toISOString(),transport:'ssh',capabilities:['users.manage']}];
 async function mount({query={devices:'1'},failOnce=false,csvError=false,jobState='success',stale=false,initialMode='add',accountsAfter=null,inspectState='success',inspectFailOnce=false}={}) {
@@ -142,17 +118,19 @@ test('account actions require a current scan and link to selected discovery targ
 
 const inspections=view=>view.calls.filter(c=>c.url.endsWith('/inspect'));
 
-test('Accounts opens first, discovers current node users and hides absent or unverified entries',async()=>{
+test('Accounts opens first and hides absent, unverified, and excluded accounts',async()=>{
  const v=await mount({initialMode:'accounts',stale:true,accountsAfter:[
   {id:1,username:'jane',placements:[{device_id:1,state:'absent'}]},
   {id:2,username:'unverified',placements:[{device_id:1,state:'unverified'}]},
   {id:3,username:'actual',placements:[{device_id:1,state:'observed',full_name:'Actual Node Name',uid:1002,home:'/home/actual',groups:'actual,sudo',shell:'/bin/sh',managed_sudo:false,sudo_policy:'(ALL : ALL) ALL'}]},
   {id:4,username:'root',placements:[{device_id:1,state:'observed',uid:0,groups:'root',shell:'/bin/bash'}]},
+  {id:5,username:'_apt',placements:[{device_id:1,state:'not_in_scope',uid:42}]},
  ]});try{
   assert.equal(inspections(v).length,1);assert.deepEqual(inspections(v)[0].body.device_ids,[1]);
   assert.equal(find(v.root,n=>n.tag==='button'&&text(n)==='Accounts').props['aria-pressed'],true);
   assert.match(text(v.root),/Actual Node Name/);assert.match(text(v.root),/UID 1002/);assert.match(text(v.root),/actual,sudo/);assert.match(text(v.root),/\(ALL : ALL\) ALL/);
   assert.ok(!find(v.root,n=>n.props['aria-label']==='Select jane'));assert.ok(!find(v.root,n=>n.props['aria-label']==='Select unverified'));
+  assert.ok(!find(v.root,n=>n.props['aria-label']==='Select _apt'));
   assert.equal(find(v.root,n=>n.props['aria-label']==='Select root').props.disabled,true);
   assert.equal(mutations(v).length,0);assert.match(text(v.root),/Accounts refreshed/);
  }finally{v.app.unmount();}

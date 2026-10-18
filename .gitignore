@@ -32,3 +32,6 @@ vault_password
 docs/crawled/
 tools/**/target/
 ignore*
+
+.pytest_cache/
+.ruff_cache/

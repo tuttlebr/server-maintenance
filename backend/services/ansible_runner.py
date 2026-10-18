@@ -507,17 +507,16 @@ def _process_scan_results(
                 try:
                     host.memory_gb = int(float(mem_mb)) // 1024 if mem_mb else None
                 except (ValueError, TypeError):
-                    pass
+                    host.memory_gb = None
 
                 # Disk percentages
-                try:
-                    host.disk_root_percent = int(report.get("disk_root_percent", 0))
-                except (ValueError, TypeError):
-                    host.disk_root_percent = 0
-                try:
-                    host.disk_raid_percent = int(report.get("disk_raid_percent", 0))
-                except (ValueError, TypeError):
-                    host.disk_raid_percent = 0
+                for field in ("disk_root_percent", "disk_raid_percent"):
+                    value = report.get(field)
+                    try:
+                        percentage = int(value) if value is not None and not isinstance(value, bool) else None
+                        setattr(host, field, percentage if percentage is not None and 0 <= percentage <= 100 else None)
+                    except (ValueError, TypeError):
+                        setattr(host, field, None)
 
                 # NIC info
                 nic_info = report.get("nic_info", "")
@@ -527,6 +526,8 @@ def _process_scan_results(
                     host.nic_type = "CX7"
                 elif nic_info and nic_info != "unknown":
                     host.nic_type = nic_info[:50]
+                else:
+                    host.nic_type = None
                 try:
                     nic_speed = int(report.get("nic_speed_mbps") or 0)
                     host.nic_speed = f"{nic_speed} Mbps" if nic_speed > 0 else None
@@ -539,6 +540,7 @@ def _process_scan_results(
                 processed.add(hostname)
                 scan_file.unlink()  # Clean up processed file
             except Exception as exc:
+                db.rollback()
                 message = f"Could not process scan report {scan_file.name}: {exc}"
                 warnings.append(message)
                 logger.warning(message, exc_info=True)

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.auth import get_current_user
-from backend.capabilities import REACHY_APP_RESET, device_capabilities, normalize_capabilities, facts_are_stale
+from backend.capabilities import REACHY_APP_RESET, device_capabilities, facts_are_stale, normalize_capabilities
 from backend.database import get_db
 from backend.models import ContextDocument, Device, DeviceReservation, UserHostAssociation
 from backend.schemas import (
@@ -277,6 +277,8 @@ def configure_device_ssh(
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
+    if db.get(DeviceReservation, device_id) or device.recovery_required:
+        raise HTTPException(status_code=409, detail="Complete active work and recovery before changing SSH access")
     if device.transport != "reachy_daemon":
         raise HTTPException(status_code=400, detail="SSH maintenance setup is only needed for Reachy daemon devices")
 
@@ -290,16 +292,10 @@ def configure_device_ssh(
         fingerprint=payload.approval.fingerprint,
     )
     device.ansible_user = payload.ssh_user
-    device.encrypted_ansible_password = encrypt_secret(
-        None if payload.passwordless_ssh else payload.ssh_password
-    )
+    device.encrypted_ansible_password = encrypt_secret(None if payload.passwordless_ssh else payload.ssh_password)
     device.encrypted_ansible_become_password = encrypt_secret(payload.become_password)
     device.capabilities = normalize_capabilities(
-        [
-            *initial_profile("reachy_daemon")["capabilities"],
-            *device_capabilities(device),
-            REACHY_APP_RESET,
-        ]
+        [*initial_profile("reachy_daemon")["capabilities"], *device_capabilities(device), REACHY_APP_RESET,]
     )
     db.commit()
     db.refresh(device)
@@ -309,39 +305,45 @@ def configure_device_ssh(
 
 @router.put("/{device_id}", response_model=DeviceResponse)
 def update_device(
-    device_id: int,
-    payload: DeviceUpdate,
-    db: Session = Depends(get_db),
-    user: str = Depends(get_current_user),
+    device_id: int, payload: DeviceUpdate, db: Session = Depends(get_db), user: str = Depends(get_current_user),
 ):
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     if db.get(DeviceReservation, device_id):
-        raise HTTPException(status_code=409, detail="Wait for the active device operation before changing its connection or maintenance policy")
-    if device.recovery_required and ((device.maintenance_mode != "unknown" and payload.maintenance_mode not in {None, device.maintenance_mode, "kubernetes"}) or (payload.endpoint is not None and payload.endpoint != (device.endpoint or device.ip_address))):
+        raise HTTPException(
+            status_code=409,
+            detail="Wait for the active device operation before changing its connection or maintenance policy",
+        )
+    endpoint_changed = payload.endpoint is not None and payload.endpoint != (
+        device.endpoint or device.ip_address or device.hostname
+    )
+    port_changed = payload.daemon_port is not None and payload.daemon_port != (device.daemon_port or 8000)
+    if device.recovery_required and (
+        (
+            device.maintenance_mode != "unknown"
+            and payload.maintenance_mode not in {None, device.maintenance_mode, "kubernetes"}
+        )
+        or endpoint_changed
+        or port_changed
+    ):
         raise HTTPException(status_code=409, detail="Verify recovery before changing endpoint or maintenance mode")
     if payload.maintenance_mode == "standalone" and (
         device.facts.get("kubernetes_membership_detected") or device.facts.get("kubernetes_available")
     ):
-        raise HTTPException(status_code=409, detail="Kubernetes membership was detected; standalone maintenance cannot bypass it")
+        raise HTTPException(
+            status_code=409, detail="Kubernetes membership was detected; standalone maintenance cannot bypass it"
+        )
     if device.transport == "reachy_daemon" and any(
         value is not None
-        for value in (
-            payload.ssh_user,
-            payload.ssh_password,
-            payload.become_password,
-            payload.passwordless_ssh,
-        )
+        for value in (payload.ssh_user, payload.ssh_password, payload.become_password, payload.passwordless_ssh,)
     ):
         raise HTTPException(
-            status_code=400,
-            detail="Use the verified Reachy SSH setup to change maintenance access",
+            status_code=400, detail="Use the verified Reachy SSH setup to change maintenance access",
         )
     if payload.display_name is not None:
         device.display_name = payload.display_name.strip()
     if payload.endpoint is not None:
-        endpoint_changed = payload.endpoint != (device.endpoint or device.ip_address)
         device.endpoint = payload.endpoint
         device.ip_address = payload.endpoint
         if endpoint_changed:
@@ -358,14 +360,35 @@ def update_device(
             device.kubernetes_node_name = None
             payload.kubernetes_context = ""
             payload.kubernetes_node_name = ""
+            for field in (
+                "vendor",
+                "model",
+                "architecture",
+                "memory_gb",
+                "gpu_model",
+                "driver_version",
+                "cuda_version",
+                "nic_type",
+                "nic_speed",
+                "fabric_manager_status",
+                "disk_root_percent",
+                "disk_raid_percent",
+                "last_seen",
+            ):
+                setattr(device, field, None)
+            device.kind = initial_profile(device.transport or "ssh")["kind"]
+            device.machine_type = "unknown"
+            device.reboot_required = False
+            for placement in db.query(UserHostAssociation).filter_by(host_id=device.id).all():
+                placement.state = "unverified"
+                placement.managed_sudo = None
+                placement.sudo_policy = None
         if device.transport == "reachy_daemon" and endpoint_changed:
             device.ansible_user = None
             device.encrypted_ansible_password = None
             device.encrypted_ansible_become_password = None
             device.capabilities = [
-                capability
-                for capability in device_capabilities(device)
-                if capability != REACHY_APP_RESET
+                capability for capability in device_capabilities(device) if capability != REACHY_APP_RESET
             ]
     if payload.ssh_user is not None:
         device.ansible_user = payload.ssh_user
@@ -377,6 +400,12 @@ def update_device(
         device.encrypted_ansible_become_password = encrypt_secret(payload.become_password)
     if payload.daemon_port is not None:
         device.daemon_port = payload.daemon_port
+        if port_changed:
+            device.facts_stale = True
+            device.status = "unknown"
+            device.facts = {}
+            device.discovered_at = None
+            device.last_seen = None
     for field in ("maintenance_mode", "kubernetes_context", "kubernetes_node_name"):
         if getattr(payload, field) is not None:
             setattr(device, field, getattr(payload, field) or None)

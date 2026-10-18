@@ -1,0 +1,145 @@
+Codebase review and remediation
+2026-10-18; reviewed from commit 32d91af
+
+Review and validation ran locally. No fleet operations or deployment were run.
+
+1. Automatic account discovery
+
+Root cause: inspect_accounts.py enumerated every NSS account and ran a sudo
+inspection for each, including system identities and disabled logins.
+
+Automatic discovery now requires a UID at or above the host's UID_MIN from
+/etc/login.defs (default 1000), a configured home below /home, and an absolute
+login shell other than nologin/false/true/sync/halt/shutdown. UID 65534 is excluded.
+High-UID directory accounts remain eligible; UID_MAX is deliberately not used.
+Filtering happens before sudo inspection. Home directories are not stat'ed,
+avoiding network automount delays and false negatives for unmounted homes.
+
+This is a conventional-account heuristic, not proof of human ownership. A
+service deliberately configured like a person can match it. People whose homes
+are outside /home or whose login shells are disabled are excluded. Explicit
+post-change verification still reports the requested identity or its absence.
+
+Successful automatic refreshes mark old excluded observations not_in_scope.
+The UI hides those entries without claiming the accounts were deleted. Failed
+or incomplete observations do not erase unrelated state. Existing deployments
+pick up this filtering on their next successful account refresh.
+
+Files: playbooks/files/inspect_accounts.py, playbooks/tasks/account_report.yml,
+backend/services/account_state.py, frontend/src/views/UserManagement.vue.
+Coverage: UID_MIN, high UIDs, system accounts, invalid home paths, disabled
+shells, sudo-call count, inventories above 500 users, and prior observations.
+
+2. Correctness and lifecycle fixes
+
+- Unicode credentials caused compare_digest TypeError. Compare UTF-8 bytes.
+  Malformed signed-token structures, non-ASCII tokens, invalid subjects, expiry
+  boundaries, and empty stream bearer headers now produce authentication errors.
+- Endpoint changes retained hardware readings and account privilege observations
+  from the previous machine. Clear those observations and require rediscovery.
+  Port changes also invalidate discovery and cannot bypass recovery restrictions.
+  SSH maintenance setup now respects active reservations and recovery.
+- A failed scan report could leave dirty ORM changes that the next host's commit
+  persisted. Roll back each failed report. Missing or malformed capacities and
+  NIC observations remain unknown instead of becoming zero or stale readings.
+- Inventory generation read outside its write lock and reused stale ORM objects.
+  Serialize the database read and file replacement, refreshing identities first.
+- Startup failures leaked the executor lease; shutdown failures could skip its
+  release. Cover initialization and shutdown with nested cleanup guarantees.
+  Alembic no longer disables existing application loggers during initialization.
+- Adverse job pagination merged three separately paginated lists, which could
+  skip or misorder results. Filter all adverse statuses in one database query
+  with stable timestamp/ID ordering and bounded page sizes.
+- Reachy recovery performed remote waits inside the request and could exceed
+  the client's deadline. Reserve and queue it, return the job ID immediately,
+  and record asynchronous verification without replaying the remote operation.
+- Queued Reachy cancellation left reservations until a later application start.
+  Finalize cancelled jobs and release reservations immediately. Devices whose
+  operation never started retain their existing observations.
+- Job-result loading stopped at 200 artifacts, potentially omitting evidence
+  that a mutation began. Load every artifact while preserving per-file limits.
+- Reused device routes retained the prior device and accepted late responses.
+  Reload on identity changes and reject responses from earlier loads.
+- Context polling could restart after navigation when an outstanding response
+  arrived. Guard disposal before applying results or scheduling another poll.
+- Request deadlines ended after headers, leaving slow body reads unbounded.
+  Keep the deadline active through decoding; distinguish timeout, cancellation,
+  invalid credentials, and expired sessions.
+- Streaming could lose split UTF-8, mishandle SSE boundaries, wait past a done
+  event, or claim successful completion after a disconnect. Share one parser,
+  recognize completion immediately, report truncation, and release readers.
+  Unconfigured chat now returns HTTP 503 rather than a misleading successful
+  JSON response to a streaming request.
+
+3. Dead code and design consistency
+
+Deleted unreachable Reachy inspection/log helpers and websocket URL builder;
+unused frontend API wrappers; the unreachable DeviceDetail reset dialog; the
+unused operation-selection utility and its tests; a redundant user-placement
+query helper; an unused inventory compatibility alias; unreachable account
+target selection; and unused imports. The deleted selection utility silently
+narrowed requested scope, contradicting the active workflow's explicit blockers.
+
+Retained documented backend and CLI operations that still have callers or
+supported interfaces. Removed tests specific to deleted helpers, updated tests
+to exercise queued recovery, and shared the Vue test renderer instead of keeping
+duplicate harnesses. Regression tests use real SQLAlchemy queries and mounted
+Vue components where those behaviors matter.
+
+4. Frontend/backend latency
+
+- Dashboard refresh: seven HTTP requests become two independent requests,
+  preserving the last successful device/job observation on partial failure.
+- Job lists defer large logs and extra_vars at the SQL layer and omit them from
+  responses. A regression verifies a 1 MB log produces a summary below 2 KB
+  without selecting the log column. Streaming status polls select only status.
+- User listing: 1 + 2N database queries become two queries for the full list.
+- Context-document listing avoids reading document bodies for metadata views.
+- The canonical /jobs route avoids its previous redirect.
+- Operation eligibility is computed once per device/operation instead of doing
+  repeated scans; excluded system accounts incur no sudo subprocess overhead.
+
+These are verified request/query/payload reductions, not production latency
+benchmarks. API consumers needing logs or extra_vars must use GET /jobs/{job_id}.
+
+5. Tests, hooks, dependencies, and build configuration
+
+The pinned Black hook could not parse existing Python and the shell formatter
+failed in its isolated environment. Replaced those broken gates with pinned
+Ruff correctness checks and bash syntax validation that checks every input file.
+Kept file hygiene and secret detection. Narrowly excluded npm integrity hashes
+from the NVIDIA detector's legacy key heuristic; the general private-key hook
+still checks the lockfile. Reworked fake PEM test fixtures without changing the
+runtime test values or broadly exempting tests from secret scanning.
+
+Installed pre-commit and pre-push hooks. Pre-push runs backend and frontend tests.
+The backend wrapper uses the local virtual environment and fails if Ansible is
+missing, preventing a misleading green run with 97 playbook cases skipped.
+CI installs collections before tests and validates the same checks plus build,
+Ansible lint/syntax, Compose configuration, and dependency audits.
+
+Updated vulnerable frontend packages and the locked rustls/quinn-proto versions.
+The patched Rust dependency graph requires Cargo's 2024-edition support, so the
+declared minimum, Docker build, docs, and CI now agree on Rust 1.85. CI also tests
+stable. Node build and CI use Node 22, matching local validation and replacing
+the EOL Node 20 line. Node release status source:
+https://nodejs.org/en/about/previous-releases
+
+Validation
+
+- Backend: 510 tests plus 34 subtests, with Ansible available and no skips.
+- Frontend: 86 tests, including streaming, route races, account filtering, and
+  polling teardown; production Vite build.
+- Rust: four tests on both Rust 1.85.0 and stable.
+- Pre-commit checks on tracked and new files; complete pre-push gate; Python
+  compilation; Ansible syntax checks, localhost DGX detection fixture, and
+  minimum-profile lint; Compose configuration; git diff --check.
+- Backend pip-audit, frontend npm audit, and Cargo audit: no known vulnerabilities
+  reported in the audited dependency sets after remediation.
+
+Limits: no full container-image build, live NAT/Milvus/embedding integration,
+real SSH/Reachy fleet changes, browser-level visual audit, or production load
+benchmark was performed. Dependency audits do not cover all OS packages or the
+separately built NAT image. The test suite emits one upstream Starlette/httpx
+deprecation warning; it does not affect test results. These checks do not prove
+the absence of every possible defect.

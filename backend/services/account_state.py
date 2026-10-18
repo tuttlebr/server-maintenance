@@ -14,7 +14,8 @@ def reconcile_accounts(db, reports, targets):
             continue
         observed_at = datetime.now(timezone.utc)
         observed_ids = set()
-        complete = report.get('scope') == 'all'
+        scope = report.get('scope')
+        complete = scope in {'all', 'people'}
         for record in records:
             if not isinstance(record, dict):
                 complete = False
@@ -43,11 +44,11 @@ def reconcile_accounts(db, reports, targets):
             association.state = 'observed' if record['present'] else 'absent'
             association.observed_at = observed_at
         if complete:
-            # Only a full inventory can prove an account disappeared. Targeted
-            # reports after edits must leave unrelated accounts untouched.
+            # A filtered inventory proves only that an identity no longer
+            # matches the discovery scope, not that Linux deleted it.
             for association in db.query(UserHostAssociation).filter_by(host_id=host.id).all():
                 if association.user_id not in observed_ids:
-                    association.state = 'absent'
+                    association.state = 'not_in_scope' if scope == 'people' else 'absent'
                     association.managed_sudo = None
                     association.sudo_policy = None
                     association.observed_at = observed_at

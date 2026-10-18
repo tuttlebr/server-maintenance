@@ -1,3 +1,5 @@
+import { readSse } from "./utils/sse.js";
+
 const BASE = "/api/v2";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -52,43 +54,38 @@ async function request(path, options = {}) {
   }
   const timeoutId = timeoutMs > 0 ? setTimeout(() => controller.abort("timeout"), timeoutMs) : null;
 
-  let res;
   try {
-    res = await fetch(`${BASE}${path}`, { ...options, headers, signal: controller.signal });
+    const res = await fetch(`${BASE}${path}`, { ...options, headers, signal: controller.signal });
+    if (res.status === 401 && path !== "/auth/login") {
+      clearToken();
+      window.location.hash = "#/login";
+      throw new ApiError("Session expired. Please sign in again.", { status: 401 });
+    }
+    if (!res.ok) {
+      const data = await res.json().catch(error => {
+        if (controller.signal.aborted) throw error;
+        return {};
+      });
+      const detail = Array.isArray(data.detail) ? data.detail.map(item => `${(item.loc || []).filter(part => part !== "body").join(".")}: ${item.msg}`).join("; ") : data.detail || `HTTP ${res.status}`;
+      throw new ApiError(detail, { status: res.status, detail });
+    }
+    if (res.status === 204) return null;
+    return await res.json();
   } catch (err) {
-    if (timeoutId) clearTimeout(timeoutId);
-    if (externalSignal) externalSignal.removeEventListener("abort", onExternalAbort);
-    if (err.name === "AbortError" || controller.signal.aborted) {
-      throw new ApiError("Request timed out — the operation may still be running. Check Jobs.", {
-        status: 0,
-        detail: `Timed out after ${timeoutMs}ms`,
-        cause: err,
+    if (err instanceof ApiError) throw err;
+    if (externalSignal?.aborted) throw new DOMException("Request cancelled", "AbortError");
+    if (controller.signal.aborted) {
+      throw new ApiError("Request timed out. The operation may still be running; check Activity.", {
+        detail: `Timed out after ${timeoutMs}ms`, cause: err,
       });
     }
-    throw new ApiError("Network error — unable to reach the server.", {
-      status: 0,
-      detail: String(err?.message || err),
-      cause: err,
+    throw new ApiError("Unable to read the server response. Check your connection and retry.", {
+      detail: String(err?.message || err), cause: err,
     });
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+    externalSignal?.removeEventListener("abort", onExternalAbort);
   }
-  if (timeoutId) clearTimeout(timeoutId);
-  if (externalSignal) externalSignal.removeEventListener("abort", onExternalAbort);
-
-  if (res.status === 401) {
-    clearToken();
-    window.location.hash = "#/login";
-    throw new ApiError("Session expired — please sign in again.", { status: 401 });
-  }
-
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    const detail = Array.isArray(data.detail) ? data.detail.map(item => `${(item.loc || []).filter(part => part !== "body").join(".")}: ${item.msg}`).join("; ") : data.detail || `HTTP ${res.status}`;
-    throw new ApiError(detail, { status: res.status, detail });
-  }
-
-  // Some endpoints may return no body (204 etc.)
-  if (res.status === 204) return null;
-  return res.json();
 }
 
 // Auth
@@ -111,13 +108,8 @@ export const updateDevice = (deviceId, data) =>
   request(`/devices/${deviceId}`, { method: "PUT", body: data });
 export const updateDeviceAnnotations = (deviceId, annotations) =>
   request(`/devices/${deviceId}/annotations`, { method: "PUT", body: { annotations } });
-export const previewDeviceSsh = (deviceId) =>
-  request(`/devices/${deviceId}/ssh-preview`, { method: "POST", timeoutMs: 45_000 });
-export const configureDeviceSsh = (deviceId, data) =>
-  request(`/devices/${deviceId}/ssh`, { method: "POST", body: data, timeoutMs: 120_000 });
 export const deleteDevice = (deviceId) => request(`/devices/${deviceId}`, { method: "DELETE" });
 export const scanDevice = (deviceId) => request(`/devices/${deviceId}/scan`, { method: "POST" });
-export const scanAllDevices = () => request("/devices/scan-all", { method: "POST" });
 
 // Operations
 export const getOperations = () => request("/operations");
@@ -136,19 +128,8 @@ export const inspectAccounts = (data) => request("/users/inspect", { method: "PO
 export const bulkUpdateUsers = (data) => request("/users/bulk-update", { method: "PUT", body: data });
 export const getUsers = () => request("/users");
 export const bulkAddUsers = (data) => request("/users/bulk-add", { method: "POST", body: data });
-export const changePassword = (username, data) =>
-  request(`/users/${username}/change-password`, { method: "POST", body: data });
-export const bulkPasswordReset = (data) =>
-  request("/users/bulk-password-reset", { method: "POST", body: data });
-export const addSudoers = (username, data) =>
-  request(`/users/${username}/add-sudoers`, { method: "POST", body: data || {} });
-export const removeSudoers = (username, data) =>
-  request(`/users/${username}/remove-sudoers`, { method: "POST", body: data || {} });
-export const removeUser = (username, data) =>
-  request(`/users/${username}`, { method: "DELETE", body: data || {} });
-
 // Jobs
-export const getJobSummary = () => request("/jobs/summary");
+export const getJobOverview = () => request("/jobs/overview");
 export const cancelJob = (jobId) => request(`/jobs/${jobId}/cancel`, { method: "POST" });
 export const getJobs = (params = {}) => {
   const qs = new URLSearchParams(params).toString();
@@ -192,37 +173,14 @@ export async function streamJobOutput(jobId, { onLine, onDone, onError, signal }
       });
     }
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let doneStatus = null;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      // SSE events split on blank lines (\n\n), individual fields on \n
-      const lines = buffer.split("\n");
-      buffer = lines.pop(); // keep partial last line
-      for (const line of lines) {
-        if (line.startsWith("event: done")) {
-          // Next data: line carries the final status. Easiest path: keep a flag and
-          // capture on the next iteration's data line.
-          doneStatus = "pending";
-          continue;
-        }
-        if (line.startsWith("data: ")) {
-          const payload = line.slice(6);
-          if (doneStatus === "pending") {
-            doneStatus = payload;
-            continue;
-          }
-          onLine?.(payload);
-        }
+    for await (const event of readSse(res)) {
+      if (event.type === 'done') {
+        onDone?.(event.data);
+        return;
       }
+      for (const line of event.data.split('\n')) onLine?.(line);
     }
-    if (!doneStatus || doneStatus === "pending") throw new ApiError("Stream ended before completion. Refresh activity to check the job.");
-    onDone?.(doneStatus);
+    throw new ApiError("Stream ended before completion. Refresh activity to check the job.");
   } catch (err) {
     if (err.name === "AbortError") return; // caller-initiated cancel; not an error
     onError?.(err);
@@ -231,11 +189,7 @@ export async function streamJobOutput(jobId, { onLine, onDone, onError, signal }
 
 // Stream a chat response from the backend. Callback shape:
 //   { onContent(text), onStatus(text), onDone(), onError(err), signal? }
-// Backwards compatible: a single function callback receives only content chunks.
-export async function streamChat(messages, handlersOrChunkFn, legacyOnDone, legacyOnError) {
-  const handlers = typeof handlersOrChunkFn === "function"
-    ? { onContent: handlersOrChunkFn, onDone: legacyOnDone, onError: legacyOnError }
-    : (handlersOrChunkFn || {});
+export async function streamChat(messages, handlers = {}) {
   const onContent = handlers.onContent || (() => {});
   const onStatus = handlers.onStatus || (() => {});
   const onDone = handlers.onDone || (() => {});
@@ -267,47 +221,16 @@ export async function streamChat(messages, handlersOrChunkFn, legacyOnDone, lega
       });
     }
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop();
-      for (const line of lines) {
-        if (line.startsWith("event: done")) {
-          onDone();
-          return;
-        }
-        if (line.startsWith("data: ")) {
-          try {
-            const payload = JSON.parse(line.slice(6));
-            // New typed envelope: {type: "content"|"status"|"error", ...}
-            if (payload.type === "content" && payload.content) {
-              onContent(payload.content);
-            } else if (payload.type === "status" && payload.text) {
-              onStatus(payload.text);
-            } else if (payload.type === "error") {
-              onError(new Error(payload.message || "Chat error"));
-              return;
-            }
-            // Legacy shape (untyped): {content} or {error}
-            else if (payload.error) {
-              onError(new Error(payload.error));
-              return;
-            } else if (payload.content) {
-              onContent(payload.content);
-            }
-          } catch {
-            // skip malformed JSON
-          }
-        }
-      }
+    for await (const event of readSse(res)) {
+      if (event.type === 'done') { onDone(); return; }
+      let payload;
+      try { payload = JSON.parse(event.data); }
+      catch { throw new ApiError("The chat stream returned invalid data. Please retry."); }
+      if (payload.type === 'content' && payload.content) onContent(payload.content);
+      else if (payload.type === 'status' && payload.text) onStatus(payload.text);
+      else if (payload.type === 'error') throw new ApiError(payload.message || "Chat error");
     }
-    onDone();
+    throw new ApiError("Chat disconnected before completion. Please retry.");
   } catch (err) {
     if (err.name === "AbortError") return;
     onError(err);

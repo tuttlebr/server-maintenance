@@ -25,7 +25,7 @@ test('Overview renders unavailable, first-run, partial-error, and ranked large-f
     const empty=await render({hasLoadedOnce:true,lastUpdated:'2026-09-25T12:00:00Z'});
     assert.match(empty,/Connect your first device/); assert.doesNotMatch(empty,/No current device alerts/);
     const devices=Array.from({length:200},(_,i)=>({id:i+1,name:`node-${String(i+1).padStart(3,'0')}`,status:'online',discovered_at:'2026-09-25T12:00:00Z',disk_root_percent:i===199?40:86,recovery_required:i===199}));
-    const large=await render({devices,hasLoadedOnce:true,lastUpdated:'2026-09-25T12:00:00Z',activeError:new Error('503'),jobsError:new Error('503')});
+    const large=await render({devices,hasLoadedOnce:true,lastUpdated:'2026-09-25T12:00:00Z',jobsError:new Error('503')});
     assert.match(large,/200 devices need attention/); assert.match(large,/Active work is unknown/);
     assert.ok(large.indexOf('Unfinished maintenance') < large.indexOf('Inspect root storage pressure'));
     assert.match(large,/devices\?reason=recovery/);

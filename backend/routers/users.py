@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from backend.auth import get_current_user
+from backend.capabilities import USERS_MANAGE, facts_are_stale, has_capability
 from backend.database import get_db
 from backend.models import Host, ManagedUser, UserHostAssociation
-from backend.capabilities import USERS_MANAGE, has_capability, facts_are_stale
 from backend.schemas import (
     BulkPasswordResetRequest,
     BulkUserAdd,
@@ -20,22 +20,30 @@ from backend.services.csv_parser import MAX_CSV_BYTES, CsvValidationError, parse
 router = APIRouter(prefix="/api/v2/users", tags=["access"])
 
 
-def _get_user_devices(db: Session, user_id: int) -> list[int]:
-    assocs = db.query(UserHostAssociation).filter(UserHostAssociation.user_id == user_id).all()
-    host_ids = [a.host_id for a in assocs]
-    if not host_ids:
-        return []
-    return sorted(host_ids)
-
-
-def _user_to_response(db: Session, user: ManagedUser) -> dict:
+def _user_to_response(db: Session, user: ManagedUser, placements=None) -> dict:
+    if placements is None:
+        placements = db.query(UserHostAssociation).filter_by(user_id=user.id).all()
     data = {
         "id": user.id,
         "username": user.username,
         "full_name": user.full_name,
         "email": user.email,
-        "placements": [{"device_id": a.host_id, "full_name": a.full_name, "uid": a.uid, "home": a.home, "groups": a.groups, "shell": a.shell, "managed_sudo": a.managed_sudo, "sudo_policy": a.sudo_policy, "observed_at": a.observed_at, "state": a.state} for a in db.query(UserHostAssociation).filter_by(user_id=user.id).all()],
-        "device_ids": _get_user_devices(db, user.id),
+        "placements": [
+            {
+                "device_id": a.host_id,
+                "full_name": a.full_name,
+                "uid": a.uid,
+                "home": a.home,
+                "groups": a.groups,
+                "shell": a.shell,
+                "managed_sudo": a.managed_sudo,
+                "sudo_policy": a.sudo_policy,
+                "observed_at": a.observed_at,
+                "state": a.state,
+            }
+            for a in placements
+        ],
+        "device_ids": sorted(a.host_id for a in placements),
         "created_at": user.created_at,
     }
     return data
@@ -50,24 +58,29 @@ def _validated_username(username: str) -> str:
 
 def _target_devices(payload, db: Session, *, inspect=False, automatic=False) -> list[Host]:
     if payload.all_devices or not payload.device_ids:
-        raise HTTPException(status_code=400, detail="Select explicit target devices. Fleet-wide implicit account changes are disabled.")
+        raise HTTPException(
+            status_code=400, detail="Select explicit target devices. Fleet-wide implicit account changes are disabled."
+        )
     query = db.query(Host).filter((Host.transport == "ssh") | (Host.transport.is_(None)))
-    devices = query.order_by(Host.hostname).all() if payload.all_devices else query.filter(
-        Host.id.in_(payload.device_ids or [])
-    ).order_by(Host.hostname).all()
-    if not payload.all_devices and len(devices) != len(payload.device_ids or []):
+    devices = query.filter(Host.id.in_(payload.device_ids or [])).order_by(Host.hostname).all()
+    if len(devices) != len(payload.device_ids or []):
         found = {device.id for device in devices}
         missing = [str(device_id) for device_id in payload.device_ids or [] if device_id not in found]
         raise HTTPException(status_code=404, detail=f"Unknown or non-SSH device IDs: {', '.join(missing)}")
     unsupported = [device.name for device in devices if not has_capability(device, USERS_MANAGE)]
     if unsupported:
-        raise HTTPException(status_code=400, detail=f"Linux account management is not supported on: {', '.join(unsupported)}")
+        raise HTTPException(
+            status_code=400, detail=f"Linux account management is not supported on: {', '.join(unsupported)}"
+        )
     if not devices:
         raise HTTPException(status_code=400, detail="No access-capable devices are available")
     if not inspect and not automatic:
         for device in devices:
             if device.os_family not in {"Debian", "RedHat"}:
-                raise HTTPException(status_code=409, detail=f"Account changes support discovered Debian and Red Hat family devices: {device.name}")
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Account changes support discovered Debian and Red Hat family devices: {device.name}",
+                )
             if device.recovery_required:
                 raise HTTPException(status_code=409, detail=f"{device.name} requires recovery verification")
             if facts_are_stale(device):
@@ -78,7 +91,10 @@ def _target_devices(payload, db: Session, *, inspect=False, automatic=False) -> 
 @router.get("")
 def list_users(db: Session = Depends(get_db), user: str = Depends(get_current_user)):
     users = db.query(ManagedUser).order_by(ManagedUser.username).all()
-    return [_user_to_response(db, u) for u in users]
+    placements = {}
+    for association in db.query(UserHostAssociation).order_by(UserHostAssociation.host_id).all():
+        placements.setdefault(association.user_id, []).append(association)
+    return [_user_to_response(db, u, placements.get(u.id, [])) for u in users]
 
 
 @router.post("/bulk-add")

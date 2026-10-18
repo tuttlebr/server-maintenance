@@ -263,7 +263,14 @@ def test_scan_verifies_interrupted_restart_without_replaying(setup, monkeypatch,
         monkeypatch.setattr(operations, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
         monkeypatch.setattr(operations.asyncio, "sleep", AsyncMock())
         monkeypatch.setattr(operations, "probe_reachy", lambda *args: {"reachable": True, "facts": {}})
-    result = asyncio.run(scan_device(host.id, db, "test"))
+    async def scenario():
+        result = await scan_device(host.id, db, "test")
+        assert db.query(Job).filter_by(job_id=result['job_id']).one().status == 'pending'
+        assert not calls
+        await queued.pop()
+        return result
+    result = asyncio.run(scenario())
+    db.expire_all()
     assert db.query(Job).filter_by(job_id=result["job_id"]).one().status == expected
     assert host.recovery_required == (expected != "success")
     assert calls == (["/update/info"] if remote_id else [])

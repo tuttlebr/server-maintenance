@@ -433,7 +433,7 @@ Unknown models and missing, placeholder, short, or unsafe serials show an explan
 
 ### Bulk user management
 
-Open **Users** in navigation or **Manage users** on Operations. The Accounts view opens first and automatically reads accounts from selected devices. It includes system accounts and disabled logins, with each node’s observed name, UID, home directory, groups, shell, and sudo policy. A successful full refresh removes accounts no longer present on that node from the list. Failed refreshes preserve the previous observation and show the error. Account discovery does not require a fresh hardware scan. Select Add users or Edit users to change accounts in a table. You can enter rows manually or upload a UTF-8 CSV. Downloadable templates are provided for both modes. Import validates the entire file and reports row errors before any remote changes. Review the exact usernames, fields, and devices once, then follow progress and per-device outcomes on the same page.
+Open **Users** in navigation or **Manage users** on Operations. The Accounts view opens first and automatically reads accounts from selected devices. Automatic discovery shows regular login accounts: UID at or above the host’s `UID_MIN` (default 1000), a configured home below `/home`, and an interactive login shell. Root, nobody, system accounts such as `_apt` and `_rpc`, and `nologin`/`false` shells are excluded. High-UID directory accounts remain supported. This is a heuristic: a service account configured like a regular user can still appear, and accounts with custom home roots are excluded. Homes are not probed, avoiding network automount delays. Each node shows the observed name, UID, home, groups, shell, and sudo policy. Successful refreshes hide accounts outside this scope without claiming they were deleted. Explicit post-change verification still checks the requested account. Failed refreshes preserve the previous observation and show the error. Account discovery does not require a fresh hardware scan. Select Add users or Edit users to change accounts in a table. You can enter rows manually or upload a UTF-8 CSV. Downloadable templates are provided for both modes. Import validates the entire file and reports row errors before any remote changes. Review the exact usernames, fields, and devices once, then follow progress and per-device outcomes on the same page.
 
 CSV columns: `username,full_name,email,groups,shell,grant_sudo`. Add requires a full name and either a username or an email from which to derive one. Email is optional with an explicit username and is stored as Fleet Manager metadata. Edit requires a username and at least one changed field. Blank edit fields preserve current values; groups append to existing memberships. Quote fields containing commas. Imports allow 500 users and 1 MB per file; requests target at most 200 explicit devices.
 
@@ -664,6 +664,31 @@ npm run dev
 ```
 
 The Vite dev server proxies `/api` requests to the backend at `localhost:8000`.
+
+To run the development checks and install Git hooks:
+
+```bash
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python -r requirements-dev.txt
+source .venv/bin/activate
+ansible-galaxy collection install -r requirements.yml
+npm --prefix frontend ci
+make hooks
+make check
+```
+
+Use Node 22 and Rust 1.85 or newer for `make check`. Pre-commit runs file hygiene,
+secret detection, Python correctness checks, and syntax checks for every shell
+file. Pre-push runs both test suites. CI runs the same checks plus Ansible lint,
+playbook syntax, production frontend compilation, Rust tests on stable and
+1.85, and dependency audits. The backend test wrapper requires Ansible instead
+of silently skipping the playbook tests. Run `pre-commit run --all-files
+--hook-stage pre-push` to exercise the complete installed push gate.
+
+Job list and overview responses contain summaries; fetch `/api/v2/jobs/{job_id}`
+for full logs and result artifacts. The fleet dashboard polls devices and a
+single job overview independently, retaining the last successful observation
+if either request fails.
 
 
 ## Embedding Test

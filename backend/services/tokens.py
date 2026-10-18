@@ -40,8 +40,9 @@ def create_token(subject: str, expires_at: datetime, secret: str) -> str:
 
 def decode_token(token: str, secret: str) -> dict:
     try:
+        token.encode("ascii")
         header_b64, payload_b64, signature = token.split(".", 2)
-    except ValueError as exc:
+    except (ValueError, UnicodeError) as exc:
         raise TokenError("Invalid token format") from exc
 
     signing_input = f"{header_b64}.{payload_b64}"
@@ -55,10 +56,14 @@ def decode_token(token: str, secret: str) -> dict:
     except (ValueError, json.JSONDecodeError) as exc:
         raise TokenError("Invalid token payload") from exc
 
+    if not isinstance(header, dict) or not isinstance(payload, dict):
+        raise TokenError("Invalid token payload")
     if header.get("alg") != "HS256":
         raise TokenError("Unsupported token algorithm")
 
     exp = payload.get("exp")
-    if not isinstance(exp, int) or exp < int(time.time()):
+    if type(exp) is not int or exp <= int(time.time()):
         raise TokenError("Token has expired")
+    if not isinstance(payload.get("sub"), str) or not payload["sub"].strip():
+        raise TokenError("Invalid token subject")
     return payload

@@ -1,5 +1,5 @@
 # Stage 1: Build frontend
-FROM node:20-alpine AS frontend-build
+FROM node:22-alpine AS frontend-build
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm ci
@@ -7,7 +7,7 @@ COPY frontend/ .
 RUN npm run build
 
 # Stage 2: Build Rust documentation ingester
-FROM rust:1.75-slim AS docs-ingester-build
+FROM rust:1.85-slim AS docs-ingester-build
 WORKDIR /build/tools/dgx-doc-ingester
 COPY tools/dgx-doc-ingester/Cargo.toml tools/dgx-doc-ingester/Cargo.lock ./
 COPY tools/dgx-doc-ingester/src ./src

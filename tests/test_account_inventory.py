@@ -23,15 +23,20 @@ def account(name, uid=1001, shell='/bin/bash'):
                            pw_gecos=f'{name} Full Name,Room 1', pw_dir=f'/home/{name}')
 
 
-def test_inventory_includes_system_disabled_high_uid_and_nonstandard_names():
+def test_inventory_excludes_system_and_disabled_logins_but_keeps_directory_users():
     accounts = [account('root', 0), account('daemon', 1, '/usr/sbin/nologin'),
-                account('disabled', 1001, '/bin/false'), account('directory.user', 100000)]
-    with patch.object(inventory.pwd, 'getpwall', return_value=accounts), \
+                account('disabled', 1001, '/bin/false'), account('_apt', 42), account('_rpc', 32),
+                account('nobody', 65534), account('directory.user', 100000), account('alice')]
+    accounts.append(account('service', 2000))
+    accounts[-1].pw_dir = '/var/lib/service'
+    with patch.object(inventory, 'minimum_user_uid', return_value=1000), \
+         patch.object(inventory.pwd, 'getpwall', return_value=accounts), \
          patch.object(inventory.grp, 'getgrall', return_value=[SimpleNamespace(gr_name='users', gr_gid=100, gr_mem=[])]), \
          patch.object(inventory.pathlib.Path, 'is_file', return_value=False), \
-         patch.object(inventory.subprocess, 'run', return_value=SimpleNamespace(stdout='policy', stderr='')):
+         patch.object(inventory.subprocess, 'run', return_value=SimpleNamespace(stdout='policy', stderr='')) as sudo:
         rows = inventory.inspect_accounts([])
-    assert {r['username'] for r in rows} == {p.pw_name for p in accounts}
+    assert {r['username'] for r in rows} == {'directory.user', 'alice'}
+    assert sudo.call_count == 2
     assert all(r['present'] and r['groups'] == ['users'] for r in rows)
     directory = next(r for r in rows if r['username'] == 'directory.user')
     assert directory['uid'] == 100000 and directory['full_name'] == 'directory.user Full Name'
@@ -40,7 +45,8 @@ def test_inventory_includes_system_disabled_high_uid_and_nonstandard_names():
 
 def test_inventory_is_not_truncated_at_the_bulk_edit_limit():
     accounts = [account(f'user{i}') for i in range(501)]
-    with patch.object(inventory.pwd, 'getpwall', return_value=accounts), \
+    with patch.object(inventory, 'minimum_user_uid', return_value=1000), \
+         patch.object(inventory.pwd, 'getpwall', return_value=accounts), \
          patch.object(inventory.grp, 'getgrall', return_value=[]), \
          patch.object(inventory.pathlib.Path, 'is_file', return_value=False), \
          patch.object(inventory.subprocess, 'run', side_effect=OSError):
@@ -100,3 +106,33 @@ def test_missing_malformed_or_out_of_scope_inventory_never_erases_accounts(datab
                             dict(report_type='accounts', hostname='one', scope='all', accounts=[{}]),
                             report('two', names=())], ['one'])
     assert all(p.state == 'observed' for p in db.query(UserHostAssociation))
+
+
+@pytest.mark.parametrize('uid_min,expected', [(500, True), (1000, False)])
+def test_person_filter_honors_local_uid_min(uid_min, expected):
+    assert inventory.is_person_account(account('legacy', 501), uid_min) is expected
+
+
+@pytest.mark.parametrize('home,shell', [('/home', '/bin/bash'), ('/home/../var/service', '/bin/bash'),
+    ('/var/lib/app', '/bin/bash'), ('/home/alice', ''), ('/home/alice', '/sbin/nologin'), ('/home/alice', '/bin/false')])
+def test_non_person_homes_and_shells_are_excluded(home, shell):
+    record = account('alice', shell=shell)
+    record.pw_dir = home
+    assert not inventory.is_person_account(record, 1000)
+
+
+def test_login_defs_minimum_uid_is_read_without_shadow_or_home_access():
+    with patch.object(inventory.pathlib.Path, 'read_text', return_value='# comment\nUID_MIN 500 # legacy\n'):
+        assert inventory.minimum_user_uid() == 500
+    with patch.object(inventory.pathlib.Path, 'read_text', side_effect=OSError):
+        assert inventory.minimum_user_uid() == 1000
+
+
+def test_filtered_inventory_retires_old_system_observations_without_claiming_deletion(database):
+    reconcile_accounts(database, [report(names=('alice', '_apt')), report('two', names=('_apt',))], ['one', 'two'])
+    reconcile_accounts(database, [report(scope='people', names=('alice',))], ['one'])
+    system = database.query(ManagedUser).filter_by(username='_apt').one()
+    placements = _user_to_response(database, system)['placements']
+    assert [p['state'] for p in placements] == ['not_in_scope', 'observed']
+    reconcile_accounts(database, [report(scope='people', names=())], ['one'])
+    assert all(p.state == 'not_in_scope' for p in database.query(UserHostAssociation).filter_by(host_id=1))

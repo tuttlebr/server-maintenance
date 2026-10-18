@@ -41,8 +41,8 @@ ASRock Rack website: <https://www.asrockrack.com>
 
 If you need to contact ASRock Rack or want to know more about ASRock Rack, visit the ASRock Rack website or contact your dealer.
 
-**ASRock Rack Incorporation**  
-6F., No. 37, Sec. 2, Jhongyang S. Rd., Beitou District,  
+**ASRock Rack Incorporation**
+6F., No. 37, Sec. 2, Jhongyang S. Rd., Beitou District,
 Taipei City 112, Taiwan (R.O.C.)
 
 ## Contents
@@ -659,7 +659,7 @@ position or key.
 
 #### System Panel Header (PANEL1)
 
-**Connector:** 9-pin `PANEL1`  
+**Connector:** 9-pin `PANEL1`
 **Board location:** [Chapter 1 component reference](#component-reference), item
 23.
 
@@ -695,7 +695,7 @@ pin assignments.
 
 #### Auxiliary Panel Header (AUX_PANEL1)
 
-**Connector:** 18-pin `AUX_PANEL1`  
+**Connector:** 18-pin `AUX_PANEL1`
 **Board location:** [Chapter 1 component reference](#component-reference), item
 35.
 
@@ -753,7 +753,7 @@ and support transfer rates up to 6.0 Gb/s.
 
 #### USB 3.2 Gen1 Header (USB3_3_4)
 
-**Connector:** Right-angled, 19-pin `USB3_3_4`  
+**Connector:** Right-angled, 19-pin `USB3_3_4`
 **Board location:** [Chapter 1 component reference](#component-reference), item
 30.
 
@@ -775,7 +775,7 @@ one USB 3.2 Gen1 header. It supports two USB 3.2 Gen1 ports.
 
 #### Chassis Speaker Header (SPEAKER1)
 
-**Connector:** 4-pin `SPEAKER1`  
+**Connector:** 4-pin `SPEAKER1`
 **Board location:** [Chapter 1 component reference](#component-reference), item
 22.
 
@@ -831,7 +831,7 @@ These connectors are used for NVMe PCIe devices.
 
 #### Serial Port Header (COM1)
 
-**Connector:** 9-pin `COM1`  
+**Connector:** 9-pin `COM1`
 **Board location:** [Chapter 1 component reference](#component-reference), item
 32.
 
@@ -847,7 +847,7 @@ This COM header supports a serial-port module.
 
 #### ATX 4-pin Power Connector (ATX4PIN1)
 
-**Connector:** 4-pin `ATX4PIN1` (ATX 24-pin-to-4-pin)  
+**Connector:** 4-pin `ATX4PIN1` (ATX 24-pin-to-4-pin)
 **Board location:** [Chapter 1 component reference](#component-reference), item
 3.
 
@@ -871,8 +871,8 @@ For a 12 V DC-IN application, this connector is not required.
 
 #### SATA Power Connector (SATA_PWR1)
 
-**Mode:** DC-IN  
-**Connector:** 4-pin `SATA_PWR1`  
+**Mode:** DC-IN
+**Connector:** 4-pin `SATA_PWR1`
 **Board location:** [Chapter 1 component reference](#component-reference), item
 14.
 
@@ -919,7 +919,7 @@ battery and short the Clear CMOS Pad.
 
 #### Front LAN LED Header (LED_LAN3_4)
 
-**Connector:** 4-pin `LED_LAN3_4`  
+**Connector:** 4-pin `LED_LAN3_4`
 **Board location:** [Chapter 1 component reference](#component-reference), item
 29.
 
@@ -934,7 +934,7 @@ This connector is used for the front LAN status indicator.
 
 #### TPMS Header (TPMS1)
 
-**Connector:** 17-pin `TPMS1`  
+**Connector:** 17-pin `TPMS1`
 **Board location:** [Chapter 1 component reference](#component-reference), item
 33.
 
@@ -952,7 +952,7 @@ Pin 1 is at the far right of the top row.
 
 #### PSU SMBus Header (PSU_SMB1)
 
-**Connector:** 5-pin `PSU_SMB1`  
+**Connector:** 5-pin `PSU_SMB1`
 **Board location:** [Chapter 1 component reference](#component-reference), item
 4.
 
@@ -969,7 +969,7 @@ temperature.
 
 #### Intelligent Platform Management Bus Header (IPMB_1)
 
-**Connector:** 4-pin `IPMB_1`  
+**Connector:** 4-pin `IPMB_1`
 **Board location:** [Chapter 1 component reference](#component-reference), item
 37.
 
@@ -986,7 +986,7 @@ cards, that provide management features through the IPMB.
 
 #### Thermal Sensor Header (TR1)
 
-**Connector:** 3-pin `TR1`  
+**Connector:** 3-pin `TR1`
 **Board location:** [Chapter 1 component reference](#component-reference), item
 34.
 
@@ -1001,7 +1001,7 @@ the other end to the device whose temperature you want to monitor.
 
 #### Non-Maskable Interrupt Button Header (NMI_BTN1)
 
-**Connector:** `NMI_BTN1`  
+**Connector:** `NMI_BTN1`
 **Board location:** [Chapter 1 component reference](#component-reference), item
 38.
 
@@ -1033,7 +1033,7 @@ the source figure.
 
 #### Baseboard Management Controller SMBus Header (BMC_SMB1)
 
-**Connector:** 5-pin `BMC_SMB1`  
+**Connector:** 5-pin `BMC_SMB1`
 **Board location:** [Chapter 1 component reference](#component-reference), item
 36.
 
@@ -1049,7 +1049,7 @@ This header is used for SMBus devices.
 
 #### PWM Configuration Header (PWM_CFG1)
 
-**Connector:** 3-pin `PWM_CFG1`  
+**Connector:** 3-pin `PWM_CFG1`
 **Board location:** [Chapter 1 component reference](#component-reference), item
 5.
 
@@ -1063,7 +1063,7 @@ This header is used for PWM configuration.
 
 #### CPU HP-SMBus Connector (CPU1_HSBP1)
 
-**Connector:** 5-pin `CPU1_HSBP1`  
+**Connector:** 5-pin `CPU1_HSBP1`
 **Board location:** [Chapter 1 component reference](#component-reference), item
 24.
 

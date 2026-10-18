@@ -12,7 +12,6 @@ logger = logging.getLogger(__name__)
 
 JOB_ID_RE = re.compile(r"^[0-9a-f-]{36}$")
 ALLOWED_REPORT_TYPES = {"assessment", "driver", "gpu", "storage", "accounts", "packages", "services", "recovery", "kubernetes", "apt_install", "cleanup", "execution", "reboot", "discovery"}
-MAX_ARTIFACTS_PER_JOB = 200
 MAX_ARTIFACT_BYTES = 2 * 1024 * 1024
 
 
@@ -24,7 +23,9 @@ def get_job_results(job_id: str) -> list[dict]:
         return []
 
     results = []
-    for path in sorted(result_dir.glob("*.json"))[:MAX_ARTIFACTS_PER_JOB]:
+    # Every selected host needs evidence. A count cap can hide mutation markers
+    # and incorrectly classify an interrupted change as never having started.
+    for path in sorted(result_dir.glob("*.json")):
         try:
             if path.stat().st_size > MAX_ARTIFACT_BYTES:
                 logger.warning("Ignoring oversized job result %s", path)

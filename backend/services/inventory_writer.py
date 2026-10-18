@@ -70,7 +70,14 @@ def _validated_device_vars(device: Device) -> dict[str, str | bool]:
 
 def regenerate_inventory(db: Session) -> None:
     """Generate capability groups for SSH and verified Reachy maintenance access."""
-    devices = sorted(db.query(Device).all(), key=lambda device: device.hostname)
+    # Serialize the read as well as the write so an older snapshot cannot
+    # overwrite a newer concurrent enrollment or discovery.
+    with _INVENTORY_LOCK:
+        _write_inventory(db)
+
+
+def _write_inventory(db: Session) -> None:
+    devices = db.query(Device).populate_existing().order_by(Device.hostname).all()
     groups: dict[str, dict] = {kind: {"hosts": {}} for kind in DEVICE_KINDS}
     groups.update({
         "managed_hosts": {"hosts": {}},
@@ -134,11 +141,6 @@ def regenerate_inventory(db: Session) -> None:
     inventory_path = settings.resolved_inventory_file
     inventory_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = inventory_path.with_name(f".{inventory_path.name}.tmp")
-    with _INVENTORY_LOCK:
-        temporary_path.write_text(json.dumps(inventory, indent=2) + "\n")
-        temporary_path.chmod(0o600)
-        temporary_path.replace(inventory_path)
-
-
-# Compatibility name used by security unit tests and older imports.
-_validated_hostvars = _validated_device_vars
+    temporary_path.write_text(json.dumps(inventory, indent=2) + "\n")
+    temporary_path.chmod(0o600)
+    temporary_path.replace(inventory_path)

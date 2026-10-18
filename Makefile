@@ -15,7 +15,17 @@ ifneq ($(origin FLEET_START_TIMEOUT_SECONDS), undefined)
 export FLEET_START_TIMEOUT_SECONDS
 endif
 
-.PHONY: start prepare enroll-hosts status
+.PHONY: start prepare enroll-hosts status check hooks
+
+hooks:
+	pre-commit install --hook-type pre-commit --hook-type pre-push
+
+check:
+	pre-commit run --all-files
+	bash scripts/check-backend.sh
+	npm --prefix frontend test
+	npm --prefix frontend run build
+	cargo test --locked --manifest-path tools/dgx-doc-ingester/Cargo.toml
 
 start:
 	@./scripts/start.sh start

@@ -41,7 +41,7 @@
         <section v-else-if="!pending" class="card accounts-panel">
           <div class="accounts-toolbar"><input v-model="accountSearch" class="form-input" aria-label="Search users" type="search" placeholder="Search users…" /><button class="btn btn-ghost btn-sm" :disabled="locked || loading || !!loadError || !selectedIds.length || !!missingIds.length" @click="inspect">Refresh accounts</button><button class="btn btn-primary btn-sm" :disabled="locked || !selectedUsers.length" @click="editSelected">Edit {{ selectedUsers.length || 'selected' }} users</button></div>
           <p v-if="jobActive && job.playbook === 'access_inspect.yml'" class="muted" role="status">Reading accounts from the selected devices… Previous observations remain visible until the refresh completes.</p>
-          <p v-else class="muted">Accounts refresh automatically when you select devices or open this view. Includes system accounts and accounts with login disabled. Each device shows its last observed state.</p>
+          <p v-else class="muted">Accounts refresh automatically when you select devices or open this view. Shows regular login accounts with a home under /home; system accounts and disabled login shells are excluded. Each device shows its last observed state.</p>
           <div class="table-wrapper"><table><thead><tr><th><input type="checkbox" :checked="allVisibleSelected" :disabled="locked || !editableUsers.length" aria-label="Select all visible users" @change="selectUsers($event.target.checked)" /></th><th>User</th><th>State on selected devices</th></tr></thead><tbody><tr v-for="user in filteredUsers" :key="user.id">
             <td><input v-model="selectedUsers" type="checkbox" :value="user.username" :disabled="locked || !canEdit(user)" :aria-label="`Select ${user.username}`" /></td>
             <td><strong>{{ user.username }}</strong><small>{{ user.email }}</small></td>
@@ -56,7 +56,7 @@
                 <details v-if="accountPlacement(user,device.id).sudo_policy" class="sudo-policy"><summary>Observed sudo policy</summary><pre>{{ accountPlacement(user,device.id).sudo_policy }}</pre></details>
                 <small>Observed {{ formatLongTime(accountPlacement(user,device.id).observed_at) }}</small>
               </template>
-              <span v-else>{{ accountPlacement(user,device.id).state === 'absent' ? 'Account absent' : 'Not yet observed' }}</span>
+              <span v-else>{{ accountPlacement(user,device.id).state === 'absent' ? 'Account absent' : accountPlacement(user,device.id).state === 'not_in_scope' ? 'Not in current account discovery' : 'Not yet observed' }}</span>
             </div></td>
           </tr></tbody></table></div>
           <p v-if="!selectedIds.length" class="empty-state">Select devices to view their accounts.</p><p v-else-if="!filteredUsers.length && !jobActive" class="empty-state">{{ accountSearch ? 'No accounts match your search.' : 'No accounts observed on these devices. Refresh accounts to check again.' }}</p>

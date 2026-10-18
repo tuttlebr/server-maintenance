@@ -265,7 +265,7 @@ async def chat(body: ChatRequest, user: str = Depends(get_current_user)):
             yield f"data: {json.dumps(item)}\n\n"
 
     if not use_nat and not _direct_llm_available():
-        return {"error": "Chat is not configured. Set AI_HELPER or NAT_BASE_URL environment variables."}
+        raise HTTPException(status_code=503, detail="Chat is not configured. Set AI_HELPER or NAT_BASE_URL environment variables.")
 
     return StreamingResponse(
         event_stream(),

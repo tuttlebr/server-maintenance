@@ -1,14 +1,13 @@
 import asyncio
 import json
 import os
-import signal
 import subprocess
 import sys
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from alembic import command
@@ -26,7 +25,12 @@ from backend.routers.users import _target_devices, _user_to_response, bulk_passw
 from backend.schemas import BulkPasswordResetRequest, OperationRunRequest, SudoersRequest
 from backend.services import ansible_runner as runner
 from backend.services.account_state import reconcile_accounts
-from backend.services.execution_state import ExecutionConflict, parse_host_outcomes, reconcile_interrupted_jobs, reserve_devices
+from backend.services.execution_state import (
+    ExecutionConflict,
+    parse_host_outcomes,
+    reconcile_interrupted_jobs,
+    reserve_devices,
+)
 
 
 @pytest.fixture
@@ -142,6 +146,7 @@ def test_eligibility_checks_platform_freshness_and_recovery():
     host.recovery_required = True
     assert operation_ineligibility(host, op) is None
     assert operation_ineligibility(host, OPERATION_BY_ID['system.packages.preview']) is None
+
 
 def test_package_approval_exact_scope_age_and_complete_results(database, tmp_path):
     with database() as db:
@@ -265,20 +270,20 @@ def test_partial_jobs_are_filterable_and_finish_streaming(database, monkeypatch)
         assert asyncio.run(asyncio.wait_for(scenario(), timeout=2)) == ['event: done\ndata: partial\n\n']
 
 
-@pytest.mark.parametrize('operation', ['reachy.health', 'reachy.logs.read', 'reachy.recover'])
-def test_reachy_mixed_outcomes_are_partial_and_release_devices(database, monkeypatch, operation):
+def test_reachy_recovery_mixed_outcomes_are_partial_and_release_devices(database, monkeypatch):
     from backend.routers import operations
+
     monkeypatch.setattr(operations, 'SessionLocal', database)
-    monkeypatch.setattr(operations, 'probe_reachy', lambda endpoint, port: {
-        'reachable': endpoint == 'node-01', 'facts': {}, 'detail': 'Health inspection failed',
-    })
+    monkeypatch.setattr(
+        operations,
+        'probe_reachy',
+        lambda endpoint, port: {
+            'reachable': endpoint == 'node-01',
+            'facts': {},
+            'detail': 'Health inspection failed',
+        },
+    )
 
-    async def logs(endpoint, port):
-        if endpoint == 'node-02':
-            raise RuntimeError('Logs unavailable')
-        return 'Daemon ready'
-
-    monkeypatch.setattr(operations, '_collect_reachy_logs', logs)
     with database() as db:
         for name in ('node-01', 'node-02'):
             host = device(name)
@@ -289,10 +294,7 @@ def test_reachy_mixed_outcomes_are_partial_and_release_devices(database, monkeyp
     async def scenario():
         with database() as db:
             hosts = db.query(Device).order_by(Device.hostname).all()
-            if operation == 'reachy.recover':
-                result = await operations._recover_reachy(db, hosts, 'test')
-            else:
-                result = operations._start_reachy_inspection(db, hosts, 'test', operation)
+            result = await operations._recover_reachy(db, hosts, 'test')
         await asyncio.gather(*list(runner._BACKGROUND_TASKS))
         return result['job_id']
 
@@ -430,31 +432,51 @@ def test_fifo_exit_before_reader_does_not_hang(tmp_path, monkeypatch):
 
 def test_reachy_interruption_preserves_remote_id_for_recovery(database, monkeypatch):
     from backend.routers import operations
+
     monkeypatch.setattr(operations, 'SessionLocal', database)
-    monkeypatch.setattr(operations, 'reachy_request', lambda *a, **k: {'job_id':'remote-123'})
+    monkeypatch.setattr(operations, 'reachy_request', lambda *a, **k: {'job_id': 'remote-123'})
     monkeypatch.setattr(operations, '_poll_reachy_job', AsyncMock(side_effect=RuntimeError('connection interrupted')))
     with database() as db:
-        host=device();host.transport='reachy_daemon';host.endpoint='127.0.0.1';db.add(host);db.commit()
+        host = device()
+        host.transport = 'reachy_daemon'
+        host.endpoint = '127.0.0.1'
+        db.add(host)
+        db.commit()
+
     async def scenario():
         with database() as db:
-            host=db.query(Device).one()
-            result=operations._start_reachy_remote_jobs(db,[host],'test','reachy.software.update','Update software',str(uuid.uuid4()))
+            host = db.query(Device).one()
+            result = operations._start_reachy_remote_jobs(
+                db, [host], 'test', 'reachy.software.update', 'Update software', str(uuid.uuid4())
+            )
         await asyncio.gather(*list(runner._BACKGROUND_TASKS))
         return result['job_id']
-    local_id=asyncio.run(scenario())
+
+    local_id = asyncio.run(scenario())
     with database() as db:
-        completed=db.query(Job).filter_by(job_id=local_id).one()
-        assert completed.status=='recovery_required'
-        assert completed.device_results[0]['remote_job_id']=='remote-123'
+        completed = db.query(Job).filter_by(job_id=local_id).one()
+        assert completed.status == 'recovery_required'
+        assert completed.device_results[0]['remote_job_id'] == 'remote-123'
         assert db.query(Device).one().recovery_required
         # Simulate abrupt exit instead of a normally recorded error.
-        completed.status='running';db.commit()
+        completed.status = 'running'
+        db.commit()
         reconcile_interrupted_jobs(db)
-        assert completed.device_results[0]['remote_job_id']=='remote-123'
-        monkeypatch.setattr(operations,'reachy_request',lambda *a,**k:{'status':'done'})
-        monkeypatch.setattr(operations,'probe_reachy',lambda *a:{'reachable':True,'detail':'Healthy','facts':{'version':'1.2'}})
-        result=asyncio.run(operations._recover_reachy(db,[db.query(Device).one()],'test'))
-        assert db.query(Job).filter_by(job_id=result['job_id']).one().status=='success'
+        assert completed.device_results[0]['remote_job_id'] == 'remote-123'
+        monkeypatch.setattr(operations, 'reachy_request', lambda *a, **k: {'status': 'done'})
+        monkeypatch.setattr(
+            operations,
+            'probe_reachy',
+            lambda *a: {'reachable': True, 'detail': 'Healthy', 'facts': {'version': '1.2'}},
+        )
+        async def recover():
+            result = await operations._recover_reachy(db, [db.query(Device).one()], 'test')
+            assert db.query(Job).filter_by(job_id=result['job_id']).one().status == 'pending'
+            await asyncio.gather(*list(runner._BACKGROUND_TASKS))
+            return result
+        result = asyncio.run(recover())
+        db.expire_all()
+        assert db.query(Job).filter_by(job_id=result['job_id']).one().status == 'success'
         assert not db.query(Device).one().recovery_required
         assert not db.query(Device).one().facts_stale
 
@@ -622,29 +644,33 @@ def test_shutdown_cancels_queued_jobs_without_executing(database, monkeypatch):
         assert db.query(DeviceReservation).count()==0
 
 
-def test_reachy_inspection_is_queued_reserved_and_refreshes_facts(database, monkeypatch):
+def test_shutdown_cancels_queued_reachy_work_without_invalidating_devices(database, monkeypatch):
     from backend.routers import operations
-    monkeypatch.setattr(operations,'SessionLocal',database)
-    probes=[]
-    def probe(*args):
-        probes.append(args)
-        return {'reachable':True, 'detail':'Healthy', 'facts':{'daemon':{'state':'running'}}}
-    monkeypatch.setattr(operations,'probe_reachy',probe)
+    monkeypatch.setattr(operations, 'SessionLocal', database)
+    remote = Mock()
+    monkeypatch.setattr(operations, 'reachy_request', remote)
     with database() as db:
-        host=device();host.transport='reachy_daemon';db.add(host);db.commit()
+        host = device()
+        host.transport = 'reachy_daemon'
+        db.add(host)
+        db.commit()
+
     async def scenario():
+        monkeypatch.setattr(runner, '_JOB_SEMAPHORE', asyncio.Semaphore(0))
         with database() as db:
-            result=operations._start_reachy_inspection(db,[db.query(Device).one()],'test')
-            assert db.query(DeviceReservation).count()==1
-            assert probes==[]
-        await asyncio.gather(*list(runner._BACKGROUND_TASKS))
-        return result['job_id']
-    job_id=asyncio.run(scenario())
+            operations._start_reachy_remote_jobs(db, [db.query(Device).one()], 'test',
+                'reachy.software.update', 'Update software', str(uuid.uuid4()))
+        await asyncio.sleep(0)
+        await runner.shutdown_executor()
+
+    asyncio.run(scenario())
     with database() as db:
-        assert db.query(Job).filter_by(job_id=job_id).one().status=='success'
-        assert db.query(DeviceReservation).count()==0
+        remote.assert_not_called()
+        assert db.query(Job).one().status == 'cancelled'
+        assert db.query(Job).one().device_results == [{'hostname': 'node-01', 'status': 'not_started'}]
+        assert db.query(DeviceReservation).count() == 0
         assert not db.query(Device).one().facts_stale
-        assert len(probes)==1
+        assert not db.query(Device).one().recovery_required
 
 
 @pytest.mark.parametrize('mutation_started,rc,expected', [(False,2,'failed'), (True,2,'recovery_required'), (False,124,'recovery_required')])

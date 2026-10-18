@@ -38,7 +38,7 @@ class JobLogDocumentTests(unittest.TestCase):
             triggered_by="admin",
             error_summary="Authorization: Bearer abc123",
             recap="dgx-01 : ok=2 failed=1",
-            output_log='password="fleet secret"\n-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----',
+            output_log='password="fleet secret"\n-----BEGIN ' + 'PRIVATE KEY-----\nabc\n-----END ' + 'PRIVATE KEY-----',
         )
 
         documents = job_log_indexer.build_job_documents(job)
@@ -49,7 +49,7 @@ class JobLogDocumentTests(unittest.TestCase):
         self.assertIn("dgx-01", text)
         self.assertNotIn("abc123", text)
         self.assertNotIn("fleet secret", text)
-        self.assertNotIn("BEGIN PRIVATE KEY", text)
+        self.assertNotIn("BEGIN " + "PRIVATE KEY", text)
         self.assertIn("***REDACTED***", text)
 
     def test_fleet_snapshot_uses_newest_completed_job_for_each_host(self):

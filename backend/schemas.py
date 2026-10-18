@@ -12,7 +12,15 @@ EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 GROUPS_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}(,[a-z_][a-z0-9_-]{0,31})*$")
 SAFE_TEXT_RE = re.compile(r"^[^{}<>\r\n$`|;]{1,120}$")
 DeviceTransport = Literal["ssh", "reachy_daemon"]
-ALLOWED_SHELLS = {"/bin/bash", "/bin/sh", "/bin/zsh", "/usr/bin/bash", "/usr/bin/zsh", "/usr/sbin/nologin", "/bin/false"}
+ALLOWED_SHELLS = {
+    "/bin/bash",
+    "/bin/sh",
+    "/bin/zsh",
+    "/usr/bin/bash",
+    "/usr/bin/zsh",
+    "/usr/sbin/nologin",
+    "/bin/false",
+}
 JINJA_MARKERS = ("{{", "}}", "{%", "%}", "{#", "#}")
 
 
@@ -563,7 +571,7 @@ class RemoveUserRequest(BaseModel):
 
 
 # Jobs
-class JobResponse(BaseModel):
+class JobSummaryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -575,8 +583,6 @@ class JobResponse(BaseModel):
     finished_at: datetime | None
     duration_seconds: int | None
     triggered_by: str | None
-    extra_vars: str | None
-    output_log: str | None
     error_summary: str | None
     recap: str | None
     created_at: datetime | None
@@ -584,6 +590,12 @@ class JobResponse(BaseModel):
     execution_kind: str | None = None
     phase: str | None = None
     device_results: list[dict] = Field(default_factory=list)
+
+
+class JobResponse(JobSummaryResponse):
+    extra_vars: str | None
+    output_log: str | None
+
 
 # Chat
 class ChatMessage(BaseModel):

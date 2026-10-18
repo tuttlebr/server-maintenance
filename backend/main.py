@@ -55,24 +55,22 @@ async def lifespan(app: FastAPI):
 
     executor_lock = acquire_executor_lock()
     set_executor_lease(executor_lock)
-    init_db()
-    encrypt_existing_host_secrets()
-    db = SessionLocal()
     try:
-        reconcile_interrupted_jobs(db)
-        reconcile_stale_recovery(db)
-        regenerate_inventory(db)
-    finally:
-        db.close()
-    # Reconcile in the background so startup stays available if Milvus or the
-    # embedding endpoint is temporarily unavailable.
-    start_job_log_reconcile()
-    try:
+        init_db()
+        encrypt_existing_host_secrets()
+        with SessionLocal() as db:
+            reconcile_interrupted_jobs(db)
+            reconcile_stale_recovery(db)
+            regenerate_inventory(db)
+        # Reconcile in the background so startup stays available during outages.
+        start_job_log_reconcile()
         yield
     finally:
-        await shutdown_executor()
-        executor_lock.close()
-        set_executor_lease(None)
+        try:
+            await shutdown_executor()
+        finally:
+            executor_lock.close()
+            set_executor_lease(None)
 
 
 app = FastAPI(

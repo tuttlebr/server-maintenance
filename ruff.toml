@@ -1,0 +1,7 @@
+target-version = "py312"
+line-length = 119
+
+[lint]
+# Catch invalid syntax, undefined names, duplicate keys and unused code.
+# Keep formatting changes separate from correctness fixes.
+select = ["E9", "F"]

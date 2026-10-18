@@ -1,8 +1,8 @@
 # NVIDIA Jetson Nano 2GB Developer Kit
 ## Practical Owner's Manual
 
-**Revision:** 1.0  
-**Prepared:** 2026-08-09  
+**Revision:** 1.0
+**Prepared:** 2026-08-09
 **Applies to:** Jetson Nano 2GB Developer Kit, kit part number **P3541**, using Jetson module **P3448-0003** and reference carrier board **P3542-0000**.
 
 > This is an independent practical manual. It consolidates NVIDIA's official hardware, setup, and software documentation into one operating reference. It does not replace NVIDIA's licenses, safety notices, release notes, or board-specific documentation.

@@ -19,8 +19,8 @@ from backend.capabilities import (
     NVIDIA_DRIVER_MANAGE,
     NVIDIA_FABRIC_MANAGER,
     NVIDIA_MIG_MANAGE,
-    REACHY_DAEMON_RESTART,
     REACHY_APP_RESET,
+    REACHY_DAEMON_RESTART,
     REACHY_HEALTH,
     REACHY_LOGS_READ,
     REACHY_SOFTWARE_UPDATE,
@@ -114,11 +114,6 @@ def reachy_request(
         raise RuntimeError(f"Reachy daemon returned HTTP {exc.code}: {detail or exc.reason}") from exc
     except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"Reachy daemon request failed: {exc}") from exc
-
-
-def reachy_websocket_url(endpoint: str, port: int, path: str) -> str:
-    host = f"[{endpoint}]" if ":" in endpoint and not endpoint.startswith("[") else endpoint
-    return f"ws://{host}:{port}{path}"
 
 
 def apply_reachy_observation(device, result: dict) -> None:

@@ -1,6 +1,5 @@
 import asyncio
 import importlib.util
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -10,7 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from backend.capabilities import OPERATIONS, OPERATION_BY_ID, operation_ineligibility
+from backend.capabilities import OPERATION_BY_ID, operation_ineligibility
 from backend.database import Base
 from backend.models import Device, Job
 from backend.routers.operations import list_operations, run_operation

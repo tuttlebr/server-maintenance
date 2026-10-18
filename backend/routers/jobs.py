@@ -4,43 +4,66 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from backend.auth import get_current_user
 from backend.config import settings
 from backend.database import SessionLocal, get_db
 from backend.models import Job
-from backend.schemas import JobResponse
+from backend.schemas import JobResponse, JobSummaryResponse
 from backend.services.ansible_runner import cancel_job, get_log_path
-from backend.services.job_results import get_job_results
 from backend.services.execution_state import TERMINAL_STATUSES, release_devices
+from backend.services.job_results import get_job_results
 from backend.services.tokens import TokenError, decode_token
 
 router = APIRouter(prefix="/api/v2/jobs", tags=["activity"])
 
 
-@router.get("/", response_model=list[JobResponse])
+def _summary_query(db):
+    return db.query(Job).options(defer(Job.output_log), defer(Job.extra_vars))
+
+
+@router.get("", response_model=list[JobSummaryResponse])
+@router.get("/", response_model=list[JobSummaryResponse], include_in_schema=False)
 def list_jobs(
     status: str | None = None,
     playbook: str | None = None,
-    limit: int = Query(default=50, le=200),
+    limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     user: str = Depends(get_current_user),
 ):
-    query = db.query(Job)
+    query = _summary_query(db)
     if status == "active":
         query = query.filter(Job.status.in_(("pending", "running", "cancelling")))
+    elif status == "adverse":
+        query = query.filter(Job.status.in_(("failed", "partial", "recovery_required")))
     elif status:
         query = query.filter(Job.status == status)
     if playbook:
         query = query.filter(Job.playbook == playbook)
-    return query.order_by(Job.created_at.desc()).offset(offset).limit(limit).all()
+    return query.order_by(Job.created_at.desc(), Job.id.desc()).offset(offset).limit(limit).all()
 
 
 @router.get("/summary")
 def job_summary(db: Session = Depends(get_db), user: str = Depends(get_current_user)):
     return {"active_count": db.query(Job).filter(Job.status.in_(("pending", "running", "cancelling"))).count()}
+
+
+@router.get("/overview")
+def job_overview(db: Session = Depends(get_db), user: str = Depends(get_current_user)):
+    def rows(status=None, limit=50):
+        return [
+            JobSummaryResponse.model_validate(job)
+            for job in list_jobs(status=status, limit=limit, offset=0, db=db, user=user,)
+        ]
+
+    return {
+        **job_summary(db, user),
+        "recent": rows(),
+        "active": rows("active", 200),
+        "adverse": rows("adverse", 15),
+    }
 
 
 @router.get("/{job_id}", response_model=JobResponse)
@@ -86,15 +109,13 @@ async def cancel_job_output(
 
 @router.get("/{job_id}/stream")
 async def stream_job_output(
-    job_id: str,
-    authorization: str | None = Header(default=None),
-    db: Session = Depends(get_db),
+    job_id: str, authorization: str | None = Header(default=None), db: Session = Depends(get_db),
 ):
     """Stream job output as Server-Sent Events. Auth via Authorization: Bearer header
     (frontend uses fetch streaming so headers are available)."""
     token = None
     if authorization and authorization.lower().startswith("bearer "):
-        token = authorization.split(None, 1)[1].strip()
+        token = authorization[7:].strip()
     if not token:
         raise HTTPException(status_code=401, detail="Token required")
     try:
@@ -116,8 +137,7 @@ async def stream_job_output(
             # Re-check job status from DB
             fresh_db = SessionLocal()
             try:
-                current_job = fresh_db.query(Job).filter(Job.job_id == job_id).first()
-                job_status = current_job.status if current_job else "failed"
+                job_status = fresh_db.query(Job.status).filter(Job.job_id == job_id).scalar() or "failed"
             finally:
                 fresh_db.close()
 
@@ -144,9 +164,5 @@ async def stream_job_output(
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no",},
     )

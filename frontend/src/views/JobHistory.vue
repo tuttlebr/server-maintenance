@@ -249,15 +249,8 @@ async function load() {
   try {
     const params = { limit: 50, offset: page.value * 50 };
     if (filterPlaybook.value) params.playbook = filterPlaybook.value;
-    let rows, more;
-    if (filterStatus.value === 'adverse') {
-      const [failed, partial, recovery] = await Promise.all([getJobs({ ...params, status: 'failed' }), getJobs({ ...params, status: 'partial' }), getJobs({ ...params, status: 'recovery_required' })]);
-      rows = [...failed, ...partial, ...recovery].sort((a,b) => String(b.created_at).localeCompare(String(a.created_at)));
-      more = failed.length === 50 || partial.length === 50 || recovery.length === 50;
-    } else {
-      if (filterStatus.value) params.status = filterStatus.value;
-      rows = await getJobs(params); more = rows.length === 50;
-    }
+    if (filterStatus.value) params.status = filterStatus.value;
+    const rows = await getJobs(params), more = rows.length === 50;
     if (sequence !== loadSequence) return;
     if (expandedJob.value && !rows.some(job => job.job_id === expanded.value)) rows.unshift(expandedJob.value);
     jobs.value = rows; hasNextPage.value = more; loadError.value = null;

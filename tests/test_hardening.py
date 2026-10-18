@@ -192,6 +192,12 @@ class HostCredentialTests(unittest.TestCase):
         )
 
         class Query:
+            def populate_existing(self):
+                return self
+
+            def order_by(self, *args):
+                return self
+
             def all(self):
                 return [host]
 
@@ -237,6 +243,12 @@ class HostCredentialTests(unittest.TestCase):
         )
 
         class Query:
+            def populate_existing(self):
+                return self
+
+            def order_by(self, *args):
+                return self
+
             def all(self):
                 return [host]
 
@@ -269,6 +281,12 @@ class HostCredentialTests(unittest.TestCase):
         )
 
         class Query:
+            def populate_existing(self):
+                return self
+
+            def order_by(self, *args):
+                return self
+
             def all(self):
                 return [host]
 

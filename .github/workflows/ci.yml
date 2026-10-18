@@ -16,14 +16,19 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Python dependencies
-        run: python -m pip install -r requirements-dev.txt
+        run: |
+          python -m pip install -r requirements-dev.txt
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Pre-commit checks
+        run: pre-commit run --all-files
 
       - name: Python syntax
         run: python -m compileall -q backend scripts nat
@@ -34,11 +39,10 @@ jobs:
           python -m py_compile scripts/enroll_hosts.py
 
       - name: Python tests
-        run: python -m pytest -q
+        run: bash scripts/check-backend.sh
 
       - name: Ansible syntax
         run: |
-          ansible-galaxy collection install -r requirements.yml
           for playbook in playbooks/*.yml; do
             ansible-playbook -i localhost, "$playbook" --syntax-check
           done
@@ -76,6 +80,11 @@ jobs:
 
       - name: Rust tests
         run: cargo test --locked --manifest-path tools/dgx-doc-ingester/Cargo.toml
+
+      - name: Rust minimum supported version
+        run: |
+          rustup toolchain install 1.85.0 --profile minimal
+          cargo +1.85.0 test --locked --manifest-path tools/dgx-doc-ingester/Cargo.toml
 
       - name: Rust vulnerability audit
         run: |

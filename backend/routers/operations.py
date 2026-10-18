@@ -11,19 +11,28 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.auth import get_current_user
-from backend.capabilities import OPERATION_BY_ID, OPERATIONS, REACHY_DAEMON_RESTART, facts_are_stale, operation_ineligibility
-from backend.database import SessionLocal, get_db
-from backend.models import Device, Job, DeviceReservation
-from backend.schemas import OperationResponse, OperationRunRequest
-from backend.services.ansible_runner import get_log_path, run_playbook, track_task, job_semaphore
-from backend.services.job_results import get_job_results
-from backend.services.execution_state import TERMINAL_STATUSES, ExecutionConflict, completed_status, reserve_devices, release_devices, request_fingerprint
-from backend.services.device_discovery import (
-    apply_reachy_observation as _apply_reachy_observation,
-    probe_reachy,
-    reachy_request,
-    reachy_websocket_url,
+from backend.capabilities import (
+    OPERATION_BY_ID,
+    OPERATIONS,
+    REACHY_DAEMON_RESTART,
+    facts_are_stale,
+    operation_ineligibility,
 )
+from backend.database import SessionLocal, get_db
+from backend.models import Device, DeviceReservation, Job
+from backend.schemas import OperationResponse, OperationRunRequest
+from backend.services.ansible_runner import get_log_path, job_semaphore, run_playbook, track_task
+from backend.services.device_discovery import apply_reachy_observation as _apply_reachy_observation
+from backend.services.device_discovery import probe_reachy, reachy_request
+from backend.services.execution_state import (
+    TERMINAL_STATUSES,
+    ExecutionConflict,
+    completed_status,
+    release_devices,
+    request_fingerprint,
+    reserve_devices,
+)
+from backend.services.job_results import get_job_results
 
 router = APIRouter(prefix="/api/v2/operations", tags=["operations"])
 
@@ -34,11 +43,22 @@ def list_operations(db: Session = Depends(get_db), user: str = Depends(get_curre
     devices = db.query(Device).order_by(Device.hostname).all()
     response = []
     reservations = {r.device_id: r.job_id for r in db.query(DeviceReservation).all()}
+
     def reason(device, operation):
-        return f"Busy with job {reservations[device.id]}. Check Activity." if device.id in reservations else operation_ineligibility(device, operation)
+        return (
+            f"Busy with job {reservations[device.id]}. Check Activity."
+            if device.id in reservations
+            else operation_ineligibility(device, operation)
+        )
+
     for operation in OPERATIONS:
-        eligible = [device.id for device in devices if not reason(device, operation)]
-        excluded = [{"id": d.id, "name": d.name, "reason": reason(d, operation)} for d in devices if d.id not in eligible]
+        eligible, excluded = [], []
+        for device in devices:
+            exclusion = reason(device, operation)
+            if exclusion:
+                excluded.append({"id": device.id, "name": device.name, "reason": exclusion})
+            else:
+                eligible.append(device.id)
         response.append(
             OperationResponse(
                 id=operation.id,
@@ -136,112 +156,67 @@ def _approved_package_plans(db, preview_job_id, devices):
 
 
 async def _recover_reachy(db, devices, user):
-    local = Job(job_id=str(uuid.uuid4()), playbook="reachy.recover", target_hosts=",".join(d.hostname for d in devices),
-                status="running", phase="verifying", execution_kind="read_only", triggered_by=user, started_at=datetime.now(timezone.utc))
+    job_id = str(uuid.uuid4())
+    local = Job(job_id=job_id, playbook="reachy.recover",
+                target_hosts=",".join(d.hostname for d in devices), status="pending",
+                phase="queued", execution_kind="read_only", triggered_by=user)
     try:
         reserve_devices(db, local, devices, recovery=True)
     except ExecutionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    outcomes = []
-    for device in devices:
-        try:
-            previous = None
-            if device.recovery_required:
-                previous = next((j for j in db.query(Job).filter(Job.execution_kind == "mutation").order_by(Job.created_at.desc()).all() if device.hostname in (j.target_hosts or "").split(",")), None)
-                remote_id = next((item.get("remote_job_id") for item in previous.device_results if item.get("hostname") == device.hostname), None) if previous else None
-                if not remote_id:
-                    raise RuntimeError("No remote job ID was acknowledged. Inspect the daemon's operation history and repair through its maintenance interface; Fleet cannot certify completion automatically.")
-                info = await asyncio.to_thread(reachy_request, device.endpoint or device.hostname, device.daemon_port or 8000, "/update/info", query={"job_id":remote_id}, timeout=10)
-                if str(info.get("status", "")).lower() != "done":
-                    raise RuntimeError("The recorded remote job has not completed successfully. Keep the device in recovery.")
-            if previous and previous.playbook == REACHY_DAEMON_RESTART:
-                result = await _wait_for_reachy_health(local.job_id, device.name, device.endpoint or device.hostname, device.daemon_port or 8000)
-            else:
-                result = await asyncio.to_thread(probe_reachy, device.endpoint or device.hostname, device.daemon_port or 8000)
-            _apply_reachy_observation(device, result)
-            if not result["reachable"]:
-                raise RuntimeError(result["detail"])
-            device.recovery_required = False
-            device.recovery_reason = None
-            outcomes.append({"hostname":device.hostname, "status":"success"})
-        except Exception as exc:
-            outcomes.append({"hostname":device.hostname, "status":"failed", "detail":str(exc)})
-    local.outcomes_json = json.dumps(outcomes)
-    local.status = completed_status(outcomes)
-    local.finished_at = datetime.now(timezone.utc)
-    local.phase = "complete"
-    local.output_log = json.dumps(outcomes, indent=2)
-    local.error_summary = "; ".join(item.get("detail", "") for item in outcomes if item["status"] != "success") or None
-    release_devices(db, local.job_id)
-    db.commit()
-    return {"job_id":local.job_id, "detail":"Reachy recovery verification completed"}
+    track_task(_run_reachy_recovery(job_id, [device.id for device in devices]))
+    return {"job_id": job_id, "detail": "Reachy recovery verification queued"}
 
 
-async def _collect_reachy_logs(endpoint, port):
-    from websockets.asyncio.client import connect
-    url = reachy_websocket_url(endpoint, port, "/logs/ws/daemon")
-    lines = []
-    async with connect(url, open_timeout=5, close_timeout=2, max_size=1_048_576) as socket:
-        deadline = asyncio.get_running_loop().time() + 5
-        while len(lines) < 100 and asyncio.get_running_loop().time() < deadline:
-            try:
-                async with asyncio.timeout(1.25):
-                    message = await socket.recv()
-            except TimeoutError:
-                break
-            if message:
-                lines.append(str(message))
-    return "\n".join(lines) or "No log lines received"
-
-
-def _start_reachy_inspection(db, devices, user, operation_id="reachy.health"):
-    job_id = str(uuid.uuid4())
-    local = Job(job_id=job_id, playbook=operation_id, target_hosts=",".join(d.hostname for d in devices),
-                status="pending", phase="queued", execution_kind="read_only", triggered_by=user)
+async def _run_reachy_recovery(job_id, device_ids):
+    outcomes, error = [], None
+    started = datetime.now(timezone.utc)
     try:
-        reserve_devices(db, local, devices)
-    except ExecutionConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    targets = [(d.hostname, d.endpoint or d.hostname, d.daemon_port or 8000) for d in devices]
-
-    async def execute():
-        outcomes = []
-        status = "failed"
-        started = datetime.now(timezone.utc)
-        error = None
-        try:
-            async with job_semaphore():
-                _update_reachy_job(job_id, status="running", phase="inspecting", started_at=started)
-                for hostname, endpoint, port in targets:
+        async with job_semaphore():
+            with SessionLocal() as db:
+                local = db.query(Job).filter_by(job_id=job_id).one()
+                if local.status != "pending":
+                    return
+                _update_reachy_job(job_id, status="running", phase="verifying", started_at=started)
+                for device in db.query(Device).filter(Device.id.in_(device_ids)).order_by(Device.hostname).all():
                     try:
-                        if operation_id == "reachy.health":
-                            result = await asyncio.to_thread(probe_reachy, endpoint, port)
-                            with SessionLocal() as state_db:
-                                device = state_db.query(Device).filter_by(hostname=hostname).one()
-                                _apply_reachy_observation(device, result)
-                                state_db.commit()
-                            if not result["reachable"]:
-                                raise RuntimeError(result["detail"])
-                            output = json.dumps(result.get("facts", {}), indent=2)
+                        previous = None
+                        if device.recovery_required:
+                            previous = next((j for j in db.query(Job).filter(Job.execution_kind == "mutation")
+                                             .order_by(Job.created_at.desc(), Job.id.desc())
+                                             if device.hostname in (j.target_hosts or "").split(",")), None)
+                            remote_id = next((item.get("remote_job_id") for item in previous.device_results
+                                              if item.get("hostname") == device.hostname), None) if previous else None
+                            if not remote_id:
+                                raise RuntimeError("No remote job ID was acknowledged. Inspect the daemon's operation history; Fleet cannot certify completion automatically.")
+                            info = await asyncio.to_thread(reachy_request, device.endpoint or device.hostname,
+                                device.daemon_port or 8000, "/update/info", query={"job_id": remote_id}, timeout=10)
+                            if str(info.get("status", "")).lower() != "done":
+                                raise RuntimeError("The recorded remote job has not completed successfully. Keep the device in recovery.")
+                        if previous and previous.playbook == REACHY_DAEMON_RESTART:
+                            result = await _wait_for_reachy_health(job_id, device.name, device.endpoint or device.hostname, device.daemon_port or 8000)
                         else:
-                            output = await _collect_reachy_logs(endpoint, port)
-                        outcomes.append({"hostname":hostname, "status":"success"})
-                        _append_reachy_log(job_id, f"[{hostname}]\n{output}\n")
+                            result = await asyncio.to_thread(probe_reachy, device.endpoint or device.hostname, device.daemon_port or 8000)
+                        _apply_reachy_observation(device, result)
+                        if not result["reachable"]:
+                            raise RuntimeError(result["detail"])
+                        device.recovery_required = False
+                        device.recovery_reason = None
+                        outcomes.append({"hostname": device.hostname, "status": "success"})
+                        db.commit()
                     except Exception as exc:
-                        outcomes.append({"hostname":hostname, "status":"failed", "detail":str(exc)})
-                        _append_reachy_log(job_id, f"[{hostname}] FAILED: {exc}\n")
+                        db.rollback()
+                        outcomes.append({"hostname": device.hostname, "status": "failed", "detail": str(exc)})
+                    _append_reachy_log(job_id, json.dumps(outcomes[-1]) + "\n")
                     _update_reachy_job(job_id, outcomes_json=json.dumps(outcomes))
-                status = completed_status(outcomes)
-                error = "; ".join(item.get("detail", "") for item in outcomes if item["status"] != "success") or None
-        except asyncio.CancelledError:
-            error = "Inspection interrupted by executor shutdown"
-        finally:
-            _update_reachy_job(job_id, status=status, phase="complete", finished_at=datetime.now(timezone.utc),
-                duration_seconds=int((datetime.now(timezone.utc)-started).total_seconds()),
-                error_summary=error, outcomes_json=json.dumps(outcomes), capture_log=True)
-
-    track_task(execute())
-    return {"job_id":job_id, "detail":f"Reachy inspection queued for {len(devices)} device(s)"}
+    except asyncio.CancelledError:
+        error = "Recovery verification interrupted. Scan again to verify device health."
+    except Exception as exc:
+        error = str(exc)
+    finally:
+        _update_reachy_job(job_id, status=completed_status(outcomes, has_errors=bool(error)), phase="complete",
+            finished_at=datetime.now(timezone.utc), outcomes_json=json.dumps(outcomes), capture_log=True,
+            error_summary=error or "; ".join(item.get("detail", "") for item in outcomes if item["status"] != "success") or None)
 
 
 def _start_reachy_remote_jobs(
@@ -284,18 +259,26 @@ def _start_reachy_remote_jobs(
 
 
 async def _run_reachy_remote_jobs(job_id, targets, operation_id, label, started):
-    async with job_semaphore():
-        with SessionLocal() as db:
-            job = db.query(Job).filter_by(job_id=job_id).first()
-            if not job or job.status != "pending":
-                return
-            names = [hostname for hostname, _, _, _ in targets]
-            if any(facts_are_stale(device) for device in db.query(Device).filter(Device.hostname.in_(names)).all()):
-                _update_reachy_job(job_id, status="failed", phase="discovery_required", finished_at=datetime.now(timezone.utc),
-                    error_summary="Scan devices first. Facts expired while queued. The action did not start.",
-                    outcomes_json=json.dumps([{"hostname": name, "status": "not_started"} for name in names]))
-                return
-        await _execute_reachy_remote_jobs(job_id, targets, operation_id, label, started)
+    try:
+        async with job_semaphore():
+            with SessionLocal() as db:
+                job = db.query(Job).filter_by(job_id=job_id).first()
+                if not job or job.status != "pending":
+                    return
+                names = [hostname for hostname, _, _, _ in targets]
+                if any(facts_are_stale(device) for device in db.query(Device).filter(Device.hostname.in_(names)).all()):
+                    _update_reachy_job(job_id, status="failed", phase="discovery_required", finished_at=datetime.now(timezone.utc),
+                        error_summary="Scan devices first. Facts expired while queued. The action did not start.",
+                        outcomes_json=json.dumps([{"hostname": name, "status": "not_started"} for name in names]))
+                    return
+            await _execute_reachy_remote_jobs(job_id, targets, operation_id, label, started)
+    except asyncio.CancelledError:
+        # Active remote work handles its own cancellation and recovery evidence.
+        # Cancellation here occurred while waiting for an executor slot.
+        _update_reachy_job(job_id, status="cancelled", phase="cancelled", finished_at=datetime.now(timezone.utc),
+            error_summary="Executor stopped before this queued job began. No device changes were started.",
+            outcomes_json=json.dumps([{"hostname": name, "status": "not_started"} for name, _, _, _ in targets]),
+            capture_log=True)
 
 
 async def _execute_reachy_remote_jobs(
@@ -429,13 +412,13 @@ def _update_reachy_job(job_id: str, capture_log: bool = False, **values) -> None
             job.output_log = log_path.read_text() if log_path.exists() else ""
         if job.status == "running" and job.execution_kind == "mutation":
             for device in db.query(Device).filter(Device.hostname.in_((job.target_hosts or "").split(","))).all():
-                if not any(item.get("hostname") == device.hostname and item.get("status") == "success" for item in job.device_results):
+                if not any(item.get("hostname") == device.hostname and item.get("status") in {"success", "not_started"} for item in job.device_results):
                     device.facts_stale = True
         if job.status in TERMINAL_STATUSES:
             release_devices(db, job_id)
             for device in db.query(Device).filter(Device.hostname.in_((job.target_hosts or "").split(","))).all():
                 outcome = next((item for item in job.device_results if item.get("hostname") == device.hostname), {})
-                if outcome.get("status") == "success":
+                if outcome.get("status") in {"success", "not_started"}:
                     continue
                 if job.playbook != "reachy.logs.read":
                     device.facts_stale = True

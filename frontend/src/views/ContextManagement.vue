@@ -55,21 +55,21 @@ import { formatLongTime } from "../utils/time.js";
 
 const route = useRoute();
 const status = reactive({ record_count: null, document_count: 0, annotated_device_count: 0, running: false, phase: "idle", message: "", progress: 0, total: 0, last_indexed_at: null, error: null });
-const documents = ref([]); const devices = ref([]); const loading = ref(true); const uploading = ref(false); const deleteTarget = ref(null); const fileInputKey = ref(0); let pollTimer;
+const documents = ref([]); const devices = ref([]); const loading = ref(true); const uploading = ref(false); const deleteTarget = ref(null); const fileInputKey = ref(0); let pollTimer, disposed = false;
 const uploadForm = reactive({ file: null, title: "", device_id: route.query.device ? String(route.query.device) : "" });
 const phaseLabel = computed(() => ({ loading: "Loading sources", embedding: "Creating embeddings", inserting: "Updating search index" }[status.phase] || "Re-indexing context"));
 const progressPercent = computed(() => status.total ? Math.min(100, Math.round((status.progress / status.total) * 100)) : 5);
 
-async function loadStatus() { try { Object.assign(status, await getContextStatus()); if (status.running) schedulePoll(); } catch (error) { window.$toast?.error("Couldn't load context index status", error); } }
-async function load() { loading.value = true; try { [documents.value, devices.value] = await Promise.all([getContextDocuments(), getDevices()]); await loadStatus(); } catch (error) { window.$toast?.error("Couldn't load context", error); } finally { loading.value = false; } }
-function schedulePoll() { clearTimeout(pollTimer); pollTimer = setTimeout(async () => { await loadStatus(); if (!status.running) await load(); }, 1500); }
+async function loadStatus() { try { const result = await getContextStatus(); if (disposed) return; Object.assign(status, result); if (status.running) schedulePoll(); } catch (error) { window.$toast?.error("Couldn't load context index status", error); } }
+async function load() { if (disposed) return; loading.value = true; try { [documents.value, devices.value] = await Promise.all([getContextDocuments(), getDevices()]); if (!disposed) await loadStatus(); } catch (error) { window.$toast?.error("Couldn't load context", error); } finally { loading.value = false; } }
+function schedulePoll() { clearTimeout(pollTimer); if (disposed) return; pollTimer = setTimeout(async () => { await loadStatus(); if (!status.running) await load(); }, 1500); }
 async function startReindex() { try { const result = await reindexContext(); window.$toast?.success(result.detail); status.running = true; status.error = null; schedulePoll(); } catch (error) { window.$toast?.error("Couldn't start context re-index", error); } }
 function selectFile(event) { uploadForm.file = event.target.files?.[0] || null; }
 async function upload() { if (!uploadForm.file) return; uploading.value = true; const body = new FormData(); body.append("file", uploadForm.file); if (uploadForm.title.trim()) body.append("title", uploadForm.title.trim()); if (uploadForm.device_id) body.append("device_id", uploadForm.device_id); try { await uploadContextDocument(body); window.$toast?.success("Document uploaded. Re-index when you're ready to publish it to search."); uploadForm.file = null; uploadForm.title = ""; fileInputKey.value += 1; await load(); } catch (error) { window.$toast?.error("Couldn't upload document", error); } finally { uploading.value = false; } }
 function askDelete(document) { deleteTarget.value = document; }
 async function removeDocument() { const document = deleteTarget.value; deleteTarget.value = null; try { const result = await deleteContextDocument(document.id); window.$toast?.success(result.detail); await load(); } catch (error) { window.$toast?.error("Couldn't remove document", error); } }
 function formatBytes(bytes) { if (bytes < 1024) return `${bytes} B`; if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`; return `${(bytes / (1024 * 1024)).toFixed(1)} MB`; }
-onMounted(load); onUnmounted(() => clearTimeout(pollTimer));
+onMounted(load); onUnmounted(() => { disposed = true; clearTimeout(pollTimer); });
 </script>
 
 <style scoped>

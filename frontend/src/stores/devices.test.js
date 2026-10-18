@@ -13,10 +13,10 @@ function setup(t, respond) {
   return store;
 }
 const json = (data,status=200) => new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json'}});
-const defaults = url => json(url.pathname.endsWith('/devices') ? [{id:1,name:'node-1'}] : url.pathname.endsWith('/summary') ? {active_count:0} : []);
+const defaults = url => json(url.pathname.endsWith('/devices') ? [{id:1,name:'node-1'}] : {active_count:0,recent:[],active:[],adverse:[]});
 
 test('jobs failure does not erase or hide a successful device observation', async t => {
-  const store = setup(t,url => url.pathname.endsWith('/jobs') ? json({detail:'Unavailable'},503) : defaults(url));
+  const store = setup(t,url => url.pathname.endsWith('/overview') ? json({detail:'Unavailable'},503) : defaults(url));
   await store.refresh();
   assert.equal(store.hasLoadedOnce,true); assert.equal(store.devices[0].name,'node-1');
   assert.equal(store.deviceError,null); assert.ok(store.jobsError); assert.ok(store.lastUpdated);
@@ -40,12 +40,12 @@ test('concurrent refresh requests coalesce, including force callers', async t =>
   let requests=0, release; const gate=new Promise(resolve => {release=resolve;});
   const store=setup(t,async url => {requests++; await gate; return defaults(url);});
   const first=store.refresh(), second=store.refresh({force:true});
-  assert.equal(requests,7); release(); await Promise.all([first,second]); assert.equal(requests,7); assert.equal(store.loading,false);
+  try { assert.equal(requests,2); } finally { release(); } await Promise.all([first,second]); assert.equal(requests,2); assert.equal(store.loading,false);
 });
 
 test('adverse outcomes include partial jobs in chronological order', async t => {
   const rows = {partial:[{job_id:'partial',status:'partial',created_at:'2026-09-27T12:00:00Z'}],failed:[{job_id:'failed',status:'failed',created_at:'2026-09-26T12:00:00Z'}]};
-  const store = setup(t,url => rows[url.searchParams.get('status')] ? json(rows[url.searchParams.get('status')]) : defaults(url));
+  const store = setup(t,url => url.pathname.endsWith('/overview') ? json({recent:[],active:[],active_count:0,adverse:[...rows.partial,...rows.failed]}) : defaults(url));
   await store.refresh();
   assert.deepEqual(store.adverseJobs.map(job => job.status), ['partial','failed']);
   assert.equal(store.adverseError,null);

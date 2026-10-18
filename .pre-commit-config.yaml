@@ -10,35 +10,36 @@ repos:
       - id: check-yaml
       - id: mixed-line-ending
         args: ["--fix=lf"]
-  - repo: https://github.com/psf/black
-    rev: 19.10b0
+  - repo: local
     hooks:
-      - id: black
-        exclude: ^third_party/
-        args: ["--skip-string-normalization", "--line-length=119"]
-        additional_dependencies: ["click==8.0.4"]
-  - repo: https://github.com/pycqa/isort
-    rev: 5.12.0
-    hooks:
-      - id: isort
-        name: isort (python)
-        args:
-          [
-            "--multi-line=3",
-            "--trailing-comma",
-            "--force-grid-wrap=0",
-            "--use-parenthese",
-            "--line-width=119",
-            "--ws",
-            "--skip=third_party",
-          ]
-  - repo: https://github.com/lovesegfault/beautysh
-    rev: v6.2.1
-    hooks:
-      - id: beautysh
-        name: beautysh (bash)
-        args: ["--indent-size=2", "--force-function-style=fnpar"]
+      - id: ruff
+        name: Python correctness (Ruff)
+        entry: ruff check --config ruff.toml
+        language: python
+        additional_dependencies: ["ruff==0.17.1"]
+        types: [python]
+      - id: shell-syntax
+        name: Shell syntax
+        entry: bash -c 'for script in "$@"; do bash -n "$script" || exit 1; done' --
+        language: system
+        types: [shell]
+      - id: backend-tests
+        name: Backend tests
+        entry: bash scripts/check-backend.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+      - id: frontend-tests
+        name: Frontend tests
+        entry: npm --prefix frontend test
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
   - repo: https://github.com/tuttlebr/nv-pre-commit
-    rev: v0.0.5 # Use the ref you want to point at
+    rev: v0.0.5
     hooks:
       - id: detect-nv-keys
+        # SHA-512 integrity hashes match the legacy 84-character key heuristic.
+        exclude: ^frontend/package-lock\.json$

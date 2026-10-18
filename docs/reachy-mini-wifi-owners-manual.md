@@ -1,8 +1,8 @@
 # Reachy Mini Wi‑Fi Owner’s Manual
 
-**Model:** Reachy Mini (Wireless / Wi‑Fi edition)  
-**Prepared from:** Pollen Robotics and Hugging Face documentation  
-**Reviewed:** 2026-08-09  
+**Model:** Reachy Mini (Wireless / Wi‑Fi edition)
+**Prepared from:** Pollen Robotics and Hugging Face documentation
+**Reviewed:** 2026-08-09
 **Status:** Community-prepared operating manual; use the official documentation and hardware instructions when they conflict with this document.
 
 > **Scope:** This manual covers the autonomous Reachy Mini Wireless, powered by its Raspberry Pi Compute Module 4 and internal battery. It does not describe the Reachy Mini Lite except where a comparison prevents confusion.

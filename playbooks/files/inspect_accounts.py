@@ -7,10 +7,36 @@ import pwd
 import subprocess
 import sys
 
+
+def minimum_user_uid():
+    """Honor the host's normal-account range, including older UID_MIN=500 hosts."""
+    try:
+        for line in pathlib.Path('/etc/login.defs').read_text().splitlines():
+            fields = line.split('#', 1)[0].split()
+            if len(fields) == 2 and fields[0] == 'UID_MIN':
+                return max(1, int(fields[1]))
+    except (OSError, ValueError):
+        pass
+    return 1000
+
+
+def is_person_account(account, uid_min):
+    # NSS/LDAP identities may exceed UID_MAX. Do not drop those users or probe
+    # their home directories: a stat can trigger a slow network automount.
+    home = pathlib.PurePosixPath(account.pw_dir)
+    shell = pathlib.PurePosixPath(account.pw_shell)
+    return (account.pw_uid >= uid_min and account.pw_uid != 65534
+            and home.is_absolute() and len(home.parts) > 2 and home.parts[1] == 'home'
+            and '..' not in home.parts and shell.is_absolute()
+            and shell.name not in {'nologin', 'false', 'true', 'sync', 'halt', 'shutdown'})
+
+
 def inspect_accounts(names):
-    # Enumerate all accounts, including system accounts and disabled logins.
-    # The 500-row mutation limit must never truncate an inventory.
-    accounts = {account.pw_name: account for account in pwd.getpwall()} if not names else {}
+    # Automatic discovery finds regular login accounts. Explicit post-change
+    # verification still reports the requested identity, including absence.
+    uid_min = minimum_user_uid()
+    accounts = {account.pw_name: account for account in pwd.getpwall()
+                if is_person_account(account, uid_min)} if not names else {}
     names = names or list(accounts)
     group_entries = grp.getgrall()
     reports = []

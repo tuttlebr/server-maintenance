@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from backend.auth import get_current_user
 from backend.config import settings
@@ -37,7 +37,7 @@ def list_documents(db: Session = Depends(get_db), user: str = Depends(get_curren
     devices = {device.id: device for device in db.query(Device).all()}
     return [
         context_manager.document_to_dict(document, devices.get(document.device_id))
-        for document in db.query(ContextDocument).order_by(ContextDocument.created_at.desc()).all()
+        for document in db.query(ContextDocument).options(defer(ContextDocument.content)).order_by(ContextDocument.created_at.desc()).all()
     ]
 
 

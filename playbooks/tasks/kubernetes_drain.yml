@@ -59,4 +59,3 @@
       or
       'timeout reached' in
         (kubernetes_emergency_drain_result.warnings | default([]) | join(' ') | lower)
-
