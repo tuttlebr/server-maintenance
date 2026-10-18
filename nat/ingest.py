@@ -11,6 +11,11 @@ import re
 import time
 import urllib.request
 
+try:
+    from .embedding_response import validate_embeddings
+except ImportError:  # The NAT entrypoint executes this file as a script.
+    from embedding_response import validate_embeddings
+
 from pymilvus import (
     Collection,
     CollectionSchema,
@@ -127,7 +132,7 @@ def _doc_title(text):
     return None
 
 
-def _call_embeddings_api(texts, input_type="passage"):
+def _call_embeddings_api(texts, input_type="passage", expected_dimension=None):
     """Call NVIDIA embeddings API (OpenAI-compatible format)."""
     url = API_BASE_URL.rstrip("/") + "/embeddings"
     headers = {
@@ -149,9 +154,7 @@ def _call_embeddings_api(texts, input_type="passage"):
         error_body = e.read().decode("utf-8", errors="replace")
         print(f"Embeddings API error {e.code}: {error_body}")
         raise
-    # Sort by index to preserve order
-    data = sorted(result["data"], key=lambda x: x["index"])
-    return [item["embedding"] for item in data]
+    return validate_embeddings(result, len(texts), expected_dimension or EMBED_DIM)
 
 
 def detect_embed_dim():
@@ -172,7 +175,7 @@ def embed_texts(texts):
         print(
             f"Embedding batch {i // EMBED_BATCH_SIZE + 1}/{(total + EMBED_BATCH_SIZE - 1) // EMBED_BATCH_SIZE}"
         )
-        embeddings = _call_embeddings_api(batch)
+        embeddings = _call_embeddings_api(batch, expected_dimension=len(all_embeddings[0]) if all_embeddings else None)
         all_embeddings.extend(embeddings)
     return all_embeddings
 

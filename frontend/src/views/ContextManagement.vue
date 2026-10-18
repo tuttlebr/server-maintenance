@@ -60,7 +60,7 @@ const uploadForm = reactive({ file: null, title: "", device_id: route.query.devi
 const phaseLabel = computed(() => ({ loading: "Loading sources", embedding: "Creating embeddings", inserting: "Updating search index" }[status.phase] || "Re-indexing context"));
 const progressPercent = computed(() => status.total ? Math.min(100, Math.round((status.progress / status.total) * 100)) : 5);
 
-async function loadStatus() { try { const result = await getContextStatus(); if (disposed) return; Object.assign(status, result); if (status.running) schedulePoll(); } catch (error) { window.$toast?.error("Couldn't load context index status", error); } }
+async function loadStatus() { try { const result = await getContextStatus(); if (disposed) return; Object.assign(status, result); } catch (error) { if (!disposed) window.$toast?.error("Couldn't load context index status", error); } finally { if (!disposed && status.running) schedulePoll(); } }
 async function load() { if (disposed) return; loading.value = true; try { [documents.value, devices.value] = await Promise.all([getContextDocuments(), getDevices()]); if (!disposed) await loadStatus(); } catch (error) { window.$toast?.error("Couldn't load context", error); } finally { loading.value = false; } }
 function schedulePoll() { clearTimeout(pollTimer); if (disposed) return; pollTimer = setTimeout(async () => { await loadStatus(); if (!status.running) await load(); }, 1500); }
 async function startReindex() { try { const result = await reindexContext(); window.$toast?.success(result.detail); status.running = true; status.error = null; schedulePoll(); } catch (error) { window.$toast?.error("Couldn't start context re-index", error); } }

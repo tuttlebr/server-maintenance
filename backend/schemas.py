@@ -148,6 +148,13 @@ class DeviceUpdate(BaseModel):
     kubernetes_context: str | None = Field(default=None, max_length=253)
     kubernetes_node_name: str | None = Field(default=None, max_length=253)
 
+    @field_validator("display_name")
+    @classmethod
+    def validate_display_name(cls, value):
+        if value is not None and not value.strip():
+            raise ValueError("display name must not be blank")
+        return value.strip() if value is not None else None
+
     @field_validator("kubernetes_context", "kubernetes_node_name")
     @classmethod
     def validate_cluster_identity(cls, value):
@@ -159,7 +166,7 @@ class DeviceUpdate(BaseModel):
     @classmethod
     def validate_endpoint(cls, value: str | None) -> str | None:
         value = _strip(value)
-        if value and not ADDRESS_RE.fullmatch(value):
+        if value is not None and not ADDRESS_RE.fullmatch(value):
             raise ValueError("endpoint contains unsupported characters")
         return value
 

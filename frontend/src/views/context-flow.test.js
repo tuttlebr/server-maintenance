@@ -50,3 +50,41 @@ test('a context status response after navigation cannot restart background polli
   await flush();
   assert.equal(polls.length, 0);
 });
+
+test('a transient status failure does not stop an ongoing reindex poll', async t => {
+  const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'localStorage', {configurable:true, value:{getItem:()=> 'test'}});
+  Object.defineProperty(globalThis, 'window', {configurable:true, value:{location:{hash:''}}});
+  t.after(() => {
+    if (originalStorage) Object.defineProperty(globalThis, 'localStorage', originalStorage); else delete globalThis.localStorage;
+    if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow); else delete globalThis.window;
+  });
+  const polls = new Map();
+  const realTimeout = globalThis.setTimeout, realClear = globalThis.clearTimeout;
+  t.mock.method(globalThis, 'setTimeout', (callback, delay, ...args) => {
+    if (delay !== 1500) return realTimeout(callback, delay, ...args);
+    const id = {}; polls.set(id, callback); return id;
+  });
+  t.mock.method(globalThis, 'clearTimeout', id => {polls.delete(id); realClear(id);});
+  let statusRequests = 0;
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (url.endsWith('/context/status')) {
+      statusRequests++;
+      if (statusRequests === 2) throw new Error('Temporary disconnect');
+      return new Response(JSON.stringify({running:statusRequests < 3}));
+    }
+    return new Response('[]');
+  });
+  const router = createRouter({history:createMemoryHistory(),routes:[{path:'/context',component:ContextManagement}]});
+  await router.push('/context'); await router.isReady();
+  const app = renderer.createApp(ContextManagement).use(router);
+  app.mount(element('root')); t.after(()=> app.unmount()); await flush();
+  assert.equal(polls.size, 1);
+  for (let attempt=0; attempt<2; attempt++) {
+    const [id, callback] = polls.entries().next().value;
+    polls.delete(id); await callback(); await flush();
+    assert.equal(polls.size, attempt === 0 ? 1 : 0);
+  }
+  assert.ok(statusRequests >= 3);
+});

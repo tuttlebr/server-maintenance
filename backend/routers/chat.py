@@ -3,11 +3,13 @@
 import asyncio
 import json
 import logging
+import threading
 import urllib.error
 import urllib.request
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from backend.auth import get_current_user
 from backend.config import settings
@@ -59,6 +61,29 @@ def chat_status(user: str = Depends(get_current_user)):
     return {"available": False, "mode": "none"}
 
 
+def _completion_chunks(response):
+    """Both providers must acknowledge completion; EOF alone is not success."""
+    for raw_line in response:
+        line = raw_line.decode("utf-8").strip()
+        if not line or line.startswith((":", "event:", "id:", "retry:", "intermediate_data:")):
+            continue
+        data = line[5:].lstrip() if line.startswith("data:") else line
+        if data == "[DONE]":
+            return
+        try:
+            chunk = json.loads(data)
+        except (ValueError, TypeError) as exc:
+            raise RuntimeError("Chat provider returned invalid stream data") from exc
+        if not isinstance(chunk, dict):
+            raise RuntimeError("Chat provider returned an invalid response")
+        if chunk.get("error") or chunk.get("code") == "workflow_error":
+            error = chunk.get("error")
+            message = error.get("message") if isinstance(error, dict) else error
+            raise RuntimeError(f"Chat provider failed: {message or chunk.get('message') or 'Unknown error'}")
+        yield chunk
+    raise RuntimeError("Chat provider disconnected before completion. Please retry.")
+
+
 def _stream_from_nat(messages: list[dict]):
     """Stream chat completions from NeMo Agent Toolkit.
 
@@ -90,18 +115,8 @@ def _stream_from_nat(messages: list[dict]):
     tool_state: dict[int, dict] = {}
 
     with urllib.request.urlopen(req, timeout=120) as resp:
-        for raw_line in resp:
-            line = raw_line.decode("utf-8").strip()
-            if not line or line.startswith("intermediate_data:"):
-                continue
-            data_str = line[6:] if line.startswith("data: ") else line
-            if data_str == "[DONE]":
-                break
+        for chunk in _completion_chunks(resp):
             try:
-                chunk = json.loads(data_str)
-                if chunk.get("code") == "workflow_error":
-                    message = chunk.get("message") or "Unknown workflow error"
-                    raise RuntimeError(f"Chat workflow failed: {message}")
                 choice = chunk.get("choices", [{}])[0]
                 delta = choice.get("delta", {})
 
@@ -191,15 +206,8 @@ def _stream_from_llm(messages: list[dict], query: str):
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=120) as resp:
-        for raw_line in resp:
-            line = raw_line.decode("utf-8").strip()
-            if not line or not line.startswith("data: "):
-                continue
-            data_str = line[6:]
-            if data_str == "[DONE]":
-                break
+        for chunk in _completion_chunks(resp):
             try:
-                chunk = json.loads(data_str)
                 delta = chunk.get("choices", [{}])[0].get("delta", {})
                 content = delta.get("content", "")
                 if content:
@@ -215,54 +223,66 @@ async def chat(body: ChatRequest, user: str = Depends(get_current_user)):
 
     use_nat = settings.nat_base_url and await asyncio.to_thread(_nat_available)
 
-    async def event_stream():
-        queue: asyncio.Queue = asyncio.Queue()
-        loop = asyncio.get_event_loop()
-
-        def _produce():
-            def emit(item):
-                # asyncio.Queue is not thread-safe; wake the event loop as well
-                # as enqueuing events from this blocking HTTP worker.
-                loop.call_soon_threadsafe(queue.put_nowait, item)
-
+    def produce_events():
+        try:
+            yield {"type": "status", "text": "Reading current job records and relevant Ansible output"}
             try:
-                emit({"type": "status", "text": "Reading current job records and relevant Ansible output"})
+                evidence = job_context.get_job_context(
+                    messages, job_id=body.job_id, device_id=body.device_id,
+                )
+            except Exception:
+                logger.exception("Could not load job evidence for chat")
+                evidence = "Job evidence is unavailable for this request."
+            grounded_messages = messages[:-1] + [{
+                "role": "user",
+                "content": (
+                    "<fleet_job_evidence>\n" + evidence + "\n</fleet_job_evidence>\n\n"
+                    "User question:\n" + query
+                ),
+            }]
+            generator = _stream_from_nat(grounded_messages) if use_nat else _stream_from_llm(grounded_messages, query)
+            # yield-from propagates close() to the provider on disconnect.
+            yield from generator
+        except Exception as exc:
+            yield {"type": "error", "message": str(exc)}
+
+    async def event_stream():
+        producer = produce_events()
+        stopped = threading.Event()
+        producer_lock = threading.Lock()
+        finished = object()
+
+        def next_event():
+            with producer_lock:
+                if stopped.is_set():
+                    return finished
                 try:
-                    evidence = job_context.get_job_context(
-                        messages, job_id=body.job_id, device_id=body.device_id,
-                    )
-                except Exception:
-                    logger.exception("Could not load job evidence for chat")
-                    evidence = "Job evidence is unavailable for this request."
-                # Keep evidence separate from the system policy and only attach
-                # it to this turn, so follow-ups refresh running/stale records.
-                grounded_messages = messages[:-1] + [{
-                    "role": "user",
-                    "content": (
-                        "<fleet_job_evidence>\n" + evidence + "\n</fleet_job_evidence>\n\n"
-                        "User question:\n" + query
-                    ),
-                }]
-                gen = _stream_from_nat(grounded_messages) if use_nat else _stream_from_llm(grounded_messages, query)
-                for event in gen:
-                    emit(event)
-            except Exception as exc:
-                emit(exc)
-            finally:
-                emit(None)
+                    return next(producer, finished)
+                finally:
+                    # Cancellation may arrive during a blocking provider read.
+                    # The worker that owns the generator closes it when that
+                    # read returns, without consuming another event.
+                    if stopped.is_set():
+                        producer.close()
 
-        loop.run_in_executor(None, _produce)
-
-        while True:
-            item = await queue.get()
-            if item is None:
-                yield "event: done\ndata: {}\n\n"
-                break
-            if isinstance(item, Exception):
-                yield f"data: {json.dumps({'type': 'error', 'message': str(item)})}\n\n"
-                yield "event: done\ndata: {}\n\n"
-                break
-            yield f"data: {json.dumps(item)}\n\n"
+        try:
+            # Read only when the client consumes an event. No detached producer
+            # or unbounded queue survives a disconnected or slow client.
+            while True:
+                item = await run_in_threadpool(next_event)
+                if item is finished:
+                    break
+                yield f"data: {json.dumps(item)}\n\n"
+                if item.get("type") == "error":
+                    return
+            yield "event: done\ndata: {}\n\n"
+        finally:
+            stopped.set()
+            if producer_lock.acquire(blocking=False):
+                try:
+                    producer.close()
+                finally:
+                    producer_lock.release()
 
     if not use_nat and not _direct_llm_available():
         raise HTTPException(status_code=503, detail="Chat is not configured. Set AI_HELPER or NAT_BASE_URL environment variables.")

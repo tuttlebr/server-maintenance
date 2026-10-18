@@ -19,7 +19,9 @@ export const flush=async()=>{for(let i=0;i<12;i++){await new Promise(resolve=>se
 export async function compileView(url) {
  const source=await readFile(url,'utf8');
  const {descriptor}=parse(source);
- let code=compileScript(descriptor,{id:url.pathname,inlineTemplate:true}).content;
+ // This renderer models nodes, not browser HTML parsing. Keep static template
+ // nodes as VNodes so tests can inspect their controls and event handlers too.
+ let code=compileScript(descriptor,{id:url.pathname,inlineTemplate:true,templateOptions:{compilerOptions:{hoistStatic:false}}}).content;
  const imports=[...code.matchAll(/from ['"]([^'"]+)['"]/g)];
  for(const [,name] of imports) {
   const resolved=name.endsWith('.vue')?await compileView(new URL(name,url)):name.startsWith('.')?new URL(name,url).href:import.meta.resolve(name);

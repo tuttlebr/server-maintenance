@@ -45,6 +45,7 @@ RUN pip install --no-cache-dir /wheels/cryptography-46.0.7-*.whl && \
 COPY config.yml .
 COPY prepare_config.py .
 COPY ingest.py .
+COPY embedding_response.py .
 COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh && chown -R nat:nat /app /home/nat
 

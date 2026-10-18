@@ -20,12 +20,12 @@ async function mount({query={devices:'1'},failOnce=false,csvError=false,jobState
    inspected++;if(inspectFailOnce&&inspected===1)throw new Error('Connection lost');
    return respond({job_id:'inspect-job'});
   }
-  if(url==='/api/v2/jobs/inspect-job')return respond({job_id:'inspect-job',playbook:'access_inspect.yml',status:inspectState,device_results:[{hostname:'node-01',status:inspectState,detail:inspectState==='failed'?'SSH connection failed':undefined}],result_artifacts:[]});
+  if(/^\/api\/v2\/jobs\/inspect-job(?:\/progress)?$/.test(url))return respond({job_id:'inspect-job',playbook:'access_inspect.yml',status:inspectState,device_results:[{hostname:'node-01',status:inspectState,detail:inspectState==='failed'?'SSH connection failed':undefined}],result_artifacts:[]});
   if(options.method==='POST'||options.method==='PUT'){
    posted++;if(failOnce&&posted===1)throw new Error('Connection lost');
    return respond({job_id:'user-job'});
   }
-  if(url==='/api/v2/jobs/user-job'){
+  if(/^\/api\/v2\/jobs\/user-job(?:\/progress)?$/.test(url)){
    const state=Array.isArray(jobState)?jobState[Math.min(jobPolls++,jobState.length-1)]:jobState;
    return respond({job_id:'user-job',playbook:'user_management.yml',status:state,phase:state==='running'?'checking_health':'complete',device_results:[{hostname:'node-01',status:state,detail:state==='partial'?'Account sam does not exist':undefined}],result_artifacts:[]});
   }
@@ -196,7 +196,8 @@ test('reopening a completed job refreshes accounts while an active job resumes p
  for(const state of ['success','running']){
   const v=await mount({initialMode:'accounts',query:{devices:'1',job:'user-job'},jobState:state});try{
    assert.equal(inspections(v).length,state==='success'?1:0);
-   assert.ok(v.calls.some(c=>c.url==='/api/v2/jobs/user-job'));
+   assert.ok(v.calls.some(c=>c.url==='/api/v2/jobs/user-job/progress'));
+   assert.equal(v.calls.some(c=>c.url==='/api/v2/jobs/user-job'),state==='success');
   }finally{v.app.unmount();}
  }
 });

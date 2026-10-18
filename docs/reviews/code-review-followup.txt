@@ -1,0 +1,126 @@
+Codebase review and remediation follow-up
+2026-10-18; starting commit 1e10365
+
+This review builds on docs/codebase-review.txt. Review and validation ran locally.
+No deployment, live fleet operation, or remote device change was run.
+
+Correctness and root causes
+
+1. Discovery silently skipped legitimate hostnames beginning with storage_,
+   gpu_usage_, or driver_upgrade_. An old filename heuristic remained after
+   discovery moved into job-specific directories. Remove that heuristic and
+   validate the report's target identity. Three regressions verify these devices
+   become online with fresh facts.
+
+2. Both upstream chat adapters treated EOF as success and ignored provider error
+   envelopes. Share completion/error parsing, require the provider's completion
+   marker, and report malformed or truncated responses without a success event.
+   Keep the current partial text available to the frontend.
+
+3. Chat used a detached producer and unbounded queue. It could continue consuming
+   provider output after navigation and accumulate data for slow clients. Consume
+   one event at a time in a worker and close the generator on disconnect. A lock
+   coordinates cancellation during a blocking read; that in-flight read can take
+   until the provider responds or the existing HTTP timeout expires, then closes
+   without consuming another event. Tests exercise both cancellation timings.
+
+4. Job SSE held a request-scoped database session for the entire connection and
+   performed synchronous reads on the event loop. Use short sessions and worker
+   reads, reuse the standard bearer-auth dependency, bound file reads to 64 KiB,
+   and preserve incomplete lines and UTF-8 sequences between chunks. Tests check
+   pool connections are returned between events and completion follows all output.
+
+5. Activity retained a disconnected stream's partial buffer even after retrieving
+   the saved final log. Final observations now replace that prefix. Ignore late
+   stream/detail responses from prior selections and prevent an older running
+   observation from overwriting a completed one.
+
+6. Knowledge-source polling stopped permanently after one transient request
+   failure. Continue polling while indexing is active and stop after completion
+   or navigation. Mounted Vue tests cover failure recovery and teardown.
+
+7. Blank endpoint updates silently fell back to the inventory hostname, potentially
+   targeting another address. Reject whitespace-only endpoints and display names.
+   Reject switching to password authentication without a new or existing password
+   instead of silently remaining in key-auth mode.
+
+8. Embedding clients only sorted response indexes. Missing/duplicate indexes,
+   empty/nonfinite vectors, or inconsistent dimensions could misassociate vectors
+   with documents or reach an index rebuild before failure. Validate complete
+   batches and dimensions before writes. Python job-log and NAT ingestion share
+   one validator; the Rust ingester enforces the same contract before rebuilding.
+   Package the Python validator in both container images.
+
+9. Python job-log fields used character slices for byte-limited Milvus strings.
+   Truncate UTF-8 safely at the actual byte limits so non-ASCII metadata remains
+   insertable. Regression covers a multibyte boundary.
+
+Latency and conflicting implementations
+
+- Add GET /api/v2/jobs/{job_id}/progress. It defers logs/extra_vars at the SQL
+  layer and never reads artifact files. Operations and account workflows use
+  this endpoint while active, retrieving full details on completion. A regression
+  proves a job with a 1 MB log has a progress response under 2 KB without selecting
+  the log or loading artifacts. Existing full-detail APIs remain available.
+- Activity refreshes are scheduled after the prior refresh finishes. Completed
+  details are no longer downloaded every five seconds; active output still uses
+  SSE. Correct the obsolete claim that adverse pages contain 50 jobs per status.
+  Pagination already reset correctly on filter changes; retain and test it.
+- Index writes previously waited on their serial lock inside the default worker
+  pool also used by fleet execution. Give indexing a dedicated single worker so
+  embedding outages cannot consume those fleet workers. A concurrency regression
+  demonstrates fleet work completing while an index write is blocked.
+- Fleet index snapshots no longer select every historical log/extra_vars blob.
+  Backfill releases loaded logs between jobs and closes query cursors before
+  network calls. Timestamp ties have a stable job-ID ordering for snapshots.
+- Index counts use bounded metadata requests without loading the vector index.
+  Cache observations for 30 seconds, throttle failures, retain the last successful
+  count, and avoid overwriting a concurrently completed reindex observation.
+
+Dead code and design cleanup
+
+- Delete exactPreviewTargets and its isolated test. It had no production caller
+  and duplicated package approval with weaker validation than validPackageCheck.
+  The active package-approval tests remain.
+- Delete duplicate streaming authentication, duplicate chat framing loops, the
+  detached queue producer, and the old manual Milvus URI splitter/connection
+  helper. Shared implementations now cover their active callers.
+- Preserve supported backend/CLI operations and historical job renderers; absence
+  from the current main UI alone does not make them dead code.
+
+Tests and hooks
+
+- Add meaningful regressions with real SQLite queries, API requests, streamed
+  output, cancellation, worker contention, provider responses, and mounted Vue
+  views. Update existing fixtures for the lightweight polling contract.
+- The Vue test renderer now keeps static nodes as VNodes because it has no browser
+  HTML parser. That allows real Activity controls and log behavior to be tested.
+  Production compilation separately checks Vue's normal optimization path.
+- Add the production frontend build to pre-push. Exercise the shell hook with a
+  valid first file and invalid second file to confirm every argument is checked.
+  Verify required push gates run without filename filtering.
+- Retain relevant existing tests, including legacy CLI maintenance coverage.
+  Ansible is installed for the complete backend gate; no tests are skipped.
+
+Validation of the final tree
+
+- Backend: 541 tests plus 34 subtests; one upstream Starlette/httpx deprecation
+  warning. Frontend: 89 tests and production build. Rust: seven tests on stable
+  and the declared minimum Rust 1.85.0.
+- Complete pre-commit and pre-push gates, including new files; Ruff; Python
+  compilation; git diff --check; dependency consistency via pip check.
+- Ansible minimum-profile lint, all playbook syntax checks, and the localhost
+  DGX detection fixture (28 successful tasks, no changes).
+- Compose configuration validation without starting services.
+- Backend pip-audit, frontend npm audit, and Cargo audit: no known vulnerabilities
+  reported for the audited dependency sets.
+
+Limits
+
+No full container-image build, browser visual audit, live NAT/Milvus/embedding
+integration, real SSH/Reachy operation, or production load benchmark was run.
+The dependency audits do not cover the separately built NAT dependency set or
+container OS packages. Query/payload/concurrency improvements are supported by
+regressions, not by production end-to-end latency measurements. Index rebuilds
+remain non-atomic for failures that occur during writes; this change validates
+provider output before rebuilding, not after a partial Milvus write.

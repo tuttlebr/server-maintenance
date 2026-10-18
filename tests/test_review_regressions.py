@@ -73,11 +73,11 @@ def test_signed_tokens_validate_claim_types_and_expiry(header, payload, monkeypa
         tokens.decode_token(f"{message}.{tokens._sign(message, 'test-secret')}", "test-secret")
 
 
-def test_empty_bearer_stream_header_returns_401(database):
-    from fastapi import HTTPException
-    with pytest.raises(HTTPException) as caught:
-        asyncio.run(jobs.stream_job_output("any", authorization="Bearer   ", db=database[0]))
-    assert caught.value.status_code == 401
+def test_empty_bearer_stream_header_returns_401():
+    app = FastAPI()
+    app.include_router(jobs.router)
+    with TestClient(app) as client:
+        assert client.get("/api/v2/jobs/any/stream", headers={"Authorization": "Bearer   "}).status_code == 401
 
 
 def test_job_lists_omit_logs_without_loading_them_and_details_retain_them(database, client):

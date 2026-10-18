@@ -679,14 +679,18 @@ make check
 
 Use Node 22 and Rust 1.85 or newer for `make check`. Pre-commit runs file hygiene,
 secret detection, Python correctness checks, and syntax checks for every shell
-file. Pre-push runs both test suites. CI runs the same checks plus Ansible lint,
+file. Pre-push runs both test suites and the production frontend build. CI runs the same checks plus Ansible lint,
 playbook syntax, production frontend compilation, Rust tests on stable and
 1.85, and dependency audits. The backend test wrapper requires Ansible instead
 of silently skipping the playbook tests. Run `pre-commit run --all-files
 --hook-stage pre-push` to exercise the complete installed push gate.
 
 Job list and overview responses contain summaries; fetch `/api/v2/jobs/{job_id}`
-for full logs and result artifacts. The fleet dashboard polls devices and a
+for full logs and result artifacts. Progress polling uses
+`/api/v2/jobs/{job_id}/progress`, which avoids loading logs and result files;
+the frontend fetches full details when the job completes. Activity stops polling
+completed details and uses the saved final log after a stream disconnect.
+The fleet dashboard polls devices and a
 single job overview independently, retaining the last successful observation
 if either request fails.
 

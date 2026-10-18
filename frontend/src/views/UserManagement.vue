@@ -84,7 +84,7 @@
 <script setup>
 import {computed,nextTick,onMounted,onUnmounted,ref,watch} from 'vue';
 import {useRoute,useRouter} from 'vue-router';
-import {getDevices,getUsers,bulkAddUsers,bulkUpdateUsers,inspectAccounts,getJob} from '../api.js';
+import {getDevices,getUsers,bulkAddUsers,bulkUpdateUsers,inspectAccounts,getJobProgress} from '../api.js';
 import CsvUpload from '../components/CsvUpload.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import {accountPlacement,privilegeLabel} from '../utils/access.js';
@@ -156,7 +156,7 @@ async function inspect(){
 async function pollJob(id,refreshCompletedInspection=false){
   clearTimeout(timer);pollError.value='';
   try{
-    const result=await getJob(id);
+    const result=await getJobProgress(id);
     if(disposed || job.value?.job_id!==id)return;
     job.value=result;
     if(ACTIVE.includes(result.status))timer=setTimeout(()=>pollJob(id),2000);

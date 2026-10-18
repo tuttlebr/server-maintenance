@@ -9,6 +9,7 @@ the embedding endpoint was unavailable.
 from __future__ import annotations
 
 import json
+import asyncio
 import logging
 import re
 import threading
@@ -16,7 +17,11 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+
+from sqlalchemy.orm import defer
+from nat.embedding_response import validate_embeddings
 
 from backend.config import settings
 from backend.database import SessionLocal
@@ -34,6 +39,9 @@ MAX_INDEXED_LOG_CHARS = 200_000
 RECENT_JOB_COUNT = 20
 
 _INDEX_LOCK = threading.Lock()
+# Slow embedding/index writes must not occupy the shared executor used by SSH
+# jobs and API streams. Index writes are serialized already.
+_INDEX_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="job-log-index")
 _RECONCILE_LOCK = threading.Lock()
 _reconcile_thread: threading.Thread | None = None
 
@@ -57,6 +65,10 @@ class IndexDocument:
     job_id: str
     status: str
     finished_at: str
+
+
+async def index_completed_job(job_id: str) -> bool:
+    return await asyncio.get_running_loop().run_in_executor(_INDEX_EXECUTOR, ingest_completed_job, job_id)
 
 
 def ingest_completed_job(job_id: str) -> bool:
@@ -114,17 +126,23 @@ def reconcile_terminal_jobs() -> int:
         try:
             jobs = (
                 db.query(Job)
+                .options(defer(Job.output_log), defer(Job.extra_vars))
                 .filter(Job.status.in_(TERMINAL_STATUSES))
                 .order_by(Job.finished_at.asc(), Job.created_at.asc())
                 .all()
             )
-            missing_jobs = [job for job in jobs if job.job_id not in indexed_job_ids]
-            for job in missing_jobs:
-                _index_documents(build_job_documents(job))
+            missing_count = 0
+            for job in jobs:
+                if job.job_id not in indexed_job_ids:
+                    _index_documents(build_job_documents(job))
+                    # Release loaded logs between jobs, and never hold an open
+                    # SQLite cursor across an embedding/network request.
+                    db.expire(job, ["output_log"])
+                    missing_count += 1
             _index_documents(build_fleet_snapshot_documents(db))
         finally:
             db.close()
-    return len(missing_jobs)
+    return missing_count
 
 
 def build_job_documents(job: Job) -> list[IndexDocument]:
@@ -175,8 +193,9 @@ def build_fleet_snapshot_documents(db) -> list[IndexDocument]:
     hosts = db.query(Host).order_by(Host.hostname.asc()).all()
     jobs = (
         db.query(Job)
+        .options(defer(Job.output_log), defer(Job.extra_vars))
         .filter(Job.status.in_(TERMINAL_STATUSES))
-        .order_by(Job.finished_at.desc(), Job.created_at.desc())
+        .order_by(Job.finished_at.desc(), Job.created_at.desc(), Job.id.desc())
         .all()
     )
 
@@ -283,9 +302,9 @@ def _index_documents(documents: list[IndexDocument]) -> None:
 
     data = [
         [document.document_id for document in documents],
-        [document.source[:256] for document in documents],
-        [document.heading[:512] for document in documents],
-        [document.text[:16_384] for document in documents],
+        [_utf8_prefix(document.source, 256) for document in documents],
+        [_utf8_prefix(document.heading, 512) for document in documents],
+        [_utf8_prefix(document.text, 16_384) for document in documents],
         [document.job_id[:64] for document in documents],
         [document.status[:32] for document in documents],
         [document.finished_at[:64] for document in documents],
@@ -393,6 +412,7 @@ def _embed_texts(texts: list[str]) -> list[list[float]]:
     all_vectors: list[list[float]] = []
     api_key = settings.embed_api_key or settings.ai_helper_api_key
     base_url = settings.embed_base_url or settings.ai_helper_base_url
+    dimension = settings.embed_dim
     for start in range(0, len(texts), EMBED_BATCH_SIZE):
         batch = texts[start : start + EMBED_BATCH_SIZE]
         request = urllib.request.Request(
@@ -419,9 +439,14 @@ def _embed_texts(texts: list[str]) -> list[list[float]]:
             raise RuntimeError(
                 f"Job-log embedding request failed ({exc.code}): {body}"
             ) from exc
-        rows = sorted(result["data"], key=lambda item: item["index"])
-        all_vectors.extend(item["embedding"] for item in rows)
+        vectors = validate_embeddings(result, len(batch), dimension)
+        dimension = len(vectors[0])
+        all_vectors.extend(vectors)
     return all_vectors
+
+
+def _utf8_prefix(value: str, max_bytes: int) -> str:
+    return value.encode("utf-8")[:max_bytes].decode("utf-8", errors="ignore")
 
 
 def _embedding_api_configured() -> bool:

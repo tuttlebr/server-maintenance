@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,6 +30,7 @@ _INSERT_RE = re.compile(r"Inserting Milvus batch (?P<current>\d+)/(?P<total>\d+)
 _INGESTED_RE = re.compile(r"Ingested (?P<count>\d+) chunk")
 
 _state_lock = threading.Lock()
+_last_count_check = float("-inf")
 _state: dict = {
     "running": False,
     "phase": "idle",  # idle | loading | embedding | inserting | success | error
@@ -45,10 +47,18 @@ _state: dict = {
 
 def get_status() -> dict:
     """Return a snapshot of the indexer state. Safe to call from any thread."""
+    global _last_count_check
     with _state_lock:
         snap = dict(_state)
-    if not snap["running"] and snap["last_count"] is None:
-        snap["last_count"] = _peek_count()
+        peek = not snap["running"] and time.monotonic() - _last_count_check >= 30
+        if peek:
+            _last_count_check = time.monotonic()
+    if peek:
+        count = _peek_count()
+        with _state_lock:
+            if count is not None and not _state["running"] and _state["last_indexed_at"] == snap["last_indexed_at"]:
+                _state["last_count"] = count
+            snap = dict(_state)
     return snap
 
 
@@ -82,33 +92,22 @@ def _set(**kwargs) -> None:
 def _peek_count() -> int | None:
     """Return current entity count from Milvus. None on connection/import errors."""
     try:
-        from pymilvus import Collection, utility
+        from pymilvus import MilvusClient
     except ImportError:
         return None
 
+    client = None
     try:
-        _connect()
-        if not utility.has_collection(COLLECTION_NAME):
+        client = MilvusClient(uri=settings.milvus_uri, timeout=2)
+        if not client.has_collection(COLLECTION_NAME, timeout=2):
             return 0
-        coll = Collection(COLLECTION_NAME)
-        try:
-            coll.load()
-            return int(coll.num_entities)
-        except Exception:
-            return None
+        # Counting records does not require loading the vector index into memory.
+        return int(client.get_collection_stats(COLLECTION_NAME, timeout=2)["row_count"])
     except Exception:
         return None
-
-
-def _connect() -> None:
-    from pymilvus import connections
-
-    uri = settings.milvus_uri
-    host = uri.replace("http://", "").replace("https://", "").split(":")[0]
-    port_part = uri.replace("http://", "").replace("https://", "").split(":")
-    port = port_part[-1] if len(port_part) > 1 else "19530"
-    if not connections.has_connection("default"):
-        connections.connect("default", host=host, port=port, timeout=2)
+    finally:
+        if client is not None:
+            client.close()
 
 
 def _run_reindex_inner() -> None:

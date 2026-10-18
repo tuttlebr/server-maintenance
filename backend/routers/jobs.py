@@ -1,20 +1,19 @@
 import asyncio
+import codecs
 import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, defer
 
 from backend.auth import get_current_user
-from backend.config import settings
 from backend.database import SessionLocal, get_db
 from backend.models import Job
 from backend.schemas import JobResponse, JobSummaryResponse
 from backend.services.ansible_runner import cancel_job, get_log_path
 from backend.services.execution_state import TERMINAL_STATUSES, release_devices
 from backend.services.job_results import get_job_results
-from backend.services.tokens import TokenError, decode_token
 
 router = APIRouter(prefix="/api/v2/jobs", tags=["activity"])
 
@@ -79,6 +78,16 @@ def get_job(
     return response.model_copy(update={"result_artifacts": get_job_results(job.job_id)})
 
 
+@router.get("/{job_id}/progress", response_model=JobSummaryResponse)
+def get_job_progress(
+    job_id: str, db: Session = Depends(get_db), user: str = Depends(get_current_user),
+):
+    job = _summary_query(db).filter(Job.job_id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    return job
+
+
 @router.post("/{job_id}/cancel")
 async def cancel_job_output(
     job_id: str,
@@ -109,53 +118,48 @@ async def cancel_job_output(
 
 @router.get("/{job_id}/stream")
 async def stream_job_output(
-    job_id: str, authorization: str | None = Header(default=None), db: Session = Depends(get_db),
+    job_id: str, user: str = Depends(get_current_user),
 ):
     """Stream job output as Server-Sent Events. Auth via Authorization: Bearer header
     (frontend uses fetch streaming so headers are available)."""
-    token = None
-    if authorization and authorization.lower().startswith("bearer "):
-        token = authorization[7:].strip()
-    if not token:
-        raise HTTPException(status_code=401, detail="Token required")
-    try:
-        payload = decode_token(token, settings.secret_key)
-        if not payload.get("sub"):
-            raise HTTPException(status_code=401, detail="Invalid token")
-    except TokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+    def read_status():
+        # A stream must not retain a request-scoped DB connection while idle.
+        with SessionLocal() as db:
+            return db.query(Job.status).filter(Job.job_id == job_id).scalar()
 
-    job = db.query(Job).filter(Job.job_id == job_id).first()
-    if not job:
+    if await asyncio.to_thread(read_status) is None:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     log_path = get_log_path(job_id)
 
+    def read_output(pos):
+        if not log_path.exists():
+            return b"", pos
+        with log_path.open("rb") as handle:
+            handle.seek(pos)
+            return handle.read(64 * 1024), handle.tell()
+
     async def event_stream():
         pos = 0
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        pending = ""
         while True:
-            # Re-check job status from DB
-            fresh_db = SessionLocal()
-            try:
-                job_status = fresh_db.query(Job.status).filter(Job.job_id == job_id).scalar() or "failed"
-            finally:
-                fresh_db.close()
-
-            # Read new content from log file
-            if log_path.exists():
-                with open(log_path, "r") as f:
-                    f.seek(pos)
-                    new_content = f.read()
-                    pos = f.tell()
-
-                if new_content:
-                    # SSE format: each line prefixed with "data: ", blank line terminates event
-                    for line in new_content.splitlines():
-                        yield f"data: {line}\n"
-                    yield "\n"
+            job_status = await asyncio.to_thread(read_status) or "failed"
+            new_content, pos = await asyncio.to_thread(read_output, pos)
+            if new_content:
+                pending += decoder.decode(new_content)
+                lines = pending.split("\n")
+                pending = lines.pop()
+                if lines:
+                    yield "".join(f"data: {line.rstrip(chr(13))}\n" for line in lines) + "\n"
+                # Drain the rest before signalling completion, without a poll delay.
+                continue
 
             # If job is done, send final event and stop
             if job_status in TERMINAL_STATUSES:
+                pending += decoder.decode(b"", final=True)
+                if pending:
+                    yield f"data: {pending}\n\n"
                 yield f"event: done\ndata: {job_status}\n\n"
                 break
 

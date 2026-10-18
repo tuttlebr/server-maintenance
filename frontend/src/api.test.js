@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {getJob, login, streamChat, streamJobOutput} from './api.js';
+import {getJob, getJobProgress, login, streamChat, streamJobOutput} from './api.js';
 import {readSse} from './utils/sse.js';
 
 function setup(t) {
@@ -15,6 +15,24 @@ function setup(t) {
   });
   return () => cleared;
 }
+
+test('progress polling downloads full details only after terminal state', async t => {
+  setup(t);
+  let status = 'running';
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async url => {
+    calls.push(url);
+    return new Response(JSON.stringify(url.endsWith('/progress') ? {job_id:'job',status} : {job_id:'job',status,output_log:'complete log',result_artifacts:[{report_type:'packages'}]}));
+  });
+  const running = await getJobProgress('job');
+  assert.equal(running.status, 'running');
+  assert.deepEqual(calls, ['/api/v2/jobs/job/progress']);
+  status = 'partial';
+  const complete = await getJobProgress('job');
+  assert.equal(complete.output_log, 'complete log');
+  assert.equal(complete.result_artifacts.length, 1);
+  assert.deepEqual(calls.slice(1), ['/api/v2/jobs/job/progress', '/api/v2/jobs/job']);
+});
 
 test('login preserves invalid credential errors instead of reporting an expired session', async t => {
   const cleared = setup(t);

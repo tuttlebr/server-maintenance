@@ -80,7 +80,7 @@ import PackageResults from '../components/PackageResults.vue';
 import InspectionResults from '../components/InspectionResults.vue';
 import DiscoveryResults from '../components/DiscoveryResults.vue';
 import {visibleStorageOutcomes} from '../utils/storage.js';
-import { getDevices, getOperations, runOperation, getJobs, getJob } from '../api.js';
+import { getDevices, getOperations, runOperation, getJobs, getJob, getJobProgress } from '../api.js';
 import { parseDeviceIds } from '../utils/fleetOverview.js';
 import { formatLongTime } from '../utils/time.js';
 import { SCAN, needsScan, CHECK, INSTALL, CLEANUP, REBOOT, STORAGE, GPU, REACHY_RESTART, PLAYBOOKS, ACTION_IDS, ACTIVE, namesFor, sameTargets, validPackageCheck, blockers, packageCount, statusLabel, updateLabel } from '../utils/maintenance.js';
@@ -212,7 +212,7 @@ async function submit(request) {
 async function pollJob(id) {
   clearTimeout(timer); const current = ++generation;
   try {
-    const result = await getJob(id);
+    const result = await getJobProgress(id);
     if (disposed || current !== generation) return;
     now.value = Date.now(); job.value = result; pollError.value = '';
     if (ACTIVE.includes(result.status)) timer = setTimeout(() => pollJob(id), 2000);

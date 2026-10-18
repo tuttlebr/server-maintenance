@@ -341,6 +341,10 @@ def update_device(
         raise HTTPException(
             status_code=400, detail="Use the verified Reachy SSH setup to change maintenance access",
         )
+    if payload.passwordless_ssh is False and not (
+        payload.ssh_password or (payload.ssh_password is None and device.encrypted_ansible_password)
+    ):
+        raise HTTPException(status_code=422, detail="An SSH password is required to use password authentication")
     if payload.display_name is not None:
         device.display_name = payload.display_name.strip()
     if payload.endpoint is not None:

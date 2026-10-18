@@ -5,7 +5,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::Parser;
 use futures::stream::{FuturesUnordered, StreamExt};
 use regex::Regex;
@@ -147,6 +147,33 @@ struct EmbeddingItem {
     embedding: Vec<f32>,
 }
 
+impl EmbeddingResponse {
+    fn validated(mut self, count: usize) -> Result<Vec<Vec<f32>>> {
+        if self.data.len() != count {
+            bail!("embedding response count does not match the input batch");
+        }
+        self.data.sort_by_key(|item| item.index);
+        for (index, item) in self.data.iter().enumerate() {
+            if item.index != index {
+                bail!("embedding indexes must cover each input exactly once");
+            }
+        }
+        let vectors: Vec<_> = self.data.into_iter().map(|item| item.embedding).collect();
+        validate_vector_dimensions(&vectors, None)?;
+        Ok(vectors)
+    }
+}
+
+fn validate_vector_dimensions(vectors: &[Vec<f32>], expected: Option<usize>) -> Result<usize> {
+    let dimension = expected.or_else(|| vectors.first().map(Vec::len)).unwrap_or(0);
+    if dimension == 0 || vectors.is_empty() || vectors.iter().any(|vector| {
+        vector.len() != dimension || vector.iter().any(|value| !value.is_finite())
+    }) {
+        bail!("embedding vectors must be finite, nonempty, and have consistent dimensions");
+    }
+    Ok(dimension)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -267,21 +294,7 @@ async fn main() -> Result<()> {
         EmbeddingClient::new(client.clone(), config.clone(), cli.embed_batch_size.max(1));
     let texts: Vec<&str> = chunks.iter().map(|chunk| chunk.text.as_str()).collect();
     let embeddings = embedder.embed_texts(&texts).await?;
-    let actual_dim = embeddings
-        .first()
-        .map(|embedding| embedding.len())
-        .ok_or_else(|| anyhow!("embedding API returned no vectors"))?;
-
-    if let Some(configured_dim) = config.embed_dim {
-        if configured_dim != actual_dim {
-            bail!(
-                "EMBED_DIM={} but {} returned {} dimensions",
-                configured_dim,
-                config.embed_model,
-                actual_dim
-            );
-        }
-    }
+    let actual_dim = validate_vector_dimensions(&embeddings, config.embed_dim)?;
 
     let milvus = MilvusClient::new(
         client,
@@ -1104,10 +1117,9 @@ impl EmbeddingClient {
             bail!("embedding API returned {status}: {body}");
         }
 
-        let mut parsed: EmbeddingResponse = serde_json::from_str(&body)
+        let parsed: EmbeddingResponse = serde_json::from_str(&body)
             .with_context(|| format!("invalid embedding response: {body}"))?;
-        parsed.data.sort_by_key(|item| item.index);
-        Ok(parsed.data.into_iter().map(|item| item.embedding).collect())
+        parsed.validated(texts.len())
     }
 }
 
@@ -1325,6 +1337,39 @@ impl MilvusClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn embedding_rows_are_mapped_by_index() {
+        let response: EmbeddingResponse = serde_json::from_value(json!({"data": [
+            {"index": 1, "embedding": [2.0, 3.0]},
+            {"index": 0, "embedding": [0.0, 1.0]}
+        ]})).unwrap();
+        assert_eq!(response.validated(2).unwrap(), vec![vec![0.0, 1.0], vec![2.0, 3.0]]);
+    }
+
+    #[test]
+    fn invalid_embedding_batches_are_rejected_before_index_rebuild() {
+        for data in [
+            json!([]),
+            json!([{"index": 0, "embedding": [1.0]}]),
+            json!([{"index": 0, "embedding": [1.0]}, {"index": 0, "embedding": [2.0]}]),
+            json!([{"index": 1, "embedding": [1.0]}, {"index": 2, "embedding": [2.0]}]),
+            json!([{"index": 0, "embedding": []}, {"index": 1, "embedding": []}]),
+            json!([{"index": 0, "embedding": [1.0]}, {"index": 1, "embedding": [1.0, 2.0]}]),
+        ] {
+            let response: EmbeddingResponse = serde_json::from_value(json!({"data": data})).unwrap();
+            assert!(response.validated(2).is_err());
+        }
+    }
+
+    #[test]
+    fn dimensions_are_validated_across_batches_and_against_configuration() {
+        assert!(validate_vector_dimensions(&[vec![1.0], vec![2.0, 3.0]], None).is_err());
+        assert!(validate_vector_dimensions(&[vec![1.0]], Some(2)).is_err());
+        assert!(validate_vector_dimensions(&[vec![f32::INFINITY]], None).is_err());
+        assert!(validate_vector_dimensions(&[vec![f32::NAN]], None).is_err());
+        assert_eq!(validate_vector_dimensions(&[vec![1.0, 2.0]], Some(2)).unwrap(), 2);
+    }
 
     #[test]
     fn seed_scope_uses_guide_directory_for_index_pages() {

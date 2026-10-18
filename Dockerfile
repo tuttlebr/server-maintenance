@@ -53,6 +53,7 @@ COPY --chown=fleet:fleet alembic.ini ./alembic.ini
 # Copy docs for fallback chat
 COPY --chown=fleet:fleet docs/ ./docs/
 COPY --chown=fleet:fleet nat/config.yml ./nat/config.yml
+COPY --chown=fleet:fleet nat/embedding_response.py ./nat/embedding_response.py
 
 # Copy Rust documentation ingester
 COPY --from=docs-ingester-build /build/tools/dgx-doc-ingester/target/release/fleet-doc-ingester /usr/local/bin/fleet-doc-ingester

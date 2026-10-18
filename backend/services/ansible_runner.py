@@ -475,8 +475,6 @@ def _process_scan_results(
     db = SessionLocal()
     try:
         for scan_file in scan_dir.glob("*.json"):
-            if scan_file.name.startswith(("storage_", "gpu_usage_", "driver_upgrade_")):
-                continue
             try:
                 report = json.loads(scan_file.read_text())
                 hostname = report.get("hostname")
@@ -947,7 +945,7 @@ async def run_playbook(
                 release_devices(state_db, job_id)
                 state_db.commit()
             try:
-                await asyncio.to_thread(job_log_indexer.ingest_completed_job, job_id)
+                await job_log_indexer.index_completed_job(job_id)
             except Exception:
                 logger.exception("Failed to index completed job %s", job_id)
                 job_log_indexer.start_reconcile()

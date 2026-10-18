@@ -1,4 +1,5 @@
 import { readSse } from "./utils/sse.js";
+import { ACTIVE } from "./utils/maintenance.js";
 
 const BASE = "/api/v2";
 
@@ -136,6 +137,11 @@ export const getJobs = (params = {}) => {
   return request(`/jobs${qs ? "?" + qs : ""}`);
 };
 export const getJob = (jobId) => request(`/jobs/${jobId}`);
+// Active jobs need only state. Fetch logs/artifacts once completion is observed.
+export async function getJobProgress(jobId) {
+  const progress = await request(`/jobs/${jobId}/progress`);
+  return ACTIVE.includes(progress.status) ? progress : getJob(jobId);
+}
 
 // Chat
 export const getChatStatus = () => request("/chat/status");

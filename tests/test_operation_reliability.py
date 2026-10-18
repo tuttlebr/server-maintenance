@@ -255,7 +255,6 @@ def test_scan_status_requires_valid_reports(database, tmp_path, monkeypatch, val
 def test_partial_jobs_are_filterable_and_finish_streaming(database, monkeypatch):
     from backend.routers import jobs
     monkeypatch.setattr(jobs, 'SessionLocal', database)
-    monkeypatch.setattr(jobs, 'decode_token', lambda *args: {'sub': 'test'})
     with database() as db:
         partial = job(status='partial', output_log='mixed results')
         db.add_all([partial, job(status='success'), job(status='failed')])
@@ -264,7 +263,7 @@ def test_partial_jobs_are_filterable_and_finish_streaming(database, monkeypatch)
         assert jobs.get_job(partial.job_id, db=db, user='test').status == 'partial'
 
         async def scenario():
-            response = await jobs.stream_job_output(partial.job_id, authorization='Bearer test', db=db)
+            response = await jobs.stream_job_output(partial.job_id, user='test')
             return [event async for event in response.body_iterator]
 
         assert asyncio.run(asyncio.wait_for(scenario(), timeout=2)) == ['event: done\ndata: partial\n\n']

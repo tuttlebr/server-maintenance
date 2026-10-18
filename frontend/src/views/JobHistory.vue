@@ -20,7 +20,7 @@
     </div>
 
     <div class="activity-filters"><label>Operation<select v-model="filterPlaybook" class="form-select"><option value="">All operations</option><option v-for="playbook in operationOptions" :key="playbook" :value="playbook">{{ operationLabel(playbook) }}</option></select></label><label>Device in loaded jobs<input v-model="filterTarget" type="search" class="form-input" placeholder="Inventory name" /></label><label>Created within<select v-model="filterPeriod" class="form-select"><option value="">Any time</option><option value="24h">24 hours</option><option value="7d">7 days</option></select></label></div>
-    <p class="activity-coverage">{{ loading ? 'Refreshing activity…' : `Page ${page + 1}: ${visibleJobs.length} visible jobs` }}. <span v-if="filterStatus === 'adverse'">Each page loads up to 50 jobs per adverse status. </span>Device and time filters apply to this loaded page. <router-link to="/">Back to Overview</router-link></p>
+    <p class="activity-coverage">{{ loading ? 'Refreshing activity…' : `Page ${page + 1}: ${visibleJobs.length} visible jobs` }}. <span v-if="filterStatus === 'adverse'">Each page loads up to 50 adverse jobs. </span>Device and time filters apply to this loaded page. <router-link to="/">Back to Overview</router-link></p>
     <p v-if="loadError" class="callout callout-warn" role="status">Activity could not be refreshed. {{ jobs.length ? 'Showing the last loaded jobs.' : 'Job history is unavailable.' }}</p>
     <p v-if="detailError" class="callout callout-danger" role="alert">The selected job could not be loaded. <button class="btn btn-ghost btn-sm" @click="showJob(route.query.job)">Retry job</button></p>
     <div v-if="visibleJobs.length" class="table-wrapper">
@@ -168,7 +168,8 @@ import PackageResults from "../components/PackageResults.vue";
 import { ref, watch, onMounted, onUnmounted, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import AnsiToHtml from "ansi-to-html";
-import { getJobs, getJob, streamJobOutput, cancelJob } from "../api.js";
+import { getJobs, getJob, getJobProgress, streamJobOutput, cancelJob } from "../api.js";
+import { ACTIVE } from "../utils/maintenance.js";
 import StatusBadge from "../components/StatusBadge.vue";
 import { formatTargetList, operationLabel, OPERATION_LABELS } from "../utils/devices.js";
 import { targetNames } from "../utils/fleetOverview.js";
@@ -177,6 +178,7 @@ import { formatLongTime, ageInMs } from "../utils/time.js";
 const jobs = ref([]);
 const cancelling = ref(false);
 let refreshTimer; let disposed = false;
+let detailSequence = 0;
 function canCancel(job) { return !job.playbook.startsWith("reachy.") && (job.status === "pending" || (job.status === "running" && job.execution_kind === "read_only")); }
 async function requestCancel(job) { cancelling.value = true; try { await cancelJob(job.job_id); expandedJob.value = await getJob(job.job_id); await load(); } catch(e) { window.$toast?.error("Could not cancel job", e); } finally { cancelling.value = false; } }
 const route = useRoute();
@@ -292,25 +294,30 @@ async function startStream(jobId) {
   liveOutput.value = "";
   streaming.value = true;
   streamController = new AbortController();
+  const controller = streamController;
+  const sequence = detailSequence;
 
   await streamJobOutput(jobId, {
     signal: streamController.signal,
     onLine: (line) => {
-      if (expanded.value !== jobId) return;
+      if (disposed || streamController !== controller || expanded.value !== jobId) return;
       liveOutput.value += line + "\n";
     },
     onDone: async () => {
-      if (expanded.value !== jobId) return;
+      if (disposed || streamController !== controller || expanded.value !== jobId) return;
       streaming.value = false;
       streamController = null;
       await load();
       try {
         const result = await getJob(jobId);
-        if (expanded.value === jobId) expandedJob.value = result;
+        if (!disposed && sequence === detailSequence && expanded.value === jobId) {
+          expandedJob.value = result;
+          liveOutput.value = '';
+        }
       } catch { /* ignore */ }
     },
     onError: (err) => {
-      if (expanded.value !== jobId) return;
+      if (disposed || streamController !== controller || expanded.value !== jobId) return;
       streaming.value = false;
       streamController = null;
       window.$toast?.error("Stream disconnected", err);
@@ -324,6 +331,7 @@ async function toggleExpand(jobId) {
 }
 
 async function showJob(jobId) {
+  const sequence = ++detailSequence;
   stopStream();
   detailError.value = null;
   expanded.value = typeof jobId === 'string' ? jobId : null;
@@ -335,12 +343,12 @@ async function showJob(jobId) {
   if (!expanded.value) return;
   try {
     const job = await getJob(jobId);
-    if (expanded.value !== jobId) return;
+    if (disposed || sequence !== detailSequence || expanded.value !== jobId) return;
     expandedJob.value = job;
     if (!jobs.value.some((item) => item.job_id === jobId)) jobs.value.unshift(job);
     if (['running', 'pending', 'cancelling'].includes(job.status)) startStream(jobId);
   } catch (e) {
-    if (expanded.value === jobId) {
+    if (!disposed && sequence === detailSequence && expanded.value === jobId) {
       detailError.value = e;
       window.$toast?.error("Couldn't load job details", e);
     }
@@ -361,10 +369,32 @@ function resultTitle(type) {
   return ({ assessment: "Maintenance assessment", driver: "Driver update", gpu: "GPU usage", storage: "Storage analysis", packages: "Apt updates", apt_install: "Apt installation", cleanup: "Container cache", reboot: "Node reboot", services: "System services", accounts: "Account state", kubernetes: "Kubernetes recovery" })[type] || "Result";
 }
 
-onUnmounted(() => { disposed = true; loadSequence++; stopStream(); clearInterval(refreshTimer); });
+async function refreshActivity() {
+  try {
+    await load();
+    if (disposed || !expanded.value || !expandedJob.value || !ACTIVE.includes(expandedJob.value.status)) return;
+    const id = expanded.value;
+    const sequence = detailSequence;
+    try {
+      const job = await getJobProgress(id);
+      if (disposed || sequence !== detailSequence || expanded.value !== id) return;
+      if (!ACTIVE.includes(expandedJob.value.status) && ACTIVE.includes(job.status)) return;
+      expandedJob.value = { ...expandedJob.value, ...job };
+      if (!ACTIVE.includes(job.status)) {
+        stopStream();
+        // A disconnected stream can leave a prefix that masks the saved log.
+        liveOutput.value = '';
+      }
+      if (!jobs.value.some(j => j.job_id === id)) jobs.value.unshift(job);
+    } catch { /* preserve the last observation on a transient failure */ }
+  } finally {
+    if (!disposed) refreshTimer = setTimeout(refreshActivity, 5000);
+  }
+}
+onUnmounted(() => { disposed = true; loadSequence++; stopStream(); clearTimeout(refreshTimer); });
 watch(() => [filterStatus.value, filterPlaybook.value, page.value], load);
 watch(() => route.query.job, showJob);
-onMounted(async () => { await load(); if (disposed) return; await showJob(route.query.job); if (disposed) return; refreshTimer = setInterval(async () => { await load(); if (expanded.value) { const id = expanded.value; try { const job = await getJob(id); if (expanded.value === id) { expandedJob.value = job; if (!jobs.value.some(j => j.job_id === id)) jobs.value.unshift(job); } } catch { /* preserve the last observation on a transient failure */ } } }, 5000); });
+onMounted(async () => { await load(); if (disposed) return; await showJob(route.query.job); if (!disposed) refreshTimer = setTimeout(refreshActivity, 5000); });
 </script>
 
 <style scoped>
