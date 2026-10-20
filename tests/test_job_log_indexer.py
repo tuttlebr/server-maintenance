@@ -25,6 +25,19 @@ def _test_session_factory():
 
 
 class JobLogDocumentTests(unittest.TestCase):
+    def test_job_documents_redact_key_and_ansible_credential_assignments(self):
+        for name in ("SECRET_KEY", "HOST_SECRET_KEY", "ansible_become_pass", "ansible_ssh_pass", "ssh_passphrase"):
+            with self.subTest(name=name):
+                job = Job(
+                    job_id="credential-job", playbook="host_facts.yml", status="failed",
+                    error_summary=f'{name}="summary credential"',
+                    output_log=f'{name}="log credential"\nTask failed: connection refused',
+                )
+                text = "\n".join(document.text for document in job_log_indexer.build_job_documents(job))
+                self.assertNotIn("summary credential", text)
+                self.assertNotIn("log credential", text)
+                self.assertIn("Task failed: connection refused", text)
+
     def test_job_documents_include_terminal_metadata_and_redact_common_secrets(self):
         now = datetime(2026, 8, 5, 12, 0, tzinfo=timezone.utc)
         job = Job(

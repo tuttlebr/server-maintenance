@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "repository_reviewed_through": "3fcce1e77757f7845e90c8fc93db25d84b02e773",
+  "docker_samples_reviewed_through": {
+    "etcd": "2026-10-20T15:09:33.960647Z",
+    "milvus": "2026-10-20T15:09:33.960647Z",
+    "nat": "2026-10-20T15:09:33.960647Z",
+    "ssh-agent-proxy": "2026-10-20T15:09:33.960647Z",
+    "web": "2026-10-20T15:09:33.960647Z"
+  },
+  "last_run": {
+    "at": "2026-10-20T15:30:09.854499Z",
+    "starting_head": "3fcce1e77757f7845e90c8fc93db25d84b02e773",
+    "scope": "Initial incremental review of 1e10365..3fcce1e (31 changed files), related callers, existing skill/README work, and bounded current Compose samples. Earlier history was context, not a completed codebase audit.",
+    "status": "partial",
+    "status_reason": "Agreed source range reviewed and supported local fixes validated; runtime completion, deployment and Rust checks remain open.",
+    "dirty_worktree_coverage": {
+      "initial": [
+        "README.md",
+        ".agents/"
+      ],
+      "reviewed": "Preserved and reviewed prior skill creation and README invocation instructions; reviewed all local fixes and new tests from this run."
+    },
+    "fixed_findings": [
+      "JOB-EVIDENCE-REDACTION",
+      "ACTIVITY-CANCEL-SELECTION",
+      "FLEET-HELP-CATALOG"
+    ],
+    "checks": [
+      {
+        "command": "bash scripts/check-backend.sh",
+        "status": "passed",
+        "result": "543 tests and 39 subtests; no skips; one upstream Starlette/httpx deprecation warning"
+      },
+      {
+        "command": "npm --prefix frontend test",
+        "status": "passed",
+        "result": "90 tests, no skips"
+      },
+      {
+        "command": "npm --prefix frontend run build",
+        "status": "passed"
+      },
+      {
+        "command": ".venv/bin/pre-commit run --all-files",
+        "status": "passed",
+        "result": "All tracked-file hygiene, YAML, Ruff, shell and credential hooks passed"
+      },
+      {
+        "command": ".venv/bin/python -m compileall -q backend scripts nat",
+        "status": "passed"
+      },
+      {
+        "command": ".venv/bin/python -m pip check",
+        "status": "passed"
+      },
+      {
+        "command": "docker compose config --quiet",
+        "status": "passed"
+      },
+      {
+        "command": "python3 -m unittest discover -s .agents/skills/server-maintenance-review-and-remediate/scripts -p 'test_*.py'",
+        "status": "passed",
+        "result": "11 collector tests"
+      },
+      {
+        "command": "cargo test --locked --manifest-path tools/dgx-doc-ingester/Cargo.toml",
+        "status": "unavailable",
+        "result": "cargo not found on PATH or in standard local install locations; no Rust source changed this run"
+      },
+      {
+        "command": "git diff --check",
+        "status": "passed"
+      },
+      {
+        "command": ".venv/bin/pre-commit run --files <all changed and new skill files>",
+        "status": "passed",
+        "result": "Included untracked skill resources; all applicable hooks passed"
+      },
+      {
+        "command": "skill-creator/scripts/quick_validate.py .agents/skills/server-maintenance-review-and-remediate",
+        "status": "passed"
+      },
+      {
+        "command": "Collector read_state, skill link and private evidence permission checks",
+        "status": "passed"
+      }
+    ],
+    "documentation": [
+      "README.md: fresh-context/index filtering behavior and limits; preserved skill invocation section",
+      "docs/fleet-manager-ui.md: current catalog, Reachy restart, account discovery and sudo CSV behavior",
+      "nat/config.yml: canonical prompt reconciled with current service"
+    ],
+    "learning": [
+      "Refined L001 to compare the canonical Fleet Help prompt and UI guide with the current operation catalog.",
+      "Refined L003 to guard cancellation follow-ups as well as streaming and polling responses.",
+      "Added L005 for shared evidence redaction, credential-name variations and unfinished key blocks, with synthetic regression evidence.",
+      "Updated workflow/evidence guide to preserve first-run scope provenance and bound displayed log characters, including nested outputs.",
+      "Updated repository guide with shared prompt loading and sanitizer ownership; collector behavior unchanged."
+    ],
+    "limits": [
+      "Not a whole-repository audit; history before the explicit comparison base was not reviewed exhaustively.",
+      "No browser visual audit, image build/deployment, real fleet operation, completion/embedding integration call or load benchmark.",
+      "Ansible playbooks and dependency manifests were unchanged; standalone Ansible lint/all-playbook syntax, dependency vulnerability audits and Rust minimum-version gate were not rerun. Full backend suite included available isolated Ansible fixtures.",
+      "Pre-push tests/build ran directly once; the pre-push wrapper was not rerun redundantly."
+    ],
+    "evidence_path": "data/skill-reviews/20261020T150933Z-qfa35c_8"
+  },
+  "pending_work": [
+    {
+      "id": "PROVIDER-COMPLETION-UNVERIFIED",
+      "summary": "Historical NAT upstream connection failures; provider model listing now succeeds but chat completion remains unverified.",
+      "evidence": "data/skill-reviews/20261020T150933Z-qfa35c_8/evidence.json:docker.logs.nat; runtime-checks.json",
+      "next_check": "Correlate the next normal Fleet Help request with NAT/provider logs; perform a minimal synthetic completion only with authorization covering the provider call. Investigate networking if connection failures recur."
+    },
+    {
+      "id": "RUNTIME-SAMPLE-GAPS",
+      "summary": "Initial samples are capped to 24 hours; Milvus reached its 500-line tail cap. Current web/NAT/proxy containers began during that window; predecessor logs were not collected.",
+      "evidence": "data/skill-reviews/20261020T150933Z-qfa35c_8/evidence.json:docker.logs and docker.inspection",
+      "next_check": "Use a focused service/time window if a concrete symptom needs missing history; preserve these exclusions when interpreting cursors. An empty proxy log sample does not verify remote SSH."
+    },
+    {
+      "id": "DEPLOYMENT-VERIFICATION",
+      "summary": "Backend/frontend fixes are local; NAT retains its startup configuration. Mounted prompt/docs source has changed; existing retrieval documents were not rebuilt.",
+      "evidence": "Dockerfile; docker-compose.yml; nat/entrypoint.sh; data/skill-reviews/20261020T150933Z-qfa35c_8/ledger.json",
+      "next_check": "When deployment is authorized, rebuild/recreate web and reload NAT, then verify Activity cancellation and fresh Fleet Help context. Reindex current documentation if authorized; do not assume existing vectors were rewritten."
+    },
+    {
+      "id": "RUST-VALIDATION-UNAVAILABLE",
+      "summary": "Rust changes in the reviewed commit were inspected, but cargo is unavailable in this checkout environment.",
+      "evidence": "tools/dgx-doc-ingester/src/main.rs; .github/workflows/ci.yml",
+      "next_check": "Run cargo test --locked --manifest-path tools/dgx-doc-ingester/Cargo.toml and the Rust 1.85.0 gate when a toolchain or CI result is available."
+    }
+  ],
+  "baseline_scope": {
+    "comparison_base": "1e1036548bf001d86a216cedcde21f63557e1c92",
+    "first_reviewed_head": "3fcce1e77757f7845e90c8fc93db25d84b02e773",
+    "established_at": "2026-10-20T15:29:23.722469Z",
+    "scope": "Initial incremental review of 1e10365..3fcce1e (31 changed files), related callers, existing skill/README work, and bounded current Compose samples. Earlier history was context, not a completed codebase audit."
+  }
+}

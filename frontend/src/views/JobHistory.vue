@@ -180,7 +180,29 @@ const cancelling = ref(false);
 let refreshTimer; let disposed = false;
 let detailSequence = 0;
 function canCancel(job) { return !job.playbook.startsWith("reachy.") && (job.status === "pending" || (job.status === "running" && job.execution_kind === "read_only")); }
-async function requestCancel(job) { cancelling.value = true; try { await cancelJob(job.job_id); expandedJob.value = await getJob(job.job_id); await load(); } catch(e) { window.$toast?.error("Could not cancel job", e); } finally { cancelling.value = false; } }
+async function requestCancel(job) {
+  if (cancelling.value) return;
+  const id = job.job_id, sequence = detailSequence;
+  cancelling.value = true;
+  try {
+    await cancelJob(id);
+    if (disposed) return;
+    const result = await getJob(id);
+    if (!disposed && sequence === detailSequence && expanded.value === id
+        && !(expandedJob.value && !ACTIVE.includes(expandedJob.value.status) && ACTIVE.includes(result.status))) {
+      expandedJob.value = result;
+      if (!ACTIVE.includes(result.status)) {
+        stopStream();
+        liveOutput.value = '';
+      }
+    }
+    if (!disposed) await load();
+  } catch (error) {
+    if (!disposed) window.$toast?.error("Could not cancel job", error);
+  } finally {
+    cancelling.value = false;
+  }
+}
 const route = useRoute();
 const router = useRouter();
 const loading = ref(true), loadError = ref(null), detailError = ref(null), hasNextPage = ref(false);

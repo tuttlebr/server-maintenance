@@ -146,6 +146,30 @@ class JobContextTests(unittest.TestCase):
         for secret in ("artifact-secret", "log-secret", "another-secret", "summary-secret", "bearer-secret"):
             self.assertNotIn(secret, text)
 
+    def test_fresh_context_redacts_secret_keys_and_incomplete_private_key(self):
+        directory = Path(self.temp.name) / "job-results" / FIRST
+        directory.mkdir(parents=True)
+        (directory / "storage.json").write_text(json.dumps({
+            "schema_version": 1, "report_type": "storage", "hostname": "node-1",
+            "HOST_SECRET_KEY": "artifact key material", "mounts": [],
+        }))
+        with self.sessions() as db:
+            db.query(Job).filter_by(job_id=FIRST).update({
+                "status": "running", "output_log": None, "finished_at": None,
+                "error_summary": 'SECRET_KEY="summary key material"',
+            })
+            db.commit()
+        log = Path(self.temp.name) / "logs" / f"{FIRST}.log"
+        log.parent.mkdir()
+        log.write_text(
+            'TASK [Connect]\nansible_become_pass="sudo credential"\n'
+            + "-----BEGIN " + "PRIVATE KEY-----\nunfinished key material\n"
+        )
+        text = self.context("Explain", job_id=FIRST)
+        for secret in ("artifact key material", "summary key material", "sudo credential", "unfinished key material"):
+            self.assertNotIn(secret, text)
+        self.assertIn("TASK [Connect]", text)
+
     def test_context_budget_and_failure_in_middle_of_huge_log(self):
         with self.sessions() as db:
             db.query(Job).filter_by(job_id=FIRST).update({"output_log": (

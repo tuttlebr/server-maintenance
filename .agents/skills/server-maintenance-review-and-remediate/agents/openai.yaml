@@ -1,0 +1,4 @@
+interface:
+  display_name: "Fleet Review and Remediation"
+  short_description: "Learn from repo changes and Docker runtime evidence"
+  default_prompt: "Use $server-maintenance-review-and-remediate to review repository changes and Docker logs, fix supported issues, and update documentation and the skill’s learning state."

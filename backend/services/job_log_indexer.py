@@ -46,12 +46,13 @@ _RECONCILE_LOCK = threading.Lock()
 _reconcile_thread: threading.Thread | None = None
 
 _PRIVATE_KEY_RE = re.compile(
-    r"-----BEGIN [^-\n]*PRIVATE KEY-----.*?-----END [^-\n]*PRIVATE KEY-----",
+    r"-----BEGIN [^-\n]*PRIVATE KEY-----.*?(?:-----END [^-\n]*PRIVATE KEY-----|\Z)",
     re.IGNORECASE | re.DOTALL,
 )
 _BEARER_RE = re.compile(r'''(?i)(authorization["']?\s*[:=]\s*["']?bearer\s+)[^\s,"';}]+''')
 _SECRET_ASSIGNMENT_RE = re.compile(
-    r"(?i)(\b(?:[\w-]*[_-])?(?:password|passwd|secret|token|api[_-]?key)\b[\"']?\s*[:=]\s*)"
+    r"(?i)(\b(?:[\w-]*[_-])?(?:password|passwd|passphrase|secret(?:[_-]?key)?|token|"
+    r"api[_-]?key|private[_-]?key|(?:become|ssh|sudo)[_-]?pass)\b[\"']?\s*[:=]\s*)"
     r'''("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}]+)'''
 )
 

@@ -5,7 +5,7 @@ import {element, renderer, text, find, flush, compileView} from '../../test-supp
 
 const {default: Activity} = await import(await compileView(new URL('./JobHistory.vue', import.meta.url)));
 
-async function mount(t, {status = 'running', query = {job:'job'}} = {}) {
+async function mount(t, {status = 'running', query = {job:'job'}, intercept} = {}) {
   const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   Object.defineProperty(globalThis, 'localStorage', {configurable:true, value:{getItem:()=> 'test'}});
@@ -25,8 +25,10 @@ async function mount(t, {status = 'running', query = {job:'job'}} = {}) {
   });
   t.mock.method(globalThis, 'clearTimeout', id => {timers.delete(id); realClear(id);});
   const job = () => ({job_id:'job',playbook:'host_facts.yml',status:current,target_devices:'node',result_artifacts:[],device_results:[],created_at:new Date().toISOString()});
-  t.mock.method(globalThis, 'fetch', async url => {
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
     calls.push(url);
+    const intercepted = await intercept?.(url, options);
+    if (intercepted) return intercepted;
     if (url.endsWith('/stream')) return new Response('data: streamed prefix\n\n'); // interrupted connection
     if (url.startsWith('/api/v2/jobs?')) return new Response(JSON.stringify([job()]));
     if (url.endsWith('/progress')) return new Response(JSON.stringify(job()));
@@ -65,4 +67,29 @@ test('changing an Activity filter resets pagination and uses the selected backen
   assert.equal(new URL(url, 'http://test').searchParams.get('offset'), '0');
   assert.equal(new URL(url, 'http://test').searchParams.get('status'), 'adverse');
   assert.match(text(view.root), /50 adverse jobs/);
+});
+
+test('a late cancellation response cannot replace the selected job details', async t => {
+  let finishCancellation;
+  const cancelled = new Promise(resolve => { finishCancellation = resolve; });
+  const view = await mount(t, {status:'pending', intercept: (url) => {
+    if (url.endsWith('/cancel')) return cancelled;
+    if (url === '/api/v2/jobs/other') return new Response(JSON.stringify({
+      job_id:'other', playbook:'host_facts.yml', status:'success', target_devices:'other-node',
+      result_artifacts:[], device_results:[], error_summary:'Selected job evidence',
+    }));
+  }});
+  const cancel = find(view.root, node => node.tag === 'button' && text(node).includes('Cancel queued job'));
+  assert.ok(cancel);
+  const request = cancel.props.onClick();
+  await flush();
+  await view.router.push({path:'/activity', query:{job:'other'}});
+  await flush();
+  assert.match(text(view.root), /Selected job evidence/);
+  finishCancellation(new Response(JSON.stringify({detail:'Cancellation requested'})));
+  await request;
+  await flush();
+  assert.equal(view.router.currentRoute.value.query.job, 'other');
+  assert.match(text(view.root), /Selected job evidence/);
+  assert.equal(view.calls.filter(url => url.endsWith('/cancel')).length, 1);
 });

@@ -573,6 +573,12 @@ Completed operations are indexed separately in `fleet_job_logs`. Every terminal 
 
 Both Fleet Help chat modes also read fresh job evidence directly from the activity database for every question, independently of embeddings or Milvus. Expand a run in Activity and choose **Ask Fleet Help** to discuss that exact job. Chat on a device page scopes recent runs to that device; explicit job IDs or device names in a question take precedence. Follow-ups refresh the evidence. The supplied context includes job metadata, per-host recaps, structured results, and bounded log excerpts that prioritize failed tasks, matching output and the log tail. Running logs are marked partial, and omitted output is identified. These records describe observed operation results, not live device health.
 
+Fresh job context and newly indexed job documents filter recognized credential
+assignments, including `SECRET_KEY`, `HOST_SECRET_KEY`, and Ansible SSH/sudo
+password fields. Private-key blocks are filtered even when a running log ends
+before the closing marker. This is pattern-based filtering of model/search
+context, not a guarantee that arbitrary log text is free of secrets.
+
 NAT uses `tool_calling_agent` to preserve conversation history, the system prompt and streamed tool calls. Optional Kubernetes and UniFi MCP definitions are omitted at startup unless both their server URL and token are configured; missing optional settings no longer prevent Fleet Help from starting. Embedding failures can still limit historical semantic search, but do not prevent fresh job evidence from reaching either chat mode.
 
 Fleet Help's sole system prompt is `workflow.system_prompt` in `nat/config.yml`. NAT uses it directly, and the direct-LLM fallback reads the same text for each request. Supplied documentation, uploaded context, and job evidence stay separate from system instructions. The prompt favors direct answers, evidence-backed diagnoses, and a small number of useful next steps. NAT can search fleet guidance, completed job history, and NVIDIA Dynamo, AIPerf, NVCF, and DSX documentation. Kubernetes and UniFi definitions are not exposed to the agent unless explicitly added to `workflow.tool_names`; the fallback has no callable tools.
@@ -694,6 +700,27 @@ The fleet dashboard polls devices and a
 single job overview independently, retaining the last successful observation
 if either request fails.
 
+
+## Repository review and learning
+
+Use `$server-maintenance-review-and-remediate` in Codex to review changes since
+the previous review, inspect Docker logs, fix supported issues, and reconcile
+documentation. The versioned [skill](.agents/skills/server-maintenance-review-and-remediate/SKILL.md)
+maintains verified lessons, a repository guide, and a run checkpoint. Every run
+updates its learning state; workflow rules change when evidence supports them.
+It runs when invoked, with no background scheduler.
+
+To collect evidence without performing a review:
+
+```bash
+python3 .agents/skills/server-maintenance-review-and-remediate/scripts/collect_evidence.py --repo .
+```
+
+Collection reads the existing Compose stack and writes bounded, best-effort
+redacted evidence under ignored `data/skill-reviews/`. These files can still
+contain private operational details. Collection does not advance the review
+checkpoint or change containers, indexes, or managed hosts. Review runs keep
+those live actions separate from local code, documentation, and skill updates.
 
 ## Embedding Test
 
