@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     ansible_job_timeout_seconds: int = 3600
     ansible_max_concurrent_jobs: int = 4
     ansible_forks: int = 10
+    automatic_scan_enabled: bool = True
     ssh_known_hosts_file: Path = Path("/app/data/ssh/known_hosts")
     ssh_known_hosts_seed_file: Path | None = None
     host_secret_key: str = ""

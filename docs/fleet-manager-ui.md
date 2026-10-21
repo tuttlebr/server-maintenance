@@ -33,6 +33,8 @@ Device Summary shows identity, connection, reachability, and last discovery. Har
 
 Scanning an SSH device runs the portable facts playbook. It probes Linux, storage, architecture, system and motherboard identity, BIOS, CPU topology, network interfaces, virtualization, NVIDIA GPU availability, Fabric Manager, MIG, and local Kubernetes membership indicators without querying the cluster or assuming capabilities from a product name. Scanning Reachy checks daemon connectivity and state without moving the robot. A scan refreshes discovered facts but does not replace manual attributes.
 
+Fleet Manager scans devices automatically every hour by default while the service is running. It checks for due devices at startup and every minute, defers busy devices until idle, and retries offline devices hourly. Recent manual scans count toward the hourly interval, including across service restarts. Activity labels scheduled jobs **Automatic hourly scan** and retains their results and errors. You can still scan manually for an immediate refresh. Automatic discovery preserves recovery requirements and failed devices remain blocked. Administrators can disable the schedule with `AUTOMATIC_SCAN_ENABLED=false` in `.env` and recreate the web container.
+
 ## Managing Context
 
 Use **Context** to upload UTF-8 `.txt`, `.md`, or `.markdown` documents. A source may apply to the fleet generally or be associated with one device. For example, associate a motherboard owner's manual with `daedalus-02` and add its exact motherboard model under **Devices → daedalus-02 → Context**. The generated index source includes the device name, current discovered identity, manual attributes, and document content together.

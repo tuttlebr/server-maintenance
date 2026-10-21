@@ -1,4 +1,5 @@
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
@@ -23,6 +24,7 @@ from backend.services.login_throttle import (
     record_login_failure,
 )
 from backend.services.secret_store import encrypt_existing_host_secrets
+from backend.services.scan_scheduler import run_scan_scheduler
 from backend.services.ssh_enrollment import initialize_known_hosts
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -55,6 +57,7 @@ async def lifespan(app: FastAPI):
 
     executor_lock = acquire_executor_lock()
     set_executor_lease(executor_lock)
+    scan_scheduler = None
     try:
         init_db()
         encrypt_existing_host_secrets()
@@ -64,13 +67,22 @@ async def lifespan(app: FastAPI):
             regenerate_inventory(db)
         # Reconcile in the background so startup stays available during outages.
         start_job_log_reconcile()
+        if settings.automatic_scan_enabled:
+            scan_scheduler = asyncio.create_task(run_scan_scheduler(), name="automatic-device-scans")
         yield
     finally:
         try:
-            await shutdown_executor()
+            # Stop enqueueing before shutting down jobs or releasing the lease.
+            if scan_scheduler is not None:
+                scan_scheduler.cancel()
+                with suppress(asyncio.CancelledError):
+                    await scan_scheduler
         finally:
-            executor_lock.close()
-            set_executor_lease(None)
+            try:
+                await shutdown_executor()
+            finally:
+                executor_lock.close()
+                set_executor_lease(None)
 
 
 app = FastAPI(
