@@ -163,6 +163,7 @@ def build_job_documents(job: Job) -> list[IndexDocument]:
             f"Duration seconds: {job.duration_seconds if job.duration_seconds is not None else 'unknown'}",
             f"Triggered by: {job.triggered_by or 'unknown'}",
             f"Error summary: {_one_line(job.error_summary or 'none', 2_000)}",
+            "Per-device outcomes:\n" + _bounded_field(_sanitize_text(json.dumps(job.device_results)), 2_000),
             f"Ansible recap:\n{_bounded_field(_sanitize_text(job.recap or 'not available'), 6_000)}",
         ]
     )
@@ -207,8 +208,9 @@ def build_fleet_snapshot_documents(db) -> list[IndexDocument]:
             if hostname in registered and hostname not in latest_by_host:
                 latest_by_host[hostname] = job
 
-    counts = {status: 0 for status in TERMINAL_STATUSES}
-    outcome_hosts = {status: [] for status in TERMINAL_STATUSES}
+    counts = {status: 0 for status in ("success", "failed", "unknown")}
+    outcome_hosts: dict[str, list[str]] = {}
+    outcomes_by_job: dict[str, dict[str, dict]] = {}
     no_job_count = 0
     no_job_hosts = []
     host_lines = []
@@ -222,13 +224,19 @@ def build_fleet_snapshot_documents(db) -> list[IndexDocument]:
                 f"last seen={_format_datetime(host.last_seen)}; reboot required={bool(host.reboot_required)}"
             )
             continue
-        counts[job.status] = counts.get(job.status, 0) + 1
-        outcome_hosts.setdefault(job.status, []).append(host.hostname)
+        if job.job_id not in outcomes_by_job:
+            outcomes_by_job[job.job_id] = {item["hostname"]: item for item in job.device_results if "hostname" in item}
+        outcome = outcomes_by_job[job.job_id].get(host.hostname, {})
+        status = outcome.get("status") or "unknown"
+        counts[status] = counts.get(status, 0) + 1
+        outcome_hosts.setdefault(status, []).append(host.hostname)
         detail = _one_line(
-            job.error_summary or job.recap or "no error or recap recorded", 500
+            outcome.get("detail") or (
+                "no per-device detail recorded" if outcome else "per-device outcome not recorded; inspect the job and recap"
+            ), 500
         )
         host_lines.append(
-            f"- {host.hostname}: latest job={job.status}; playbook={job.playbook}; "
+            f"- {host.hostname}: latest job={job.status}; device outcome={status}; playbook={job.playbook}; "
             f"job_id={job.job_id}; finished={_format_datetime(job.finished_at or job.created_at)}; "
             f"recorded host state={host.status or 'unknown'}; last seen={_format_datetime(host.last_seen)}; "
             f"reboot required={bool(host.reboot_required)}; detail={detail}"
@@ -251,17 +259,16 @@ def build_fleet_snapshot_documents(db) -> list[IndexDocument]:
             f"Snapshot generated at (UTC): {generated_at}",
             (
                 "Interpretation: For each registered host, the latest completed job that targeted that host is "
-                "shown. This is job outcome evidence, not a live health probe. Prefer newer timestamps over older "
-                "log chunks."
+                "shown with its recorded per-device outcome. The overall job status can differ from that device's "
+                "outcome. Missing per-device outcomes are unknown, not inferred from the job status. "
+                "This is job outcome evidence, not a live health probe. Prefer newer timestamps over older log chunks."
             ),
             f"Registered hosts: {len(hosts)}",
-            (
-                f"Latest per-host outcomes: success={counts.get('success', 0)}, partial={counts.get('partial', 0)}, failed={counts.get('failed', 0)}, "
-                f"cancelled={counts.get('cancelled', 0)}, no completed job={no_job_count}"
-            ),
-            f"Hosts whose latest completed job failed: {_host_list(outcome_hosts.get('failed', []))}",
-            f"Hosts whose latest completed job was partial: {_host_list(outcome_hosts.get('partial', []))}",
-            f"Hosts whose latest completed job was cancelled: {_host_list(outcome_hosts.get('cancelled', []))}",
+            "Latest recorded per-device outcomes: " + ", ".join(
+                f"{status}={counts[status]}" for status in sorted(counts)
+            ) + f", no completed job={no_job_count}",
+            *(f"Hosts whose latest device outcome was {status}: {_host_list(outcome_hosts[status])}"
+              for status in sorted(outcome_hosts) if status != "success"),
             f"Hosts with no completed job: {_host_list(no_job_hosts)}",
             "",
             "Latest completed job per registered host:",

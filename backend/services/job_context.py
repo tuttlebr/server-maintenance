@@ -129,6 +129,7 @@ def _detail(job: Job, query: str, budget: int) -> str:
         _summary(job),
         f"Started: {_format_datetime(job.started_at)}; duration seconds: {job.duration_seconds}",
         "Error summary: " + _clip(_sanitize_text(job.error_summary or "none recorded"), 1_000),
+        "Per-device outcomes:\n" + _clip(_sanitize_text(json.dumps(job.device_results, ensure_ascii=False)), 2_000),
         "Host recap:\n" + _clip(_sanitize_text(job.recap or "not available"), 1_500),
         "Structured results:\n" + _clip(_sanitize_text(json.dumps(results, ensure_ascii=False)), 2_000),
         label + ":",

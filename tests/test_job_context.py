@@ -50,6 +50,23 @@ class JobContextTests(unittest.TestCase):
         self.assertIn("node-2 : ok=5 failed=0", text)
         self.assertNotIn(SECOND, text)
 
+    def test_fresh_context_includes_redacted_device_outcomes_without_a_recap(self):
+        with self.sessions() as db:
+            db.query(Job).filter_by(job_id=FIRST).update({
+                "status": "partial", "recap": None, "output_log": None,
+                "outcomes_json": json.dumps([
+                    {"hostname": "node-1", "status": "success"},
+                    {"hostname": "node-2", "status": "unreachable", "detail": "SSH refused password=sentinel"},
+                ]),
+            })
+            db.commit()
+        text = self.context("Explain this run", job_id=FIRST)
+        self.assertIn("Per-device outcomes:", text)
+        self.assertIn('"hostname": "node-1", "status": "success"', text)
+        self.assertIn('"hostname": "node-2", "status": "unreachable"', text)
+        self.assertNotIn("sentinel", text)
+        self.assertNotIn(SECOND, text)
+
     def test_missing_explicit_job_does_not_substitute_latest_job(self):
         text = self.context(f"Explain job {MISSING}")
         self.assertIn("not found", text)

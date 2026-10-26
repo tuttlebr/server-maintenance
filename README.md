@@ -319,6 +319,7 @@ Startup validates the admin password, JWT signing key, and host-encryption key.
 | `ANSIBLE_JOB_TIMEOUT_SECONDS` | `3600` | Maximum runtime for one queued Ansible job |
 | `ANSIBLE_MAX_CONCURRENT_JOBS` | `4` | Maximum concurrent Ansible jobs |
 | `ANSIBLE_FORKS` | `10` | Maximum hosts Ansible may operate on concurrently inside one fleet-scoped job; playbook `serial` still takes precedence |
+| `AUTOMATIC_SCAN_ENABLED` | `true` | Schedule read-only device scans hourly; checks for due, idle devices at startup and every minute |
 | `AI_HELPER_API_KEY` | empty | Provider-issued credential for Fleet Help; see secret setup above |
 | `AI_HELPER_MODEL` | `aws/anthropic/bedrock-claude-sonnet-4-6` | Chat model API ID in `.env.example` |
 | `AI_HELPER_BASE_URL` | `https://inference-api.nvidia.com/v1` | Chat API base URL in `.env.example`; use the endpoint matching the key |
@@ -573,6 +574,14 @@ The tool reads `EMBED_MODEL`, optional `EMBED_DIM`, `EMBED_API_KEY`/`AI_HELPER_A
 
 Completed operations are indexed separately in `fleet_job_logs`. Every terminal outcome adds redacted metadata, recap, error context, and bounded log chunks. Each ingestion also refreshes a latest-completed-job-per-device snapshot so Fleet Help can answer questions about recent fleet evidence. SQL activity and full on-disk logs remain the source of truth; Milvus is a derived search index.
 
+Snapshots distinguish each device's recorded outcome from the overall job status.
+A partial scan can include successful and unreachable devices. Snapshot counts
+use the per-device results; missing results in older jobs remain unknown. Fresh
+job context and newly indexed log documents also include bounded, filtered
+per-device outcomes, even when no Ansible recap is available. Existing search
+documents retain their prior contents until refreshed; deploying this change
+alone does not rebuild them.
+
 Both Fleet Help chat modes also read fresh job evidence directly from the activity database for every question, independently of embeddings or Milvus. Expand a run in Activity and choose **Ask Fleet Help** to discuss that exact job. Chat on a device page scopes recent runs to that device; explicit job IDs or device names in a question take precedence. Follow-ups refresh the evidence. The supplied context includes job metadata, per-host recaps, structured results, and bounded log excerpts that prioritize failed tasks, matching output and the log tail. Running logs are marked partial, and omitted output is identified. These records describe observed operation results, not live device health.
 
 Fresh job context and newly indexed job documents filter recognized credential
@@ -582,6 +591,12 @@ before the closing marker. This is pattern-based filtering of model/search
 context, not a guarantee that arbitrary log text is free of secrets.
 
 NAT uses `tool_calling_agent` to preserve conversation history, the system prompt and streamed tool calls. Optional Kubernetes and UniFi MCP definitions are omitted at startup unless both their server URL and token are configured; missing optional settings no longer prevent Fleet Help from starting. Embedding failures can still limit historical semantic search, but do not prevent fresh job evidence from reaching either chat mode.
+
+If web logs report `Connection refused` during job-log embedding or reconciliation,
+check that the configured embedding service is listening and reachable from the
+web container. Healthy web and Milvus containers do not verify provider access.
+Inspect `EMBED_BASE_URL` when set; otherwise embeddings use `AI_HELPER_BASE_URL`.
+Restore provider connectivity before retrying an index rebuild.
 
 Fleet Help's sole system prompt is `workflow.system_prompt` in `nat/config.yml`. NAT uses it directly, and the direct-LLM fallback reads the same text for each request. Supplied documentation, uploaded context, and job evidence stay separate from system instructions. The prompt favors direct answers, evidence-backed diagnoses, and a small number of useful next steps. NAT can search fleet guidance, completed job history, and NVIDIA Dynamo, AIPerf, NVCF, and DSX documentation. Kubernetes and UniFi definitions are not exposed to the agent unless explicitly added to `workflow.tool_names`; the fallback has no callable tools.
 

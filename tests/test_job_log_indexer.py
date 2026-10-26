@@ -1,4 +1,5 @@
 import asyncio
+import json
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -89,6 +90,7 @@ class JobLogDocumentTests(unittest.TestCase):
                     status="success",
                     created_at=now - timedelta(hours=2),
                     finished_at=now - timedelta(hours=2),
+                    outcomes_json=json.dumps([{"hostname": "dgx-01", "status": "success"}]),
                 ),
                 Job(
                     job_id="newest-cancel",
@@ -97,6 +99,7 @@ class JobLogDocumentTests(unittest.TestCase):
                     status="cancelled",
                     created_at=now - timedelta(hours=1),
                     finished_at=now - timedelta(hours=1),
+                    outcomes_json=json.dumps([{"hostname": "dgx-02", "status": "cancelled"}]),
                 ),
             ]
         )
@@ -108,12 +111,55 @@ class JobLogDocumentTests(unittest.TestCase):
         )
         db.close()
 
-        self.assertIn("success=1, partial=0, failed=0, cancelled=1, no completed job=1", text)
+        self.assertIn("cancelled=1, failed=0, success=1, unknown=0, no completed job=1", text)
         self.assertIn("dgx-01: latest job=success", text)
         self.assertIn("job_id=newer-success", text)
         self.assertIn("dgx-02: latest job=cancelled", text)
         self.assertIn("dgx-03: no completed job", text)
         self.assertNotIn("dgx-01: latest job=failed", text)
+
+    def test_mixed_scan_snapshot_keeps_device_outcomes_separate_from_job_status(self):
+        sessions = _test_session_factory()
+        with sessions() as db:
+            db.add_all([Host(hostname=name) for name in ("node", "node-01", "robot", "legacy")])
+            db.add(Job(
+                job_id="mixed-scan", playbook="host_facts.yml", status="partial",
+                target_hosts="node,node-01,robot", triggered_by="Automatic hourly scan",
+                error_summary="One or more devices did not complete",
+                outcomes_json=json.dumps([
+                    {"hostname": "node", "status": "success"},
+                    {"hostname": "node-01", "status": "unreachable", "detail": "SSH connection failed password=sentinel"},
+                    {"hostname": "robot", "status": "verification_failed", "detail": "Scan report missing"},
+                ]),
+            ))
+            db.add(Job(job_id="legacy", playbook="host_facts.yml", status="failed", target_hosts="legacy"))
+            db.commit()
+            text = "\n".join(d.text for d in job_log_indexer.build_fleet_snapshot_documents(db))
+
+        self.assertIn("node: latest job=partial; device outcome=success;", text)
+        self.assertIn("node-01: latest job=partial; device outcome=unreachable;", text)
+        self.assertIn("robot: latest job=partial; device outcome=verification_failed;", text)
+        self.assertIn("legacy: latest job=failed; device outcome=unknown;", text)
+        self.assertIn("failed=0, success=1, unknown=1, unreachable=1, verification_failed=1", text)
+        self.assertIn("Hosts whose latest device outcome was unreachable: node-01", text)
+        self.assertIn("Hosts whose latest device outcome was unknown: legacy", text)
+        self.assertNotIn("sentinel", text)
+        node_line = next(line for line in text.splitlines() if line.startswith("- node:"))
+        self.assertNotIn("One or more devices did not complete", node_line)
+
+    def test_job_documents_include_redacted_per_device_results_without_a_recap(self):
+        job = Job(
+            job_id="mixed-scan", playbook="host_facts.yml", status="partial",
+            target_hosts="node,robot", outcomes_json=json.dumps([
+                {"hostname": "node", "status": "success"},
+                {"hostname": "robot", "status": "unreachable", "detail": "api_key=sentinel"},
+            ]),
+        )
+        text = "\n".join(d.text for d in job_log_indexer.build_job_documents(job))
+        self.assertIn("Per-device outcomes:", text)
+        self.assertIn('"hostname": "node", "status": "success"', text)
+        self.assertIn('"hostname": "robot", "status": "unreachable"', text)
+        self.assertNotIn("sentinel", text)
 
 
 class CompletedJobIngestionTests(unittest.TestCase):

@@ -12,6 +12,13 @@ This guide teaches Fleet Help how to explain the vendor-neutral Fleet Manager UI
 - **Context** shows the current Fleet Help record count, manages uploaded text and Markdown sources, and runs context re-indexing.
 - **Fleet Help** answers documentation and recorded-operation questions. It does not operate devices.
 
+Fleet Help job evidence distinguishes the overall run status from each device's
+recorded outcome. For example, a partial automatic scan can have successful SSH
+devices and one unreachable robot. Latest-device snapshot counts use the recorded
+per-device results; an older job without those results has an unknown device
+outcome. Fresh job context also supplies bounded per-device outcomes without
+requiring semantic search or an Ansible recap. Consult Activity for full evidence.
+
 ## Adding Devices
 
 Use **Devices → Add device**. The flow is connection, details, discovery, and review.

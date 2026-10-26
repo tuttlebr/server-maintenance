@@ -10,6 +10,7 @@ CI on every review; update it when ownership or commands move.
 | Product behavior | `README.md`, `docs/fleet-manager-ui.md`, `docs/recovery-check.md` | Current service catalog, confirmations, standalone policy, recovery and observation age |
 | API and identity | `backend/main.py`, `backend/auth.py`, `backend/schemas.py`, `backend/routers/` | Authentication, validation, explicit target scope and error semantics |
 | Execution | `backend/services/ansible_runner.py`, `backend/services/execution_state.py`, `backend/services/process_supervisor.py`, `backend/services/recovery_state.py` | Durable reservations, single executor, idempotency, interruption and per-host verification |
+| Automatic discovery | `backend/services/scan_scheduler.py`, `backend/main.py`, `tests/test_scan_scheduler.py` | Default-on hourly scans, durable manual/automatic attempt cadence, idle targets, no overlapping automatic scans, lifecycle shutdown |
 | Device and account evidence | `backend/services/device_discovery.py`, `backend/services/account_state.py`, `backend/services/job_results.py`, `backend/capabilities.py` | Missing/partial observations, correct eligibility, user discovery and stale state |
 | Host operations | `playbooks/`, `playbooks/tasks/`, `playbooks/files/`, `backend/services/inventory_writer.py` | Actual Ansible dispatch and report contracts; legacy CLI compatibility |
 | Persistence | `backend/models.py`, `backend/database.py`, `backend/migrations/` | Database compatibility, startup reconciliation, authoritative job evidence |
@@ -27,9 +28,20 @@ contracts. Read their implementations before changing a shared gate.
 
 SQL activity and full job logs are authoritative; Milvus is derived retrieval.
 `/api/v2/jobs/{job_id}/progress` deliberately avoids full logs and artifacts.
+Fresh Fleet Help context and new index documents include bounded, sanitized
+`Job.device_results`. Fleet snapshot device counts use the matching hostname's
+outcome, with unknown for older jobs without one; the overall job status stays
+separate. A partial or recovery-required job must not label every device alike.
 The web startup lifecycle acquires an executor lease, reconciles interrupted
 work, and starts background job-index reconciliation. Importing or starting the
 real app against live configuration is not a read-only test.
+
+`AUTOMATIC_SCAN_ENABLED` defaults to true. After startup reconciliation, the web
+lifespan starts one scheduler task and cancels it before executor shutdown. The
+scheduler polls once per minute, counts all accepted `host_facts.yml` jobs in the
+last hour (including failures and cancellations), defers reserved devices, and
+dispatches idle supported transports through the same durable runner as manual
+scans. Automatic scans preserve recovery requirements.
 
 The canonical Fleet Help prompt is `workflow.system_prompt` in `nat/config.yml`.
 NAT loads prepared configuration at startup; the direct fallback reads this

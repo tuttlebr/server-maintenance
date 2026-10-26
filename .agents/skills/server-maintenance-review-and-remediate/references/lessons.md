@@ -81,3 +81,26 @@ Recheck their applicability before using them.
   Existing indexed documents were not rewritten.
 - **Invalidate when:** context ownership, credential formats, or ingestion paths
   change; check every consumer of the sanitizer again.
+
+## L006: A multi-device job's status is not every device's outcome
+
+- **Condition/mechanism:** mixed scans and other multi-device jobs can be partial
+  or require recovery while some devices succeeded. The retrieval snapshot used
+  the overall job status in per-host counts and details, and context documents
+  omitted the durable per-device results when recaps were unavailable.
+- **Future check:** match `Job.device_results` by exact hostname in snapshots and
+  expose bounded, sanitized results in both fresh context and indexed documents.
+  Preserve the overall job status separately. Missing historical per-device
+  results mean unknown; do not infer success or failure from the group status.
+- **Evidence:** `backend/services/job_log_indexer.py::build_fleet_snapshot_documents`;
+  `backend/services/job_context.py::_detail`;
+  `tests/test_job_log_indexer.py::JobLogDocumentTests::test_mixed_scan_snapshot_keeps_device_outcomes_separate_from_job_status`;
+  `tests/test_job_log_indexer.py::JobLogDocumentTests::test_job_documents_include_redacted_per_device_results_without_a_recap`;
+  `tests/test_job_context.py::JobContextTests::test_fresh_context_includes_redacted_device_outcomes_without_a_recap`.
+- **Verification:** all three synthetic regressions failed before the fix and
+  passed afterward. Read-only SQL inspection also found recent partial automatic
+  scans with successful and unreachable devices, confirming applicability. No
+  live Fleet Help answer or index refresh was performed; existing documents are
+  unchanged until refreshed.
+- **Invalidate when:** per-device result schemas, snapshot ownership, or historical
+  job compatibility change.
