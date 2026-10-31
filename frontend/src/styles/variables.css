@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light;
   /* Semantic colors */
   --color-success: #27864b;
   --color-warning: #c56a08;
@@ -17,6 +18,15 @@
   --surface-lighter: #eeeeee;
   --surface-light: #f7f7f7;
   --surface-white: #ffffff;
+
+  /* Glass chrome: opaque by default, progressively enhanced in materials.css. */
+  --glass-solid: #f4f6fa;
+  --glass-fill: rgb(248 250 255 / 88%);
+  --glass-edge: #b8c2d0;
+  --glass-highlight: rgb(255 255 255 / 85%);
+  --glass-shadow: 0 8px 24px rgb(23 42 70 / 10%);
+  --glass-active: #dfebfc;
+  --glass-hover: rgb(23 105 210 / 8%);
 
   /* Text */
   --text-on-dark: #ffffff;
@@ -66,6 +76,14 @@
 
 /* Dark theme. Activate with <html data-theme="dark"> OR prefers-color-scheme. */
 [data-theme="dark"] {
+  color-scheme: dark;
+  --glass-solid: #202630;
+  --glass-fill: rgb(29 35 45 / 92%);
+  --glass-edge: #566273;
+  --glass-highlight: rgb(255 255 255 / 12%);
+  --glass-shadow: 0 8px 24px rgb(0 0 0 / 28%);
+  --glass-active: #263f60;
+  --glass-hover: rgb(145 188 255 / 12%);
   --link-text: #91bcff;
   --focus-ring: #91bcff;
   --control-border: #79879a;
@@ -98,6 +116,14 @@
 /* Honor OS preference when no explicit theme set. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --glass-solid: #202630;
+    --glass-fill: rgb(29 35 45 / 92%);
+    --glass-edge: #566273;
+    --glass-highlight: rgb(255 255 255 / 12%);
+    --glass-shadow: 0 8px 24px rgb(0 0 0 / 28%);
+    --glass-active: #263f60;
+    --glass-hover: rgb(145 188 255 / 12%);
     --link-text: #91bcff;
     --focus-ring: #91bcff;
     --control-border: #79879a;

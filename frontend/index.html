@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Fleet Manager</title>
+    <script>
+      // Apply the saved appearance before styles paint; absent/invalid means system.
+      try {
+        const theme = localStorage.getItem("fleet_theme");
+        if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+      } catch { /* Storage may be unavailable; CSS follows the system preference. */ }
+    </script>
     <link
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"

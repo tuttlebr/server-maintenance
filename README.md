@@ -688,6 +688,22 @@ npm run dev
 
 The Vite dev server proxies `/api` requests to the backend at `localhost:8000`.
 
+For a UI-only preview with synthetic fleet data, run `node frontend/design-review/preview.mjs`
+from the repository root and open `http://127.0.0.1:9012/?theme=light#/devices`
+(or `theme=dark`). The preview rejects writes and does not connect to fleet devices.
+
+Choose **Manage → Appearance → System, Light, or Dark** to set the interface appearance.
+System is the default and follows OS changes automatically. Explicit choices are saved
+in this browser and applied before the page paints, including on the login screen.
+
+Navigation and Devices filters use the shared `.glass-surface` material in
+`frontend/src/styles/materials.css`, with light/dark tokens in `variables.css`.
+Content panels and popovers stay opaque. Blur requires browser support and an explicit
+`prefers-reduced-transparency: no-preference` match; unsupported preference detection,
+reduced transparency, increased contrast, and forced colors use solid surfaces.
+Set `data-material="opaque"` on `<html>` to exercise the opaque fallback. Keep each
+control group on one material rather than nesting backdrop filters.
+
 To run the development checks and install Git hooks:
 
 ```bash

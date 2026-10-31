@@ -32,7 +32,7 @@ const op=(id,label,description,risk,ids,excluded=[])=>({id,label,description,ris
 const operations=[op('system.scan','Scan devices','Refresh facts and discovered capabilities.','low',[1,4,5,6,7,10,11]),op('storage.inspect','Analyze storage','Inspect storage use before planning cleanup.','low',[1,4,5,6,10,11]),op('system.recover','Verify recovery','Verify remote state after interrupted maintenance.','low',[12]),op('system.reboot','Reboot devices','Restart selected devices. Running workloads may be interrupted.','high',[4,5,6,10,11],[{id:12,name:'worker-02',reason:'Recovery verification required'},{id:1,name:'atlas-01',reason:'Facts are stale'}])];
 const server=await createServer({root:resolve(here,'..'),configFile:false,plugins:[vue(),{
  name:'design-review-fixtures',
- transformIndexHtml(html){return html.replace('<head>','<head><script>localStorage.setItem("fleet_token","design-review-only"); const p=new URLSearchParams(location.search); if(p.has("theme"))document.documentElement.dataset.theme=p.get("theme");</script>');},
+ transformIndexHtml(html){return html.replace('<head>','<head><script>localStorage.setItem("fleet_token","design-review-only"); </script>').replace('</head>', '<script>const theme=new URLSearchParams(location.search).get("theme"); if(theme==="light"||theme==="dark")document.documentElement.dataset.theme=theme;</script></head>');},
  configureServer(v){v.middlewares.use((req,res,next)=>{
   if(!req.url.startsWith('/api/'))return next();
   const url=new URL(req.url,'http://127.0.0.1');
@@ -52,6 +52,7 @@ const server=await createServer({root:resolve(here,'..'),configFile:false,plugin
   if(req.method!=='GET')return send({detail:'Preview only. No operation was executed.'},409);
   if(path==='/devices')return send(ds);
   if(/^\/devices\/\d+$/.test(path))return send(ds.find(d=>d.id===Number(path.split('/').pop()))||{},ds.some(d=>d.id===Number(path.split('/').pop()))?200:404);
+  if(path==='/jobs/overview')return send({recent:js,active:js.filter(j=>['running','pending','cancelling'].includes(j.status)),active_count:js.filter(j=>['running','pending','cancelling'].includes(j.status)).length,adverse:js.filter(j=>['failed','partial','recovery_required'].includes(j.status))});
   if(path==='/jobs/summary')return send({active_count:js.filter(j=>['running','pending','cancelling'].includes(j.status)).length});
   if(path==='/jobs'){let filtered=js;const s=url.searchParams.get('status');if(s)filtered=filtered.filter(j=>s==='active'?['running','pending','cancelling'].includes(j.status):j.status===s);const p=url.searchParams.get('playbook');if(p)filtered=filtered.filter(j=>j.playbook===p);return send(filtered.slice(Number(url.searchParams.get('offset')||0),Number(url.searchParams.get('offset')||0)+Number(url.searchParams.get('limit')||50)));}
   if(path.endsWith('/stream')){res.setHeader('Content-Type','text/event-stream');return res.end('data: Synthetic preview: waiting for device\n\nevent: done\ndata: running\n\n');}

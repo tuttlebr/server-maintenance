@@ -6,6 +6,7 @@ import "./styles/variables.css";
 import "./styles/base.css";
 import "./styles/layout.css";
 import "./styles/components.css";
+import "./styles/materials.css";
 
 const app = createApp(App);
 app.use(createPinia());
