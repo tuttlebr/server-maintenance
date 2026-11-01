@@ -9,7 +9,7 @@ This guide teaches Fleet Help how to explain the vendor-neutral Fleet Manager UI
 - **Operations** is the default page. Its catalog contains Scan devices and seven maintenance actions: Check for apt updates, Install apt updates, Clear container cache, Reboot nodes, Check storage, Check GPU usage, and Restart Reachy Mini daemon. Device selection and capabilities determine which actions are available. Selection, review, progress, and results stay on this page.
 - **Users** supports bulk Linux account additions and edits, manual rows or CSV import, and account observations. Operations also links here with the device selection preserved.
 - **Activity** contains background and completed jobs, including target devices, status, recap, logs, errors, and compact structured results when an operation produces them.
-- **Context** shows the current Fleet Help record count, manages uploaded text and Markdown sources, and runs context re-indexing.
+- **Context** shows the current Fleet Help record count, manages uploaded documentation, and runs context re-indexing. PDF and PNG/JPEG uploads are available when an optional parser is configured.
 - **Fleet Help** answers documentation and recorded-operation questions. It does not operate devices.
 
 Fleet Help job evidence distinguishes the overall run status from each device's
@@ -45,6 +45,8 @@ Fleet Manager scans devices automatically every hour by default while the servic
 ## Managing Context
 
 Use **Context** to upload UTF-8 `.txt`, `.md`, or `.markdown` documents. A source may apply to the fleet generally or be associated with one device. For example, associate a motherboard owner's manual with `daedalus-02` and add its exact motherboard model under **Devices → daedalus-02 → Context**. The generated index source includes the device name, current discovered identity, manual attributes, and document content together.
+
+When the optional document parser is enabled, Context also accepts PDFs and PNG/JPEG page images. It extracts text during upload and preserves page labels for retrieval. The upload form shows the current file-size and PDF page limits. During upload, the status card shows transferred bytes, pages prepared, pages parsed, elapsed time, and time since the last completed page. Saving is confirmed only after the document is stored; completion still requires re-indexing to publish to search. A progress connection warning does not mean parsing failed. Administrators can increase `PARSER_TIMEOUT_SECONDS` up to 3600 seconds for slow models or long documents; the browser allows the configured budget plus two minutes. If parsing fails or returns incomplete text, the document is not saved; retry or upload a smaller document. Extracted text is stored, not the original binary file. Text and Markdown uploads do not require the parser. Re-index after uploading to make new content searchable.
 
 Uploads, deletions, and attribute edits are staged changes. Select **Re-index context** to rebuild `fleet_docs`. The page reports the current indexed record count, source counts, phase, progress, completion time, and errors. Removing a document does not remove its old vector records until the next successful re-index.
 

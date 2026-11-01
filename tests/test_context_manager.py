@@ -5,7 +5,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from backend.database import Base
-from backend.models import Device
+from backend.models import ContextDocument, Device
+from backend.services.document_parser import ParserUnavailable
 from backend.services.context_manager import (
     _render_uploaded_document,
     create_document,
@@ -57,6 +58,25 @@ class ContextManagerTests(unittest.TestCase):
         context = render_device_context([self.device])
         self.assertIn("Motherboard model: ROMED6U-2L2T", context)
         self.assertIn("Manual attributes", context)
+
+    def test_parsed_upload_is_saved_as_text_and_duplicates_are_not_reparsed(self):
+        kwargs = dict(filename="manual.pdf", content_bytes=b"PDF bytes", title=None, device_id=self.device.id, uploaded_by="admin")
+        with patch("backend.services.context_manager.parse_document", return_value="## Page 1\n\nUse this procedure to maintain the motherboard.") as parse:
+            document = create_document(self.db, **kwargs)
+            self.assertEqual(document.title, "manual")
+            self.assertEqual(document.content_type, "text/markdown")
+            self.assertIn("Use this procedure", _render_uploaded_document(document, self.device))
+            with self.assertRaises(FileExistsError):
+                create_document(self.db, **kwargs)
+            parse.assert_called_once()
+
+    def test_failed_parser_saves_nothing_and_text_uploads_bypass_it(self):
+        with patch("backend.services.context_manager.parse_document", side_effect=ParserUnavailable("Unavailable")) as parse:
+            with self.assertRaises(ParserUnavailable):
+                create_document(self.db, filename="manual.pdf", content_bytes=b"PDF", title=None, device_id=None, uploaded_by="admin")
+            self.assertEqual(self.db.query(ContextDocument).count(), 0)
+            create_document(self.db, filename="manual.md", content_bytes=b"# Manual\n\nInstructions for maintaining the fans.", title=None, device_id=None, uploaded_by="admin")
+            parse.assert_called_once()
 
 if __name__ == "__main__":
     unittest.main()

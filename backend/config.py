@@ -1,7 +1,9 @@
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
 
 from cryptography.fernet import Fernet
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -58,7 +60,15 @@ class Settings(BaseSettings):
     docs_urls_file: Path = Path("/app/docs/urls.txt")
     docs_markdown_dir: Path = Path("/app/data/docs-crawled")
     docs_ingester_bin: Path = Path("/usr/local/bin/fleet-doc-ingester")
-    context_upload_max_bytes: int = 10 * 1024 * 1024
+    context_upload_max_bytes: int = 30 * 1024 * 1024
+
+    # Optional document-image parser. An explicit base URL enables PDF/image uploads.
+    parser_base_url: str = ""
+    parser_api_key: str = ""
+    parser_model: str = "nvidia/Nemotron-3.5-Parse"
+    parser_api_format: Literal["openai", "nim", "nv-ingest"] = "openai"
+    parser_timeout_seconds: float = Field(default=100, gt=0, le=3600)
+    parser_max_pages: int = Field(default=50, ge=1, le=1000)
 
     @property
     def is_development(self) -> bool:

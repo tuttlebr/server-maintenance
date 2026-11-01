@@ -96,3 +96,41 @@ test('chat errors cancel and unlock the stream', async t => {
   await streamChat([{role:'user',content:'test'}],{onError:caught=>error=caught});
   assert.equal(error.message,'Provider failed');assert.equal(cancelled,true);assert.equal(response.body.locked,false);
 });
+
+test('document upload reports measured bytes and uses the configured model budget', async t => {
+  setup(t);
+  const {uploadContextDocument, contextUploadTimeoutMs} = await import('./api.js');
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'XMLHttpRequest');
+  let xhr;
+  class UploadRequest {
+    constructor() { xhr = this; this.upload = {}; this.headers = {}; }
+    open(method, url) { this.method = method; this.url = url; }
+    setRequestHeader(key, value) { this.headers[key] = value; }
+    send(body) { this.body = body; }
+  }
+  Object.defineProperty(globalThis, 'XMLHttpRequest', {configurable:true, value:UploadRequest});
+  t.after(() => { if (original) Object.defineProperty(globalThis, 'XMLHttpRequest', original); else delete globalThis.XMLHttpRequest; });
+  const progress = [];
+  let transferred = false;
+  const body = new FormData();
+  const pending = uploadContextDocument(body, {parserTimeoutSeconds:1800, onProgress:(...values)=>progress.push(values), onTransferred:()=>{transferred=true;}});
+  assert.equal(xhr.timeout, 1_920_000);
+  assert.equal(contextUploadTimeoutMs(3600), 3_720_000);
+  assert.equal(contextUploadTimeoutMs(NaN), 220_000);
+  assert.equal(xhr.headers.Authorization, 'Bearer test');
+  assert.equal(xhr.headers['Content-Type'], undefined);
+  assert.equal(xhr.body, body);
+  xhr.upload.onprogress({loaded:512,total:1024,lengthComputable:true});
+  xhr.upload.onprogress({loaded:600,total:0,lengthComputable:false});
+  xhr.upload.onload();
+  assert.deepEqual(progress, [[512,1024],[600,null]]);
+  assert.equal(transferred,true);
+  xhr.status=201; xhr.responseText='{"id":42}'; xhr.onload();
+  assert.deepEqual(await pending,{id:42});
+  const failed=uploadContextDocument(body);
+  xhr.status=502; xhr.responseText='{"detail":"Parser request timed out for page 15. No document was saved."}'; xhr.onload();
+  await assert.rejects(failed,/page 15/);
+  const disconnected=uploadContextDocument(body);
+  xhr.onerror();
+  await assert.rejects(disconnected,/Processing may still be running/);
+});

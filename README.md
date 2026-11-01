@@ -589,6 +589,26 @@ The bundled standalone Milvus uses `COMMON_STORAGETYPE=local`, as in the [upstre
 
 The Rust doc ingester crawls every HTML page under each URL prefix in `docs/urls.txt`, includes local Markdown guidance from `docs/*.md`, converts content to Markdown, embeds the chunks with the `.env` embedding settings, and rebuilds the `fleet_docs` collection in Milvus. The Context UI also accepts UTF-8 `.txt`, `.md`, and `.markdown` uploads, optionally associates them with a device, and adds current discovery facts plus manual device attributes to the same rebuild. The included `docs/fleet-manager-ui.md` file teaches Fleet Help how to guide users through the UI.
 
+Optional Nemotron document parsing is configured independently in `.env` and disabled until `PARSER_BASE_URL` is set. The base URL must be reachable from the web container; Kubernetes `*.svc.cluster.local` names typically require running inside that cluster or configuring DNS/routing. `PARSER_API_KEY` is independent of `AI_HELPER_API_KEY`; leave it empty for unauthenticated services. For OpenAI-compatible serving, the model name must match the endpoint’s configured alias.
+
+```dotenv
+# Optional document-image parsing in the web service
+PARSER_BASE_URL=http://your-parser:8000/v1
+PARSER_MODEL=nvidia/Nemotron-3.5-Parse
+PARSER_API_KEY=
+PARSER_API_FORMAT=openai
+PARSER_MAX_PAGES=20
+PARSER_TIMEOUT_SECONDS=100
+```
+
+With the parser configured, **Context** also accepts PDF, PNG, and JPEG uploads. PDF pages are rendered locally, then sent individually to `PARSER_BASE_URL/chat/completions` using the [Nemotron 3.5 Parse request format](https://huggingface.co/nvidia/Nemotron-3.5-Parse#inference-with-vllm). For a NIM parser exposing [multipart `/v1/parse`](https://docs.api.nvidia.com/nim/reference/nvidia-nemotron-3_5-parse-infer), set `PARSER_API_FORMAT=nim` and a base URL ending in `/v1`; this fixed-model API does not use `PARSER_MODEL`. The upload stores extracted text with page labels, the original filename/hash/size, and the device association. Binary originals are not retained. Layout control tokens are removed; Markdown, HTML, and native LaTeX table text are retained without advanced table conversion. Re-index after uploading to publish the extracted text to Milvus. Existing HTML crawling, Markdown ingestion, and job-log indexing do not invoke the parser. Changing parser settings does not reparse existing uploads; remove and upload the original again to regenerate text.
+
+For the local `nv-ingest-parser` adapter, set `PARSER_API_FORMAT=nv-ingest` with a base URL ending in `/v1`. It accepts JSON `{"image": "<base64 PNG>"}` at `/parse` and returns `{"markdown": "..."}`; it serves a fixed model and rejects truncated generation with HTTP 422. This is a different API from the NIM multipart endpoint. Match the format to the service's `/openapi.json`: sending multipart to the JSON adapter can produce HTTP 500 during request validation. Fleet Manager reports upstream HTTP status and logs the page, API format, and error type without logging document content, credentials, or remote response bodies.
+
+The default upload limit is 30 MiB, with at most 50 PDF pages (configurable with `PARSER_MAX_PAGES`), 25 million pixels per input image, and two simultaneous parsing uploads. These model calls send uploaded page content to the configured parser. Invalid documents, failed requests, empty pages, and truncated model output reject the whole upload before saving it. The total parsing budget defaults to 100 seconds. Set `PARSER_TIMEOUT_SECONDS=1800` for a 30-minute budget, or up to 3600 seconds for large or slow documents. The browser derives its request timeout from this budget plus 120 seconds for transfer and saving; rebuild/recreate the web service after changing settings. This is a total budget across all pages, not a per-page timeout. Text/Markdown uploads continue to work when the parser is unavailable or disabled.
+
+Uploads show measured transfer bytes, pages prepared, pages parsed, saving, and confirmed completion. Elapsed time and time since the last completed page help identify slow pages; there is no estimated finish time or within-page percentage. The browser reserves an authenticated upload ID and polls its owner-scoped status once per second while the request runs. Status failures show a connection notice without resetting page progress or implying the upload failed. Progress is transient, bounded to 256 records, and retained for 15 minutes after completion; active processing is retained through its deadline. The current single-process web service keeps progress in memory, so status does not survive a restart and multi-worker deployments would need a shared store. Existing clients may still upload without an ID. Saved documents remain in the database.
+
 In Docker, the web image builds this tool into `/usr/local/bin/fleet-doc-ingester`. The Context page's re-index action runs that binary inside the web container and writes generated Markdown to `/app/data/docs-crawled`. Uploaded source text and associations are stored in the Fleet Manager database; temporary Markdown index sources are generated for each rebuild.
 
 ```bash

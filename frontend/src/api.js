@@ -149,8 +149,45 @@ export const getChatStatus = () => request("/chat/status");
 // Context management
 export const getContextStatus = () => request("/context/status");
 export const getContextDocuments = () => request("/context/documents");
-export const uploadContextDocument = (formData) =>
-  request("/context/documents", { method: "POST", body: formData, timeoutMs: 120_000 });
+export const startContextUpload = () => request("/context/uploads", { method: "POST" });
+export const getContextUpload = (uploadId) => request(`/context/uploads/${encodeURIComponent(uploadId)}`, { timeoutMs: 5000 });
+
+// Allow the server's full parsing budget plus two minutes for transfer/saving.
+export function contextUploadTimeoutMs(parserTimeoutSeconds = 100) {
+  const seconds = Number(parserTimeoutSeconds);
+  return ((Number.isFinite(seconds) && seconds > 0 ? seconds : 100) + 120) * 1000;
+}
+
+export function uploadContextDocument(formData, { onProgress, onTransferred, parserTimeoutSeconds } = {}) {
+  // XHR exposes actual request-body transfer progress, including multipart framing.
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${BASE}/context/documents`);
+    const token = getToken();
+    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.timeout = contextUploadTimeoutMs(parserTimeoutSeconds);
+    xhr.upload.onprogress = event => onProgress?.(event.loaded, event.lengthComputable ? event.total : null);
+    xhr.upload.onload = () => onTransferred?.();
+    xhr.onload = () => {
+      let data;
+      try { data = JSON.parse(xhr.responseText); } catch { data = {}; }
+      if (xhr.status === 401) {
+        clearToken();
+        window.location.hash = "#/login";
+        reject(new ApiError("Session expired. Please sign in again.", { status: 401 }));
+      } else if (xhr.status >= 200 && xhr.status < 300 && data.id != null) {
+        resolve(data);
+      } else {
+        const detail = Array.isArray(data.detail) ? data.detail.map(item => item.msg).join("; ") : data.detail;
+        reject(new ApiError(detail || "Couldn't confirm the upload. Check uploaded documents before retrying.", { status: xhr.status, detail }));
+      }
+    };
+    xhr.onerror = () => reject(new ApiError("Upload connection lost. Processing may still be running; check uploaded documents before retrying."));
+    xhr.ontimeout = () => reject(new ApiError("Upload request timed out. Check uploaded documents before retrying."));
+    xhr.onabort = () => reject(new ApiError("Upload connection closed. Check uploaded documents before retrying."));
+    xhr.send(formData);
+  });
+}
 export const deleteContextDocument = (documentId) =>
   request(`/context/documents/${documentId}`, { method: "DELETE" });
 export const reindexContext = () => request("/context/reindex", { method: "POST" });

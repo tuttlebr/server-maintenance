@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 from backend.config import settings
 from backend.database import SessionLocal
 from backend.models import ContextDocument, Device
+from backend.services.document_parser import PARSER_EXTENSIONS, parse_document
+from backend.services.upload_progress import ProgressCallback
 
 ALLOWED_EXTENSIONS = {".md", ".markdown", ".txt"}
 
@@ -24,18 +26,13 @@ def create_document(
     title: str | None,
     device_id: int | None,
     uploaded_by: str,
+    progress: ProgressCallback | None = None,
 ) -> ContextDocument:
     extension = Path(filename).suffix.lower()
-    if extension not in ALLOWED_EXTENSIONS:
-        raise ValueError("Only .txt, .md, and .markdown files are supported")
+    if extension not in ALLOWED_EXTENSIONS | PARSER_EXTENSIONS:
+        raise ValueError("Supported files: .txt, .md, .markdown, and (with a parser) .pdf, .png, .jpg, .jpeg")
     if len(content_bytes) > settings.context_upload_max_bytes:
         raise ValueError(f"Files may not exceed {settings.context_upload_max_bytes // (1024 * 1024)} MB")
-    try:
-        content = content_bytes.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise ValueError("The file must contain UTF-8 text") from exc
-    if len(content.strip()) < 20:
-        raise ValueError("The document does not contain enough text to index")
     if device_id is not None and not db.query(Device).filter(Device.id == device_id).first():
         raise LookupError("Device not found")
 
@@ -48,12 +45,23 @@ def create_document(
     if existing:
         raise FileExistsError("This document is already uploaded for that device")
 
+    if extension in PARSER_EXTENSIONS:
+        content = parse_document(content_bytes, extension, progress=progress)
+    else:
+        try:
+            content = content_bytes.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise ValueError("The file must contain UTF-8 text") from exc
+    if len(content.strip()) < 20:
+        raise ValueError("The document does not contain enough text to index")
+
+    content_title = None if extension in PARSER_EXTENSIONS else _title_from_content(content)
     resolved_title = " ".join(
-        (title or _title_from_content(content) or Path(filename).stem).replace("\x00", "").split()
+        (title or content_title or Path(filename).stem).replace("\x00", "").split()
     )[:200]
     if not resolved_title:
         raise ValueError("A document title could not be determined")
-    normalized_content_type = "text/markdown" if extension in {".md", ".markdown"} else "text/plain"
+    normalized_content_type = "text/plain" if extension == ".txt" else "text/markdown"
     document = ContextDocument(
         title=resolved_title,
         original_filename=Path(filename).name[:255],
@@ -64,6 +72,8 @@ def create_document(
         device_id=device_id,
         uploaded_by=uploaded_by,
     )
+    if progress:
+        progress("saving", 0, 0)
     db.add(document)
     db.commit()
     db.refresh(document)

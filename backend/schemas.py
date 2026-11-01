@@ -256,6 +256,10 @@ class ContextDocumentResponse(BaseModel):
 
 
 class ContextStatusResponse(BaseModel):
+    parser_enabled: bool = False
+    upload_max_bytes: int = 10 * 1024 * 1024
+    parser_max_pages: int = 20
+    parser_timeout_seconds: float = 100
     record_count: int | None = None
     document_count: int = 0
     annotated_device_count: int = 0
