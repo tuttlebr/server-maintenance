@@ -674,7 +674,7 @@ password fields. Private-key blocks are filtered even when a running log ends
 before the closing marker. This is pattern-based filtering of model/search
 context, not a guarantee that arbitrary log text is free of secrets.
 
-NAT uses `tool_calling_agent` to preserve conversation history, the system prompt and streamed tool calls. Optional Kubernetes and UniFi MCP definitions are omitted at startup unless both their server URL and token are configured; missing optional settings no longer prevent Fleet Help from starting. Embedding failures can still limit historical semantic search, but do not prevent fresh job evidence from reaching either chat mode.
+NAT uses `tool_calling_agent` to preserve conversation history, the system prompt and streamed tool calls. The optional Kubernetes MCP definition is omitted at startup unless both its server URL and token are configured; missing optional settings do not prevent Fleet Help from starting. UniFi is not defined in the current config. Embedding failures can still limit historical semantic search, but do not prevent fresh job evidence from reaching either chat mode.
 
 If web logs report `Connection refused` during job-log embedding or reconciliation,
 check that the configured embedding service is listening and reachable from the
@@ -682,7 +682,12 @@ web container. Healthy web and Milvus containers do not verify provider access.
 Inspect `EMBED_BASE_URL` when set; otherwise embeddings use `AI_HELPER_BASE_URL`.
 Restore provider connectivity before retrying an index rebuild.
 
-Fleet Help's sole system prompt is `workflow.system_prompt` in `nat/config.yml`. NAT uses it directly, and the direct-LLM fallback reads the same text for each request. Supplied documentation, uploaded context, and job evidence stay separate from system instructions. The prompt favors direct answers, evidence-backed diagnoses, and a small number of useful next steps. NAT can search fleet guidance, completed job history, and NVIDIA Dynamo, AIPerf, NVCF, and DSX documentation. Kubernetes and UniFi definitions are not exposed to the agent unless explicitly added to `workflow.tool_names`; the fallback has no callable tools.
+Fleet Help's sole system prompt is `workflow.system_prompt` in `nat/config.yml`. NAT uses it directly, and the direct-LLM fallback reads the same text for each request. Supplied documentation, uploaded context, and job evidence stay separate from system instructions. The prompt favors direct answers, evidence-backed diagnoses, and a small number of useful next steps. NAT can search fleet guidance, completed job history, and NVIDIA Dynamo, AIPerf, NVCF, and DSX documentation. The Kubernetes integration is not exposed in `workflow.tool_names`; the fallback has no callable tools.
+
+Use the repository-local [$fleet-nat-maintainer](.agents/skills/fleet-nat-maintainer/SKILL.md)
+to reconcile the full NAT config with current application behavior and keep the
+prompt concise. It runs when invoked or selected during relevant work, with no
+background scheduler.
 
 Both images include the canonical config, and Compose mounts the same file read-only into both services. After editing the prompt, restart `nat` to reload its workflow; the fallback picks up edits on its next request. When upgrading to this shared-prompt setup, rebuild and recreate `web` and `nat` with `docker compose up -d --build web nat`. Image-only deployments also need both images rebuilt after prompt changes. The direct fallback reports a configuration error if the prompt is missing or invalid instead of silently using another policy.
 
