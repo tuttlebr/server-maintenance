@@ -97,9 +97,9 @@ test('chat errors cancel and unlock the stream', async t => {
   assert.equal(error.message,'Provider failed');assert.equal(cancelled,true);assert.equal(response.body.locked,false);
 });
 
-test('document upload reports measured bytes and uses the configured model budget', async t => {
+test('document upload reports bytes and returns queue acceptance without waiting for inference', async t => {
   setup(t);
-  const {uploadContextDocument, contextUploadTimeoutMs} = await import('./api.js');
+  const {uploadContextDocument} = await import('./api.js');
   const original = Object.getOwnPropertyDescriptor(globalThis, 'XMLHttpRequest');
   let xhr;
   class UploadRequest {
@@ -113,10 +113,9 @@ test('document upload reports measured bytes and uses the configured model budge
   const progress = [];
   let transferred = false;
   const body = new FormData();
-  const pending = uploadContextDocument(body, {parserTimeoutSeconds:1800, onProgress:(...values)=>progress.push(values), onTransferred:()=>{transferred=true;}});
-  assert.equal(xhr.timeout, 1_920_000);
-  assert.equal(contextUploadTimeoutMs(3600), 3_720_000);
-  assert.equal(contextUploadTimeoutMs(NaN), 220_000);
+  const pending = uploadContextDocument(body, {uploadId:'upload-id', onProgress:(...values)=>progress.push(values), onTransferred:()=>{transferred=true;}});
+  assert.equal(xhr.timeout, 120_000);
+  assert.equal(xhr.url, '/api/v2/context/uploads/upload-id/file');
   assert.equal(xhr.headers.Authorization, 'Bearer test');
   assert.equal(xhr.headers['Content-Type'], undefined);
   assert.equal(xhr.body, body);
@@ -125,8 +124,8 @@ test('document upload reports measured bytes and uses the configured model budge
   xhr.upload.onload();
   assert.deepEqual(progress, [[512,1024],[600,null]]);
   assert.equal(transferred,true);
-  xhr.status=201; xhr.responseText='{"id":42}'; xhr.onload();
-  assert.deepEqual(await pending,{id:42});
+  xhr.status=202; xhr.responseText='{"upload_id":"upload-id","phase":"queued"}'; xhr.onload();
+  assert.deepEqual(await pending,{upload_id:'upload-id',phase:'queued'});
   const failed=uploadContextDocument(body);
   xhr.status=502; xhr.responseText='{"detail":"Parser request timed out for page 15. No document was saved."}'; xhr.onload();
   await assert.rejects(failed,/page 15/);

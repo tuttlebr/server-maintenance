@@ -23,6 +23,8 @@ class Upload:
     phase: str = "uploading"
     completed: int = 0
     total: int = 0
+    rendered: int = 0
+    parsed: int = 0
     last_page_completed: float | None = None
     error: str | None = None
     document_id: int | None = None
@@ -73,8 +75,16 @@ class UploadProgress:
         with self._lock:
             item = self._uploads[upload_id]
             now = time.monotonic()
-            if phase == "parsing" and completed > item.completed:
+            if phase == "rendering":
+                item.rendered = completed
+                # Rendering is lazy, interleaved with model calls. Preserve the
+                # completed parsing count instead of bouncing between two bars.
+                if item.phase == "parsing":
+                    item.updated = now
+                    return
+            if phase == "parsing" and completed > item.parsed:
                 item.last_page_completed = now
+                item.parsed = completed
             item.phase, item.completed, item.total = phase, completed, total
             item.error, item.document_id, item.updated = error, document_id, now
 
@@ -87,6 +97,7 @@ class UploadProgress:
             return {
                 "upload_id": upload_id, "phase": item.phase,
                 "completed": item.completed, "total": item.total,
+                "rendered": item.rendered,
                 "elapsed_seconds": round(end - item.started, 1),
                 "seconds_since_last_page": round(end - item.last_page_completed, 1) if item.last_page_completed is not None else None,
                 "error": item.error, "document_id": item.document_id,

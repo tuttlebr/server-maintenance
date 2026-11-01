@@ -26,6 +26,7 @@ INSERT_BATCH_SIZE = 64
 
 _PREPARED_RE = re.compile(r"Prepared (?P<count>\d+) Markdown chunk")
 _EMBED_RE = re.compile(r"Embedding batch (?P<current>\d+)/(?P<total>\d+)")
+_EMBED_DONE_RE = re.compile(r"Embedded batch (?P<current>\d+)/(?P<total>\d+)")
 _INSERT_RE = re.compile(r"Inserting Milvus batch (?P<current>\d+)/(?P<total>\d+)")
 _INGESTED_RE = re.compile(r"Ingested (?P<count>\d+) chunk")
 
@@ -142,9 +143,12 @@ def _run_reindex_inner() -> None:
         return
 
     with tempfile.TemporaryDirectory(prefix="fleet-context-", dir=settings.data_dir) as staging:
-        source_count = prepare_index_sources(Path(staging))
+        # Keep local source references stable across runs so unchanged text hits
+        # the embedding checkpoint cache despite the temporary parent directory.
+        sources = Path(staging) / "context"
+        source_count = prepare_index_sources(sources)
         _set(message=f"Prepared {source_count} local context document(s)")
-        _run_ingester(command, Path(staging))
+        _run_ingester(command, sources)
 
 
 def _run_ingester(command: list[str], local_docs_dir: Path) -> None:
@@ -164,6 +168,8 @@ def _run_ingester(command: list[str], local_docs_dir: Path) -> None:
         str(EMBED_BATCH_SIZE),
         "--insert-batch-size",
         str(INSERT_BATCH_SIZE),
+        "--embedding-cache-dir",
+        str(settings.data_dir / "embedding-checkpoints" / COLLECTION_NAME),
     ]
 
     env = _ingester_env()
@@ -232,11 +238,12 @@ def _handle_ingester_line(line: str, total_chunks: int) -> int:
         _set(phase="embedding", message=line, progress=0, total=total_chunks)
         return total_chunks
 
-    embed = _EMBED_RE.search(line)
+    embedded = _EMBED_DONE_RE.search(line)
+    embed = embedded or _EMBED_RE.search(line)
     if embed:
         current = int(embed.group("current"))
         total_batches = int(embed.group("total"))
-        progress, total = _batch_progress(current, total_batches, EMBED_BATCH_SIZE, total_chunks)
+        progress, total = _batch_progress(current if embedded else current - 1, total_batches, EMBED_BATCH_SIZE, total_chunks)
         _set(phase="embedding", message=line, progress=progress, total=total)
         return total_chunks
 

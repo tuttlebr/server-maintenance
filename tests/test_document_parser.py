@@ -145,7 +145,7 @@ class DocumentParserTests(unittest.TestCase):
             self.assertNotIn("secret", str(caught.exception))
 
     def test_time_budget_and_concurrency_are_bounded(self):
-        with patch.object(parser.time, "monotonic", side_effect=[0, 101]):
+        with patch.object(parser.settings, "parser_timeout_seconds", 0.000001):
             with self.assertRaisesRegex(parser.ParserUnavailable, "timed out"):
                 self.parse_with(lambda request: self.fail("Expired request must not be sent"))
         with patch.object(parser._PARSE_SLOTS, "acquire", return_value=False):
@@ -164,7 +164,7 @@ class DocumentParserTests(unittest.TestCase):
         events = []
         calls = 0
 
-        async def request(page, remaining):
+        async def request(page, remaining, client):
             nonlocal calls
             calls += 1
             if calls == 2:
@@ -186,9 +186,65 @@ class DocumentParserTests(unittest.TestCase):
         settings = Settings(_env_file=None, parser_timeout_seconds=1800)
         self.assertEqual(settings.parser_timeout_seconds, 1800)
 
-        async def request(page, remaining):
+        async def request(page, remaining, client):
             self.assertGreater(remaining, 1700)
             return {"choices": [{"message": {"content": "Maintenance instructions for the fans."}, "finish_reason": "stop"}]}
 
         with patch.object(parser.settings, "parser_timeout_seconds", 1800), patch.object(parser, "_request_page", side_effect=request):
             self.assertIn("Maintenance", parser.parse_document(page_image(), ".png"))
+
+    def test_pages_render_lazily_and_share_one_http_client(self):
+        rendered = []
+        requests = []
+        client_type = httpx.AsyncClient
+        clients = []
+        original_png = parser._png
+
+        def png(image):
+            rendered.append(len(rendered) + 1)
+            return original_png(image)
+
+        async def handler(request):
+            requests.append(len(requests) + 1)
+            self.assertEqual(len(rendered), len(requests), 'Do not render ahead into unbounded image memory')
+            await asyncio.sleep(0)
+            return httpx.Response(200, json={'choices': [{'message': {'content': 'Maintenance instructions for the fans.'}, 'finish_reason': 'stop'}]})
+
+        def factory(**kwargs):
+            client = client_type(transport=httpx.MockTransport(handler), **kwargs)
+            clients.append(client)
+            return client
+
+        with patch.object(parser, '_png', side_effect=png), patch.object(parser.httpx, 'AsyncClient', side_effect=factory):
+            result = asyncio.run(parser.parse_document_async(pdf_document(3), '.pdf'))
+        self.assertEqual(len(clients), 1)
+        self.assertTrue(clients[0].is_closed)
+        self.assertEqual(len(requests), 3)
+        self.assertIn('## Page 3', result)
+
+    def test_cancellation_waits_for_rendering_before_closing_generator(self):
+        import threading
+        entered, release, closed = threading.Event(), threading.Event(), threading.Event()
+
+        def pages(*args):
+            try:
+                entered.set()
+                release.wait(2)
+                yield 1, page_image()
+            finally:
+                closed.set()
+
+        async def exercise():
+            task = asyncio.create_task(parser.parse_document_async(b'pdf', '.pdf'))
+            self.assertTrue(await asyncio.to_thread(entered.wait, 2))
+            task.cancel()
+            await asyncio.sleep(0.01)
+            self.assertFalse(closed.is_set())
+            release.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            self.assertTrue(closed.is_set())
+
+        with patch.object(parser, 'iter_pages', side_effect=pages):
+            asyncio.run(exercise())
+        self.assertEqual(parser._PARSE_SLOTS._value, 2)

@@ -152,20 +152,15 @@ export const getContextDocuments = () => request("/context/documents");
 export const startContextUpload = () => request("/context/uploads", { method: "POST" });
 export const getContextUpload = (uploadId) => request(`/context/uploads/${encodeURIComponent(uploadId)}`, { timeoutMs: 5000 });
 
-// Allow the server's full parsing budget plus two minutes for transfer/saving.
-export function contextUploadTimeoutMs(parserTimeoutSeconds = 100) {
-  const seconds = Number(parserTimeoutSeconds);
-  return ((Number.isFinite(seconds) && seconds > 0 ? seconds : 100) + 120) * 1000;
-}
-
-export function uploadContextDocument(formData, { onProgress, onTransferred, parserTimeoutSeconds } = {}) {
+export function uploadContextDocument(formData, { uploadId, onProgress, onTransferred } = {}) {
   // XHR exposes actual request-body transfer progress, including multipart framing.
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${BASE}/context/documents`);
+    xhr.open("POST", `${BASE}/context/uploads/${encodeURIComponent(uploadId)}/file`);
     const token = getToken();
     if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-    xhr.timeout = contextUploadTimeoutMs(parserTimeoutSeconds);
+    // This deadline covers transfer/queue admission only. Inference runs independently.
+    xhr.timeout = 120_000;
     xhr.upload.onprogress = event => onProgress?.(event.loaded, event.lengthComputable ? event.total : null);
     xhr.upload.onload = () => onTransferred?.();
     xhr.onload = () => {
@@ -175,7 +170,7 @@ export function uploadContextDocument(formData, { onProgress, onTransferred, par
         clearToken();
         window.location.hash = "#/login";
         reject(new ApiError("Session expired. Please sign in again.", { status: 401 }));
-      } else if (xhr.status >= 200 && xhr.status < 300 && data.id != null) {
+      } else if (xhr.status === 202 && data.upload_id === uploadId) {
         resolve(data);
       } else {
         const detail = Array.isArray(data.detail) ? data.detail.map(item => item.msg).join("; ") : data.detail;

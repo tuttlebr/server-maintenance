@@ -25,6 +25,7 @@ from backend.services.login_throttle import (
 )
 from backend.services.secret_store import encrypt_existing_host_secrets
 from backend.services.scan_scheduler import run_scan_scheduler
+from backend.services.document_uploads import document_uploads
 from backend.services.ssh_enrollment import initialize_known_hosts
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -67,6 +68,7 @@ async def lifespan(app: FastAPI):
             regenerate_inventory(db)
         # Reconcile in the background so startup stays available during outages.
         start_job_log_reconcile()
+        await document_uploads.start()
         if settings.automatic_scan_enabled:
             scan_scheduler = asyncio.create_task(run_scan_scheduler(), name="automatic-device-scans")
         yield
@@ -79,7 +81,10 @@ async def lifespan(app: FastAPI):
                     await scan_scheduler
         finally:
             try:
-                await shutdown_executor()
+                try:
+                    await document_uploads.shutdown()
+                finally:
+                    await shutdown_executor()
             finally:
                 executor_lock.close()
                 set_executor_lease(None)

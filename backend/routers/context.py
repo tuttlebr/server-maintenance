@@ -14,6 +14,7 @@ from backend.schemas import ContextDocumentResponse, ContextStatusResponse
 from backend.services import context_manager, docs_indexer
 from backend.services.document_parser import ParserUnavailable, parser_enabled
 from backend.services.upload_progress import uploads
+from backend.services.document_uploads import document_uploads
 
 router = APIRouter(prefix="/api/v2/context", tags=["context"])
 
@@ -64,6 +65,31 @@ def upload_status(upload_id: UUID, user: str = Depends(get_current_user)):
         return uploads.get(str(upload_id), user)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/uploads/{upload_id}/file", status_code=202)
+async def queue_upload(
+    upload_id: UUID,
+    file: UploadFile = File(...),
+    title: str | None = Form(default=None, max_length=200),
+    device_id: int | None = Form(default=None),
+    user: str = Depends(get_current_user),
+):
+    key = str(upload_id)
+    try:
+        state = uploads.get(key, user)
+        # Retrying an accepted upload ID follows the existing job, never reruns it.
+        if state["phase"] != "uploading":
+            return state
+        content = await file.read(settings.context_upload_max_bytes + 1)
+        if len(content) > settings.context_upload_max_bytes:
+            raise ValueError(f"Files may not exceed {settings.context_upload_max_bytes // (1024 * 1024)} MB")
+        await document_uploads.submit(key, user, content=content, filename=file.filename or "document.txt", title=title, device_id=device_id)
+        return uploads.get(key, user)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (ValueError, ParserUnavailable) as exc:
+        raise HTTPException(status_code=503 if isinstance(exc, ParserUnavailable) else 422, detail=str(exc)) from exc
 
 
 @router.post("/documents", response_model=ContextDocumentResponse, status_code=201)

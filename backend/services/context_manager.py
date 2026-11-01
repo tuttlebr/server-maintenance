@@ -18,6 +18,21 @@ from backend.services.upload_progress import ProgressCallback
 ALLOWED_EXTENSIONS = {".md", ".markdown", ".txt"}
 
 
+def validate_upload(db: Session, *, filename: str, content_bytes: bytes, device_id: int | None) -> str:
+    """Validate metadata/duplicates in a short-lived transaction before inference."""
+    extension = Path(filename).suffix.lower()
+    if extension not in ALLOWED_EXTENSIONS | PARSER_EXTENSIONS:
+        raise ValueError("Supported files: .txt, .md, .markdown, and (with a parser) .pdf, .png, .jpg, .jpeg")
+    if len(content_bytes) > settings.context_upload_max_bytes:
+        raise ValueError(f"Files may not exceed {settings.context_upload_max_bytes // (1024 * 1024)} MB")
+    if device_id is not None and not db.query(Device).filter(Device.id == device_id).first():
+        raise LookupError("Device not found")
+    digest = hashlib.sha256(content_bytes).hexdigest()
+    if db.query(ContextDocument).filter(ContextDocument.sha256 == digest, ContextDocument.device_id == device_id).first():
+        raise FileExistsError("This document is already uploaded for that device")
+    return digest
+
+
 def create_document(
     db: Session,
     *,
@@ -27,26 +42,13 @@ def create_document(
     device_id: int | None,
     uploaded_by: str,
     progress: ProgressCallback | None = None,
+    parsed_content: str | None = None,
 ) -> ContextDocument:
     extension = Path(filename).suffix.lower()
-    if extension not in ALLOWED_EXTENSIONS | PARSER_EXTENSIONS:
-        raise ValueError("Supported files: .txt, .md, .markdown, and (with a parser) .pdf, .png, .jpg, .jpeg")
-    if len(content_bytes) > settings.context_upload_max_bytes:
-        raise ValueError(f"Files may not exceed {settings.context_upload_max_bytes // (1024 * 1024)} MB")
-    if device_id is not None and not db.query(Device).filter(Device.id == device_id).first():
-        raise LookupError("Device not found")
-
-    digest = hashlib.sha256(content_bytes).hexdigest()
-    existing = (
-        db.query(ContextDocument)
-        .filter(ContextDocument.sha256 == digest, ContextDocument.device_id == device_id)
-        .first()
-    )
-    if existing:
-        raise FileExistsError("This document is already uploaded for that device")
+    digest = validate_upload(db, filename=filename, content_bytes=content_bytes, device_id=device_id)
 
     if extension in PARSER_EXTENSIONS:
-        content = parse_document(content_bytes, extension, progress=progress)
+        content = parsed_content if parsed_content is not None else parse_document(content_bytes, extension, progress=progress)
     else:
         try:
             content = content_bytes.decode("utf-8-sig")

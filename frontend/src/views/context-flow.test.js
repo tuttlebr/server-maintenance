@@ -90,9 +90,11 @@ test('a transient status failure does not stop an ongoing reindex poll', async t
 });
 
 async function uploadHarness(t) {
-  const originals = Object.fromEntries(['localStorage','window','XMLHttpRequest'].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)]));
+  const originals = Object.fromEntries(['localStorage','window','XMLHttpRequest','sessionStorage'].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)]));
   Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:()=> 'test'}});
   Object.defineProperty(globalThis,'window',{configurable:true,value:{location:{hash:''}}});
+  const storage=new Map();
+  Object.defineProperty(globalThis,'sessionStorage',{configurable:true,value:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)}});
   let xhr;
   class UploadRequest {
     constructor() { xhr=this; this.upload={}; }
@@ -127,20 +129,26 @@ async function uploadHarness(t) {
   find(root,n=>n.props.id==='context-file').props.onChange({target:{files:[file]}});
   const pending=find(root,n=>n.tag==='form').props.onSubmit({preventDefault(){}});
   await flush();
-  return {root, app, pending, polls, get xhr(){return xhr;}, setProgress:value=>{progress=value;}, fail:value=>{failPoll=value;}, hold:()=>{releasePoll={};return releasePoll;}, poll:async()=>{
+  return {root, app, pending, polls, storage, remount:async()=>{
+    const newRoot=element('root'), newApp=renderer.createApp(ContextManagement).use(router);
+    newApp.mount(newRoot);t.after(()=>newApp.unmount());await flush();return {root:newRoot,app:newApp};
+  }, accept:async()=>{xhr.status=202;xhr.responseText=JSON.stringify({upload_id:'upload-id',phase:'queued',elapsed_seconds:0});xhr.onload();await pending;await flush();}, get xhr(){return xhr;}, setProgress:value=>{progress=value;}, fail:value=>{failPoll=value;}, hold:()=>{releasePoll={};return releasePoll;}, poll:async()=>{
     const [id,callback]=polls.entries().next().value;polls.delete(id);await callback();await flush();
   }};
 }
 
 test('upload shows measured stages, survives a polling failure, and confirms saving',async t=>{
   const h=await uploadHarness(t);
-  assert.equal(h.xhr.timeout,1_920_000);
+  assert.equal(h.xhr.timeout,120_000);
   h.xhr.upload.onprogress({loaded:512,total:1024,lengthComputable:true});await flush();
   assert.match(text(h.root),/512 B \/ 1.0 KB transferred/);
   assert.equal(find(h.root,n=>n.tag==='progress').props.value,50);
   h.xhr.upload.onload();await flush();
   assert.match(text(h.root),/Waiting for server/);
   assert.equal(find(h.root,n=>n.tag==='progress').props.value,undefined);
+  await h.accept();
+  assert.match(text(h.root),/Queued for processing/);
+  assert.doesNotMatch(text(h.root),/Document saved/);
   await h.poll();
   assert.match(text(h.root),/1 of 3 pages complete; processing page 2/);
   assert.match(text(h.root),/Last page completed 2s ago/);
@@ -151,7 +159,7 @@ test('upload shows measured stages, survives a polling failure, and confirms sav
   h.fail(false);h.setProgress({phase:'saving',completed:0,total:0,elapsed_seconds:12,seconds_since_last_page:0});await h.poll();
   assert.match(text(h.root),/Saving document/);
   assert.doesNotMatch(text(h.root),/Document saved/);
-  h.xhr.status=201;h.xhr.responseText='{"id":7}';h.xhr.onload();await h.pending;await flush();
+  h.setProgress({phase:'complete',document_id:7,elapsed_seconds:13});await h.poll();
   assert.match(text(h.root),/Document saved/);
   assert.match(text(h.root),/Re-index to make this document searchable/);
   assert.equal(h.polls.size,0);
@@ -160,8 +168,7 @@ test('upload shows measured stages, survives a polling failure, and confirms sav
 test('a parser failure keeps the page error visible and never shows success',async t=>{
   const h=await uploadHarness(t);
   h.setProgress({phase:'failed',error:'Parser request timed out for page 15. No document was saved.'});
-  h.xhr.status=502;h.xhr.responseText=JSON.stringify({detail:'Parser request timed out for page 15. No document was saved.'});h.xhr.onload();
-  await h.pending;await flush();
+  await h.accept();await h.poll();
   assert.match(text(h.root),/Upload failed/);
   assert.match(text(h.root),/page 15/);
   assert.doesNotMatch(text(h.root),/Document saved/);
@@ -169,11 +176,10 @@ test('a parser failure keeps the page error visible and never shows success',asy
 });
 
 test('a late upload status response after navigation cannot restart polling',async t=>{
-  const h=await uploadHarness(t), held=h.hold();
+  const h=await uploadHarness(t);await h.accept();const held=h.hold();
   const pendingPoll=h.poll();await flush();
   h.app.unmount();held.resolve();await pendingPoll;
   assert.equal(h.polls.size,0);
-  h.xhr.status=201;h.xhr.responseText='{"id":7}';h.xhr.onload();await h.pending;
   assert.equal(h.polls.size,0);
 });
 
@@ -189,6 +195,22 @@ test('a lost upload response can still confirm the saved document from status',a
 test('a proxy timeout does not claim failure when the parser is still running',async t=>{
   const h=await uploadHarness(t);
   h.xhr.status=504;h.xhr.responseText='{}';h.xhr.onload();await h.pending;await flush();
-  assert.match(text(h.root),/Upload status unconfirmed/);
+  assert.match(text(h.root),/1 of 3 pages complete/);
+  assert.equal(h.polls.size,1);
   assert.doesNotMatch(text(h.root),/Upload failed/);
+});
+
+
+test('accepted background work reconnects after navigation without uploading again',async t=>{
+  const h=await uploadHarness(t);
+  await h.accept();
+  assert.equal(h.storage.get('fleet_context_upload'),'upload-id');
+  h.app.unmount();
+  const next=await h.remount();
+  assert.match(text(next.root),/1 of 3 pages complete; processing page 2/);
+  assert.match(text(next.root),/Processing continues in the background/);
+  h.setProgress({phase:'complete',document_id:7,elapsed_seconds:13});await h.poll();
+  assert.match(text(next.root),/Document saved/);
+  assert.equal(h.storage.has('fleet_context_upload'),false);
+  assert.equal(h.polls.size,0);
 });

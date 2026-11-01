@@ -1,4 +1,5 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{hash_map::DefaultHasher, HashSet, VecDeque};
+use std::hash::{Hash, Hasher};
 use std::env;
 use std::fs;
 use std::io::{self, Write};
@@ -12,7 +13,7 @@ use regex::Regex;
 use reqwest::header::{CONTENT_TYPE, USER_AGENT};
 use reqwest::{Client, StatusCode};
 use scraper::{Html, Selector};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use url::Url;
 
@@ -91,6 +92,18 @@ struct Cli {
 
     #[arg(long, default_value_t = 45)]
     request_timeout_secs: u64,
+
+    /// Persistent per-chunk embedding checkpoints (defaults to <markdown-dir>/.embeddings).
+    #[arg(long)]
+    embedding_cache_dir: Option<PathBuf>,
+
+    /// Recompute embeddings even when matching checkpoints exist.
+    #[arg(long, default_value_t = false)]
+    refresh_embeddings: bool,
+
+    /// Attempts per embedding batch for transient network/HTTP failures (1-10).
+    #[arg(long, default_value_t = 5)]
+    embedding_max_attempts: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -179,9 +192,13 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     load_env(&cli.env_file)?;
     let config = AppConfig::from_env(&cli)?;
+    if !(1..=10).contains(&cli.embedding_max_attempts) {
+        bail!("embedding-max-attempts must be between 1 and 10");
+    }
 
     let client = Client::builder()
         .timeout(Duration::from_secs(cli.request_timeout_secs))
+        .connect_timeout(Duration::from_secs(10))
         .redirect(reqwest::redirect::Policy::limited(10))
         .build()
         .context("failed to build HTTP client")?;
@@ -290,8 +307,17 @@ async fn main() -> Result<()> {
         );
     }
 
-    let embedder =
-        EmbeddingClient::new(client.clone(), config.clone(), cli.embed_batch_size.max(1));
+    let cache_dir = cli.embedding_cache_dir.clone()
+        .unwrap_or_else(|| cli.markdown_dir.join(".embeddings"));
+    fs::create_dir_all(&cache_dir).context("failed to create embedding checkpoint directory")?;
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&cache_dir, fs::Permissions::from_mode(0o700))?;
+    }
+    let mut embedder = EmbeddingClient::new(client.clone(), config.clone(), cli.embed_batch_size.max(1));
+    embedder.cache_dir = Some(cache_dir);
+    embedder.refresh = cli.refresh_embeddings;
+    embedder.max_attempts = cli.embedding_max_attempts;
     let texts: Vec<&str> = chunks.iter().map(|chunk| chunk.text.as_str()).collect();
     let embeddings = embedder.embed_texts(&texts).await?;
     let actual_dim = validate_vector_dimensions(&embeddings, config.embed_dim)?;
@@ -1060,12 +1086,38 @@ fn truncate_field(input: &str, max_bytes: usize) -> String {
     output.trim().to_string()
 }
 
+#[derive(Serialize, Deserialize)]
+struct EmbeddingCheckpoint {
+    identity: String,
+    vector: Vec<f32>,
+}
+
+struct EmbeddingFailure {
+    error: anyhow::Error,
+    retryable: bool,
+    retry_after: Option<Duration>,
+}
+
+fn retryable_embedding_status(status: StatusCode) -> bool {
+    status == StatusCode::REQUEST_TIMEOUT || status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
+}
+
+fn embedding_transport_failure(error: reqwest::Error) -> EmbeddingFailure {
+    let retryable = error.is_connect() || error.is_timeout() || error.is_body() || error.is_request();
+    EmbeddingFailure { error: error.into(), retryable, retry_after: None }
+}
+
 struct EmbeddingClient {
     http: Client,
     base_url: String,
     api_key: String,
     model: String,
     batch_size: usize,
+    expected_dim: Option<usize>,
+    cache_dir: Option<PathBuf>,
+    refresh: bool,
+    max_attempts: usize,
+    retry_delay: Duration,
 }
 
 impl EmbeddingClient {
@@ -1076,50 +1128,111 @@ impl EmbeddingClient {
             api_key: config.embed_api_key,
             model: config.embed_model,
             batch_size,
+            expected_dim: config.embed_dim,
+            cache_dir: None,
+            refresh: false,
+            max_attempts: 5,
+            retry_delay: Duration::from_secs(2),
         }
+    }
+
+    fn checkpoint(&self, text: &str) -> Option<(PathBuf, String)> {
+        let directory = self.cache_dir.as_ref()?;
+        // The hash is just a filename: compare the complete identity on reads so
+        // hash collisions can only cause a cache miss, never a wrong embedding.
+        // No API keys are included. Version the identity when request semantics change.
+        let identity = serde_json::to_string(&(1, &self.base_url, &self.model, self.expected_dim, "passage", "float", text)).ok()?;
+        let mut hash = DefaultHasher::new();
+        identity.hash(&mut hash);
+        Some((directory.join(format!("{:016x}.json", hash.finish())), identity))
+    }
+
+    fn cached(&self, text: &str) -> Option<Vec<f32>> {
+        if self.refresh { return None; }
+        let (path, identity) = self.checkpoint(text)?;
+        let value: EmbeddingCheckpoint = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
+        if value.identity != identity || validate_vector_dimensions(std::slice::from_ref(&value.vector), self.expected_dim).is_err() {
+            return None;
+        }
+        Some(value.vector)
+    }
+
+    fn save_checkpoint(&self, text: &str, vector: &[f32]) -> Result<()> {
+        let Some((path, identity)) = self.checkpoint(text) else { return Ok(()); };
+        let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)] {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary).context("could not write embedding checkpoint")?;
+        serde_json::to_writer(&mut file, &EmbeddingCheckpoint { identity, vector: vector.to_vec() })?;
+        file.sync_all()?;
+        fs::rename(temporary, path).context("could not publish embedding checkpoint")?;
+        Ok(())
     }
 
     async fn embed_texts(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
         let mut embeddings = Vec::with_capacity(texts.len());
         let total_batches = (texts.len() + self.batch_size - 1) / self.batch_size;
-
+        let mut reused = 0;
         for (batch_idx, batch) in texts.chunks(self.batch_size).enumerate() {
             status!("Embedding batch {}/{}", batch_idx + 1, total_batches);
-            let mut batch_embeddings = self.call_embeddings(batch).await?;
-            embeddings.append(&mut batch_embeddings);
+            let mut vectors: Vec<Option<Vec<f32>>> = batch.iter().map(|text| self.cached(text)).collect();
+            let missing: Vec<usize> = vectors.iter().enumerate().filter_map(|(index, vector)| vector.is_none().then_some(index)).collect();
+            reused += batch.len() - missing.len();
+            if !missing.is_empty() {
+                let inputs: Vec<&str> = missing.iter().map(|&index| batch[index]).collect();
+                let results = self.call_embeddings(&inputs).await
+                    .context("embedding batch failed; completed checkpoints are saved; re-index again to resume")?;
+                validate_vector_dimensions(&results, self.expected_dim)?;
+                for (index, vector) in missing.into_iter().zip(results) {
+                    self.save_checkpoint(batch[index], &vector)?;
+                    vectors[index] = Some(vector);
+                }
+            }
+            embeddings.extend(vectors.into_iter().map(|vector| vector.expect("validated or cached embedding")));
+            status!("Embedded batch {}/{} ({} cached chunks reused)", batch_idx + 1, total_batches, reused);
         }
-
         Ok(embeddings)
     }
 
     async fn call_embeddings(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        let url = format!("{}/embeddings", self.base_url);
-        let response = self
-            .http
-            .post(url)
-            .bearer_auth(&self.api_key)
-            .json(&json!({
-                "model": self.model,
-                "input": texts,
-                "encoding_format": "float",
-                "input_type": "passage"
-            }))
-            .send()
-            .await
-            .context("embedding request failed")?;
-
-        let status = response.status();
-        let body = response
-            .text()
-            .await
-            .context("failed to read embedding response")?;
-        if !status.is_success() {
-            bail!("embedding API returned {status}: {body}");
+        for attempt in 1..=self.max_attempts {
+            match self.call_embeddings_once(texts).await {
+                Ok(vectors) => return Ok(vectors),
+                Err(failure) if failure.retryable && attempt < self.max_attempts => {
+                    let backoff = self.retry_delay.saturating_mul(1 << (attempt - 1).min(5)).min(Duration::from_secs(30));
+                    let delay = failure.retry_after.unwrap_or(backoff).min(Duration::from_secs(60));
+                    status!("Retrying embedding batch after transient failure in {}s (attempt {}/{})", delay.as_secs(), attempt + 1, self.max_attempts);
+                    tokio::time::sleep(delay).await;
+                }
+                Err(failure) => return Err(failure.error).context(format!("embedding request failed after {attempt} attempt(s)")),
+            }
         }
+        bail!("embedding attempts must be positive")
+    }
 
-        let parsed: EmbeddingResponse = serde_json::from_str(&body)
-            .with_context(|| format!("invalid embedding response: {body}"))?;
-        parsed.validated(texts.len())
+    async fn call_embeddings_once(&self, texts: &[&str]) -> std::result::Result<Vec<Vec<f32>>, EmbeddingFailure> {
+        let response = self.http.post(format!("{}/embeddings", self.base_url))
+            .bearer_auth(&self.api_key)
+            .json(&json!({"model": self.model, "input": texts, "encoding_format": "float", "input_type": "passage"}))
+            .send().await.map_err(embedding_transport_failure)?;
+        let status = response.status();
+        if !status.is_success() {
+            let retry_after = response.headers().get("retry-after")
+                .and_then(|value| value.to_str().ok()).and_then(|value| value.parse::<u64>().ok()).map(Duration::from_secs);
+            return Err(EmbeddingFailure {
+                error: anyhow::anyhow!("embedding API returned HTTP {status}"),
+                retryable: retryable_embedding_status(status), retry_after,
+            });
+        }
+        let body = response.text().await.map_err(embedding_transport_failure)?;
+        let vectors = serde_json::from_str::<EmbeddingResponse>(&body)
+            .context("invalid embedding response JSON")
+            .and_then(|parsed| parsed.validated(texts.len()));
+        vectors.map_err(|error| EmbeddingFailure { error, retryable: false, retry_after: None })
     }
 }
 
@@ -1415,5 +1528,156 @@ mod tests {
         assert_eq!(chunks[0].source, "Fleet Manager UI Guide");
         assert!(chunks[0].text.contains("docs/fleet-manager-ui.md"));
         assert_eq!(chunks[0].heading, "Fleet Manager UI Guide: Operations");
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    use std::io::Read;
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::thread;
+    use std::time::Instant;
+
+    fn server(responses: Vec<Option<(&'static str, &'static str)>>) -> (String, thread::JoinHandle<Vec<Value>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = format!("http://{}/v1", listener.local_addr().unwrap());
+        listener.set_nonblocking(true).unwrap();
+        let task = thread::spawn(move || {
+            let mut inputs = Vec::new();
+            for response in responses {
+                let deadline = Instant::now() + Duration::from_secs(5);
+                let mut socket = loop {
+                    match listener.accept() {
+                        Ok((socket, _)) => break socket,
+                        Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                            assert!(Instant::now() < deadline, "expected embedding request never arrived");
+                            thread::sleep(Duration::from_millis(1));
+                        }
+                        Err(error) => panic!("{error}"),
+                    }
+                };
+                socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                let mut bytes = Vec::new();
+                let (header_end, length) = loop {
+                    let mut block = [0; 4096];
+                    let count = socket.read(&mut block).unwrap();
+                    assert!(count > 0);
+                    bytes.extend_from_slice(&block[..count]);
+                    if let Some(end) = bytes.windows(4).position(|value| value == b"\r\n\r\n") {
+                        let headers = String::from_utf8_lossy(&bytes[..end]);
+                        let length = headers.lines().find_map(|line| {
+                            let (key, value) = line.split_once(':')?;
+                            key.eq_ignore_ascii_case("content-length").then(|| value.trim().parse::<usize>().unwrap())
+                        }).unwrap();
+                        break (end + 4, length);
+                    }
+                };
+                while bytes.len() < header_end + length {
+                    let mut block = [0; 4096];
+                    let count = socket.read(&mut block).unwrap();
+                    assert!(count > 0);
+                    bytes.extend_from_slice(&block[..count]);
+                }
+                inputs.push(serde_json::from_slice::<Value>(&bytes[header_end..header_end + length]).unwrap()["input"].clone());
+                if let Some((status, body)) = response {
+                    write!(socket, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nRetry-After: 0\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                }
+            }
+            inputs
+        });
+        (address, task)
+    }
+
+    fn client(base_url: String) -> EmbeddingClient {
+        let mut client = EmbeddingClient::new(
+            Client::builder().timeout(Duration::from_secs(1)).build().unwrap(),
+            AppConfig { embed_model: "test-model".into(), embed_dim: Some(2), embed_base_url: base_url, embed_api_key: "test-key".into(), milvus_uri: String::new(), milvus_token: None }, 1,
+        );
+        client.max_attempts = 2;
+        client.retry_delay = Duration::ZERO;
+        client
+    }
+
+    struct Cache(PathBuf);
+    impl Cache {
+        fn new() -> Self {
+            static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+            let path = env::temp_dir().join(format!("fleet-checkpoint-test-{}-{}", std::process::id(), SEQUENCE.fetch_add(1, Ordering::Relaxed)));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+    impl Drop for Cache {
+        fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); }
+    }
+
+    const VECTOR: &str = r#"{"data":[{"index":0,"embedding":[1.0,2.0]}]}"#;
+
+    #[tokio::test]
+    async fn transient_http_and_connection_failures_retry_the_same_batch() {
+        for first in [Some(("503 Service Unavailable", "unavailable")), Some(("429 Too Many Requests", "busy")), None] {
+            let (url, requests) = server(vec![first, Some(("200 OK", VECTOR))]);
+            assert_eq!(client(url).call_embeddings(&["one"]).await.unwrap(), vec![vec![1.0, 2.0]]);
+            assert_eq!(requests.join().unwrap(), vec![json!(["one"]), json!(["one"])]);
+        }
+    }
+
+    #[tokio::test]
+    async fn permanent_http_and_invalid_vectors_are_not_retried() {
+        for (status, body) in [("401 Unauthorized", "private body"), ("422 Unprocessable Entity", "bad model"), ("200 OK", "invalid json"), ("200 OK", r#"{"data":[]}"#)] {
+            let (url, requests) = server(vec![Some((status, body))]);
+            let error = client(url).call_embeddings(&["one"]).await.unwrap_err();
+            assert!(!format!("{error:#}").contains("private body"));
+            assert_eq!(requests.join().unwrap().len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_run_resumes_from_persistent_checkpoints_without_reembedding_successes() {
+        let cache = Cache::new();
+        let (url, requests) = server(vec![Some(("200 OK", VECTOR)), Some(("503 Service Unavailable", "busy")), Some(("503 Service Unavailable", "busy")), Some(("200 OK", VECTOR)), Some(("200 OK", VECTOR))]);
+        let mut first = client(url.clone());
+        first.cache_dir = Some(cache.0.clone());
+        assert!(first.embed_texts(&["one", "two", "three"]).await.is_err());
+        assert!(first.cached("one").is_some());
+        assert!(first.cached("two").is_none());
+        let mut resumed = client(url);
+        resumed.cache_dir = Some(cache.0.clone());
+        assert_eq!(resumed.embed_texts(&["one", "two", "three"]).await.unwrap().len(), 3);
+        assert_eq!(requests.join().unwrap(), vec![json!(["one"]), json!(["two"]), json!(["two"]), json!(["two"]), json!(["three"])]);
+        // Even after batching/order changes, every exact input is reusable offline.
+        resumed.batch_size = 2;
+        assert_eq!(resumed.embed_texts(&["three", "one", "two"]).await.unwrap().len(), 3);
+    }
+
+    #[test]
+    fn checkpoints_validate_identity_dimensions_and_corruption() {
+        let cache = Cache::new();
+        let mut embedder = client("http://first/v1".into());
+        embedder.cache_dir = Some(cache.0.clone());
+        embedder.save_checkpoint("one", &[1.0, 2.0]).unwrap();
+        assert!(embedder.cached("one").is_some());
+        assert!(embedder.cached("different input").is_none());
+        embedder.model = "new-model".into();
+        assert!(embedder.cached("one").is_none());
+        embedder.model = "test-model".into();
+        embedder.base_url = "http://second/v1".into();
+        assert!(embedder.cached("one").is_none());
+        embedder.base_url = "http://first/v1".into();
+        embedder.expected_dim = Some(3);
+        assert!(embedder.cached("one").is_none());
+        embedder.expected_dim = Some(2);
+        embedder.refresh = true;
+        assert!(embedder.cached("one").is_none());
+        embedder.refresh = false;
+        let (path, identity) = embedder.checkpoint("one").unwrap();
+        fs::write(&path, "truncated JSON").unwrap();
+        assert!(embedder.cached("one").is_none());
+        fs::write(&path, serde_json::to_vec(&EmbeddingCheckpoint { identity: "collision".into(), vector: vec![1.0, 2.0] }).unwrap()).unwrap();
+        assert!(embedder.cached("one").is_none());
+        fs::write(&path, serde_json::to_vec(&EmbeddingCheckpoint { identity, vector: vec![1.0] }).unwrap()).unwrap();
+        assert!(embedder.cached("one").is_none());
     }
 }

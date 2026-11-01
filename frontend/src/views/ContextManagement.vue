@@ -24,7 +24,7 @@
       <section class="card upload-card">
         <div class="card-body">
           <h3>Upload documentation</h3>
-          <p class="muted">Add a UTF-8 text or Markdown file<span v-if="status.parser_enabled">, PDF, or PNG/JPEG page image</span> up to {{ formatBytes(status.upload_max_bytes) }}.<span v-if="status.parser_enabled"> PDFs support up to {{ status.parser_max_pages }} pages and are parsed during upload.</span> Associate hardware manuals with a device so retrieval includes that relationship.</p>
+          <p class="muted">Add a UTF-8 text or Markdown file<span v-if="status.parser_enabled">, PDF, or PNG/JPEG page image</span> up to {{ formatBytes(status.upload_max_bytes) }}.<span v-if="status.parser_enabled"> PDFs support up to {{ status.parser_max_pages }} pages. Parsing continues in the background after upload.</span> Associate hardware manuals with a device so retrieval includes that relationship.</p>
           <form @submit.prevent="upload">
             <div class="form-group"><label class="form-label" for="context-file">Document</label><input :key="fileInputKey" id="context-file" class="file-input" type="file" :accept="acceptedFiles" required :disabled="uploading" @change="selectFile" /></div>
             <div class="form-group"><label class="form-label" for="context-title">Title <span>(optional)</span></label><input id="context-title" v-model="uploadForm.title" :disabled="uploading" class="form-input" maxlength="200" placeholder="Uses the document heading or filename" /></div>
@@ -37,6 +37,7 @@
               <p v-if="uploadDetail">{{ uploadDetail }}</p>
             </div>
             <progress v-if="uploading && !['complete', 'failed'].includes(uploadState.phase)" :value="uploadPercent ?? undefined" max="100" :aria-label="uploadLabel"></progress>
+            <p v-if="uploading && uploadAccepted">You can leave this page. Processing continues in the background.</p>
             <p class="upload-timing">Elapsed {{ formatDuration(uploadElapsed) }}<span v-if="lastPageAge != null && uploadState.phase === 'parsing'"> · Last page completed {{ formatDuration(lastPageAge) }} ago</span></p>
             <p v-if="uploadState.connectionWarning" class="upload-warning">{{ uploadState.connectionWarning }}</p>
           </section>
@@ -75,6 +76,8 @@ async function load() { if (disposed) return; loading.value = true; try { [docum
 function schedulePoll() { clearTimeout(pollTimer); if (disposed) return; pollTimer = setTimeout(async () => { await loadStatus(); if (!status.running) await load(); }, 1500); }
 async function startReindex() { try { const result = await reindexContext(); window.$toast?.success(result.detail); status.running = true; status.error = null; schedulePoll(); } catch (error) { window.$toast?.error("Couldn't start context re-index", error); } }
 const uploadState = ref(null);
+const uploadAccepted = ref(false);
+const UPLOAD_STORAGE_KEY = "fleet_context_upload";
 const uploadNow = ref(Date.now());
 let uploadPollTimer, uploadClock, activeUploadId = null;
 const uploadElapsed = computed(() => {
@@ -86,13 +89,14 @@ const lastPageAge = computed(() => uploadState.value?.seconds_since_last_page ==
 const uploadLabel = computed(() => {
   const state = uploadState.value;
   if (!state) return "";
-  return ({ uploading: state.transferred ? "Waiting for server…" : "Uploading file…", validating: "Checking document…", rendering: "Preparing pages…", parsing: "Parsing document…", saving: "Saving document…", complete: "Document saved", failed: "Upload failed", interrupted: "Upload status unconfirmed" })[state.phase] || "Processing document…";
+  return ({ uploading: state.transferred ? "Waiting for server…" : "Uploading file…", queued: "Queued for processing…", validating: "Checking document…", rendering: "Preparing pages…", parsing: "Parsing document…", saving: "Saving document…", complete: "Document saved", failed: "Upload failed", interrupted: "Upload status unconfirmed" })[state.phase] || "Processing document…";
 });
 const uploadDetail = computed(() => {
   const state = uploadState.value;
   if (!state) return "";
   if (state.error) return state.error;
   if (state.phase === "complete") return "Re-index to make this document searchable.";
+  if (state.phase === "queued") return "Waiting for an available document worker.";
   if (state.phase === "uploading") return state.bytesTotal ? `${formatBytes(state.bytesSent)} / ${formatBytes(state.bytesTotal)} transferred` : `${formatBytes(state.bytesSent)} transferred`;
   if (state.phase === "rendering" && state.total) return `${state.completed} of ${state.total} pages prepared`;
   if (state.phase === "parsing") return `${state.completed} of ${state.total} pages complete${state.completed < state.total ? `; processing page ${state.completed + 1}` : ""}`;
@@ -110,30 +114,59 @@ function applyUploadStatus(result) {
   Object.assign(uploadState.value, result, { observedAt: Date.now(), connectionWarning: "" });
   uploadNow.value = Date.now();
 }
+function rememberUpload(uploadId) {
+  try { if (uploadId) globalThis.sessionStorage?.setItem(UPLOAD_STORAGE_KEY, uploadId); else globalThis.sessionStorage?.removeItem(UPLOAD_STORAGE_KEY); } catch { /* Storage can be disabled. */ }
+}
+function beginUploadState(phase = "uploading") {
+  uploading.value = true;
+  uploadAccepted.value = phase !== "uploading";
+  uploadNow.value = Date.now();
+  uploadState.value = { phase, bytesSent: 0, bytesTotal: null, transferred: false, completed: 0, total: 0, elapsed_seconds: 0, seconds_since_last_page: null, observedAt: Date.now(), error: null, connectionWarning: "" };
+  clearInterval(uploadClock);
+  uploadClock = setInterval(() => { uploadNow.value = Date.now(); }, 1000);
+}
+async function finishUpload() {
+  stopUploadTimers();
+  uploadState.value.elapsed_seconds = uploadElapsed.value;
+  uploading.value = false;
+  rememberUpload(null);
+  if (uploadState.value.phase === "complete") {
+    uploadForm.file = null;
+    uploadForm.title = "";
+    fileInputKey.value += 1;
+    await load();
+  }
+}
+async function pollUpload(uploadId) {
+  if (disposed || !uploading.value || uploadId !== activeUploadId) return;
+  try {
+    const result = await getContextUpload(uploadId);
+    if (disposed || !uploading.value || uploadId !== activeUploadId) return;
+    applyUploadStatus(result);
+    uploadAccepted.value = result.phase !== "uploading";
+    if (["complete", "failed"].includes(result.phase)) { await finishUpload(); return; }
+  } catch (error) {
+    if (disposed || !uploading.value || uploadId !== activeUploadId) return;
+    if ([401, 404].includes(error.status)) {
+      Object.assign(uploadState.value, { phase: "interrupted", error: error.message, connectionWarning: "" });
+      await finishUpload();
+      return;
+    }
+    uploadState.value.connectionWarning = "Progress updates unavailable. Reconnecting…";
+  }
+  scheduleUploadPoll(uploadId);
+}
 function scheduleUploadPoll(uploadId) {
   clearTimeout(uploadPollTimer);
   if (disposed || !uploading.value || uploadId !== activeUploadId) return;
-  uploadPollTimer = setTimeout(async () => {
-    try {
-      const result = await getContextUpload(uploadId);
-      if (disposed || !uploading.value || uploadId !== activeUploadId) return;
-      applyUploadStatus(result);
-    } catch (error) {
-      if (disposed || !uploading.value || uploadId !== activeUploadId) return;
-      uploadState.value.connectionWarning = "Progress updates unavailable. Waiting for the upload result…";
-    }
-    if (!['complete', 'failed'].includes(uploadState.value.phase)) scheduleUploadPoll(uploadId);
-  }, 1000);
+  uploadPollTimer = setTimeout(() => pollUpload(uploadId), 1000);
 }
 function stopUploadTimers() { clearTimeout(uploadPollTimer); clearInterval(uploadClock); }
 function selectFile(event) { uploadForm.file = event.target.files?.[0] || null; if (!uploading.value) uploadState.value = null; }
 async function upload() {
   if (!uploadForm.file || uploading.value) return;
-  uploading.value = true;
   activeUploadId = null;
-  uploadNow.value = Date.now();
-  uploadState.value = { phase: "uploading", bytesSent: 0, bytesTotal: null, transferred: false, completed: 0, total: 0, elapsed_seconds: 0, seconds_since_last_page: null, observedAt: Date.now(), error: null, connectionWarning: "" };
-  uploadClock = setInterval(() => { uploadNow.value = Date.now(); }, 1000);
+  beginUploadState();
   let uploadId;
   const body = new FormData();
   body.append("file", uploadForm.file);
@@ -144,46 +177,64 @@ async function upload() {
     uploadId = reservation.upload_id;
     activeUploadId = uploadId;
     if (disposed) return;
-    body.append("upload_id", uploadId);
-    scheduleUploadPoll(uploadId);
-    await uploadContextDocument(body, {
-      parserTimeoutSeconds: reservation.parser_timeout_seconds ?? status.parser_timeout_seconds,
+    // Remember before sending: a navigation/lost response can still reconnect.
+    rememberUpload(uploadId);
+    const result = await uploadContextDocument(body, {
+      uploadId,
       onProgress: (loaded, total) => { if (!disposed) Object.assign(uploadState.value, { bytesSent: loaded, bytesTotal: total }); },
       onTransferred: () => { if (!disposed) uploadState.value.transferred = true; },
     });
     if (disposed) return;
-    uploadState.value.phase = "complete";
-    uploadState.value.connectionWarning = "";
+    applyUploadStatus(result);
+    uploadAccepted.value = true;
+    if (["complete", "failed"].includes(result.phase)) await finishUpload();
+    else scheduleUploadPoll(uploadId);
   } catch (error) {
     if (disposed) return;
-    // A lost response is not proof that the database commit failed.
     let result;
-    if (uploadId) { try { result = await getContextUpload(uploadId); } catch { /* The connection may still be down. */ } }
+    if (uploadId) { try { result = await getContextUpload(uploadId); } catch { /* Keep the ID if status is uncertain. */ } }
     if (disposed) return;
-    if (result?.phase === "complete") applyUploadStatus(result);
-    else {
-      uploadState.value.phase = result?.phase === "failed" || (error.status >= 400 && error.status < 500) ? "failed" : "interrupted";
-      uploadState.value.error = result?.error || error.message;
-      uploadState.value.connectionWarning = "";
+    if (result && result.phase !== "uploading") {
+      applyUploadStatus(result);
+      uploadAccepted.value = true;
+      if (["complete", "failed"].includes(result.phase)) await finishUpload();
+      else scheduleUploadPoll(uploadId);
+    } else if (!result && uploadId && !(error.status >= 400 && error.status < 500)) {
+      uploadState.value.connectionWarning = "Upload acceptance unconfirmed. Reconnecting to check status…";
+      scheduleUploadPoll(uploadId);
+    } else {
+      Object.assign(uploadState.value, { phase: "interrupted", error: error.message, connectionWarning: "" });
+      await finishUpload();
     }
   } finally {
-    stopUploadTimers();
-    if (!disposed) {
-      uploadState.value.elapsed_seconds = uploadElapsed.value;
-      uploading.value = false;
-    }
+    if (disposed) stopUploadTimers();
   }
-  if (!disposed && uploadState.value.phase === "complete") {
-    uploadForm.file = null;
-    uploadForm.title = "";
-    fileInputKey.value += 1;
-    await load();
+}
+async function restoreUpload() {
+  let uploadId;
+  try { uploadId = globalThis.sessionStorage?.getItem(UPLOAD_STORAGE_KEY); } catch { return; }
+  if (!uploadId || disposed) return;
+  activeUploadId = uploadId;
+  beginUploadState("queued");
+  try {
+    const result = await getContextUpload(uploadId);
+    if (disposed) return;
+    if (result.phase === "uploading") {
+      Object.assign(uploadState.value, { phase: "interrupted", error: "File transfer was not confirmed. Select the file to upload again." });
+      await finishUpload();
+      return;
+    }
+    applyUploadStatus(result);
+    if (["complete", "failed"].includes(result.phase)) await finishUpload();
+    else scheduleUploadPoll(uploadId);
+  } catch {
+    if (!disposed) scheduleUploadPoll(uploadId);
   }
 }
 function askDelete(document) { deleteTarget.value = document; }
 async function removeDocument() { const document = deleteTarget.value; deleteTarget.value = null; try { const result = await deleteContextDocument(document.id); window.$toast?.success(result.detail); await load(); } catch (error) { window.$toast?.error("Couldn't remove document", error); } }
 function formatBytes(bytes) { if (bytes < 1024) return `${bytes} B`; if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`; return `${(bytes / (1024 * 1024)).toFixed(1)} MB`; }
-onMounted(load); onUnmounted(() => { disposed = true; clearTimeout(pollTimer); stopUploadTimers(); });
+onMounted(async () => { await load(); if (!disposed) await restoreUpload(); }); onUnmounted(() => { disposed = true; clearTimeout(pollTimer); stopUploadTimers(); });
 </script>
 
 <style scoped>
