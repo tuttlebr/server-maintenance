@@ -140,6 +140,9 @@ function_groups:
       url: ${UNIFI_MCP_SERVER}
       auth_provider: unifi_mcp_server
 functions:
+  # prepare_config.py conditionally replaces both retrieval functions with
+  # fleet_reranked_retriever when RERANK_BASE_URL is configured. Tool names and
+  # final result counts stay stable; candidates are reranked after vector search.
   fleet_docs:
     _type: nat_retriever
     retriever: fleet_retriever

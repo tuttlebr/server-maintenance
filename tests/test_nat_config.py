@@ -31,6 +31,36 @@ class NatConfigTests(unittest.TestCase):
         self.assertEqual(self.config["workflow"]["_type"], "tool_calling_agent")
         self.assertEqual(self.config["llms"]["fleet_llm"]["api_type"], "chat_completion")
 
+    def test_reranking_disabled_without_explicit_endpoint(self):
+        config = prepare_config(copy.deepcopy(self.config), {"RERANK_MODEL": "test", "RERANK_API_KEY": "key"})
+        for name in ("fleet_docs", "fleet_job_logs"):
+            self.assertEqual(config["functions"][name]["_type"], "nat_retriever")
+
+    def test_reranking_wraps_both_searches_and_preserves_final_counts(self):
+        config = prepare_config(copy.deepcopy(self.config), {"RERANK_BASE_URL": " http://reranker:8000/v1/ "})
+        for name, count in (("fleet_docs", 3), ("fleet_job_logs", 20)):
+            function = config["functions"][name]
+            self.assertEqual(function["_type"], "fleet_reranked_retriever")
+            self.assertEqual(function["base_url"], "http://reranker:8000/v1")
+            self.assertEqual(function["top_k"], count)
+            self.assertEqual(function["candidate_k"], 40)
+            self.assertEqual(function["api_key"], "")
+            self.assertEqual(function["api_format"], "rerank")
+        self.assertEqual(config["workflow"]["tool_names"], self.config["workflow"]["tool_names"])
+
+    def test_reranker_settings_override_defaults(self):
+        config = prepare_config(copy.deepcopy(self.config), {
+            "RERANK_BASE_URL": "http://reranker/v1", "RERANK_API_KEY": "dedicated-key",
+            "RERANK_MODEL": "served-model", "RERANK_API_FORMAT": "nim",
+            "RERANK_CANDIDATE_K": "80", "RERANK_TIMEOUT_SECONDS": "5",
+        })
+        function = config["functions"]["fleet_docs"]
+        self.assertEqual(function["candidate_k"], 80)
+        self.assertEqual(function["model_name"], "served-model")
+        self.assertEqual(function["api_key"], "dedicated-key")
+        self.assertEqual(function["api_format"], "nim")
+        self.assertEqual(function["timeout"], 5)
+
     def test_prepared_config_preserves_the_canonical_system_prompt(self):
         config = prepare_config(copy.deepcopy(self.config), {})
         runtime_config = yaml.safe_load(yaml.safe_dump(config, sort_keys=False))

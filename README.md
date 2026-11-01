@@ -589,7 +589,7 @@ The bundled standalone Milvus uses `COMMON_STORAGETYPE=local`, as in the [upstre
 
 The Rust doc ingester crawls every HTML page under each URL prefix in `docs/urls.txt`, includes local Markdown guidance from `docs/*.md`, converts content to Markdown, embeds the chunks with the `.env` embedding settings, and rebuilds the `fleet_docs` collection in Milvus. The Context UI also accepts UTF-8 `.txt`, `.md`, and `.markdown` uploads, optionally associates them with a device, and adds current discovery facts plus manual device attributes to the same rebuild. The included `docs/fleet-manager-ui.md` file teaches Fleet Help how to guide users through the UI.
 
-Optional Nemotron document parsing is configured independently in `.env` and disabled until `PARSER_BASE_URL` is set. The base URL must be reachable from the web container; Kubernetes `*.svc.cluster.local` names typically require running inside that cluster or configuring DNS/routing. `PARSER_API_KEY` is independent of `AI_HELPER_API_KEY`; leave it empty for unauthenticated services. For OpenAI-compatible serving, the model name must match the endpoint’s configured alias.
+Optional Nemotron parser and reranker models are configured independently in `.env`. Both are disabled until their base URL is set. Base URLs must be reachable from the calling container; Kubernetes `*.svc.cluster.local` names typically require running inside that cluster or configuring DNS/routing. Keys are independent of `AI_HELPER_API_KEY`; leave them empty for unauthenticated services, or set the placeholder/key required by your gateway. Model names must match the serving endpoint's configured alias.
 
 ```dotenv
 # Optional document-image parsing in the web service
@@ -599,6 +599,14 @@ PARSER_API_KEY=
 PARSER_API_FORMAT=openai
 PARSER_MAX_PAGES=20
 PARSER_TIMEOUT_SECONDS=100
+
+# Optional reranking in NeMo Agent Toolkit
+RERANK_BASE_URL=http://your-reranker:8000/v1
+RERANK_MODEL=nvidia/Nemotron-3.5-Rerank-8B-BF16
+RERANK_API_KEY=
+RERANK_API_FORMAT=rerank
+RERANK_CANDIDATE_K=40
+RERANK_TIMEOUT_SECONDS=15
 ```
 
 With the parser configured, **Context** also accepts PDF, PNG, and JPEG uploads. PDF pages are rendered locally one at a time, then sent individually to `PARSER_BASE_URL/chat/completions` using the [Nemotron 3.5 Parse request format](https://huggingface.co/nvidia/Nemotron-3.5-Parse#inference-with-vllm). For a NIM parser exposing [multipart `/v1/parse`](https://docs.api.nvidia.com/nim/reference/nvidia-nemotron-3_5-parse-infer), set `PARSER_API_FORMAT=nim` and a base URL ending in `/v1`; this fixed-model API does not use `PARSER_MODEL`. The upload stores extracted text with page labels, the original filename/hash/size, and the device association. Binary originals are not retained. Layout control tokens are removed; Markdown, HTML, and native LaTeX table text are retained without advanced table conversion. Re-index after uploading to publish the extracted text to Milvus. Existing HTML crawling, Markdown ingestion, and job-log indexing do not invoke the parser. Changing parser settings does not reparse existing uploads; remove and upload the original again to regenerate text.
@@ -610,6 +618,14 @@ The default upload limit is 30 MiB, with at most 50 PDF pages (configurable with
 Uploads show measured transfer bytes, queueing, pages prepared, pages parsed, saving, and confirmed completion. Elapsed time and time since the last completed page help identify slow pages; there is no estimated finish time or within-page percentage. The browser reserves an authenticated upload ID, sends the file to `POST /api/v2/context/uploads/{id}/file`, and receives HTTP 202 after queue admission. It polls owner-scoped status once per second until completion. Accepted uploads continue after navigation or disconnection; the browser remembers the ID in session storage and reconnects on returning to Context or reloading. Status failures show a reconnecting notice without resetting page progress or implying the upload failed.
 
 Two lifespan-managed async workers process at most six accepted uploads (running plus queued). Originals are spooled in a private temporary directory and removed on completion, failure, or orderly shutdown. CPU rendering and short database operations run off the event loop; inference uses one reusable HTTP client per document and never holds a database session open while waiting. Page rendering is lazy, bounding image memory to the current page per worker; parsed text keeps its existing size limit. Queue saturation returns HTTP 503. Progress is transient, bounded to 256 records, and retained for 15 minutes after completion; active jobs are retained through their deadline. The current single-process web service keeps jobs/status in memory: server restarts interrupt unfinished uploads, which must be retried. Multi-process or durable execution would need a shared job store/worker service. Saved documents remain in the database. The legacy `POST /api/v2/context/documents` route remains synchronous for existing clients, using the same async parser through a compatibility wrapper.
+
+When `RERANK_BASE_URL` is set, `nat/prepare_config.py` replaces `fleet_docs` and `fleet_job_logs` with the installed `fleet_reranked_retriever` custom function. Each function embeds the query, fetches at least `RERANK_CANDIDATE_K` candidates from its existing Milvus collection, then reranks their text. Documentation returns the best 3 results; job history returns the best 20. Source, heading, job metadata, document IDs, and original vector distances stay attached; successful reranking adds `rerank_score`. Reranking runs automatically inside retrieval, without a separate agent tool call. The parser runs during ingestion, so NAT retrieves its extracted content through the same tools.
+
+`RERANK_API_FORMAT=rerank` sends `model`, `query`, `documents`, and `top_n` to `<base>/rerank` and reads `results[].index/relevance_score`. This supports a LiteLLM-compatible rerank route; it does not use chat completions. `RERANK_API_FORMAT=nim` sends `query.text` and `passages[].text` to `<base>/ranking` and reads `rankings[].index/logit`. Set the base to the prefix your service actually exposes (some services use `/rerank` at the root instead of `/v1/rerank`). An unavailable reranker, timeout, or invalid response falls back to vector order with the original final result count and a server warning. Queries and candidate text are sent to the configured reranker. Direct-LLM fallback mode still uses its existing local context search.
+
+After changing these settings, rebuild/recreate the affected services with `docker compose up -d --build web nat`. No model weights or GPU serving containers are installed by Fleet Manager. Disabling reranking needs no re-index; changing the embedding model or dimension still requires rebuilding the affected indexes.
+
+The backend tests cover parser uploads, page rendering, API contracts, response validation, and reranker fallback. To check plugin registration and invocation against an installed NAT runtime, install `./nat` in that environment and run `python nat/tests/check_registered_retriever.py`. This smoke test uses a mocked retriever and HTTP endpoint, so it needs no running models or Milvus.
 
 Re-indexing retries the same embedding batch up to five times for connection failures, timeouts, HTTP 408/429, and HTTP 5xx responses, with bounded exponential backoff (and numeric `Retry-After` support). Authentication, invalid input, and malformed embedding results fail without repeated requests. The Context status message shows retries and counts only completed embedding batches.
 
