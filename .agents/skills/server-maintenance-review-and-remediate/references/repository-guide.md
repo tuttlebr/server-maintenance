@@ -58,7 +58,7 @@ Discover actual services each time. The current Compose services are:
 | --- | --- |
 | `web` | FastAPI, executor lifecycle, SSH/Ansible launch errors, index reconciliation |
 | `nat` | NAT startup/configuration, provider calls, retrieval and streaming errors; no Compose healthcheck currently |
-| `ssh-agent-proxy` | Socket readiness and proxy failures; a socket healthcheck does not prove the key is unlocked |
+| `ssh-agent-proxy` | Bounded identity query through the forwarded socket; old images only check socket existence and can falsely report healthy |
 | `milvus` | Search/index failures, memory and storage errors |
 | `etcd` | Metadata availability, slow requests and storage warnings |
 
@@ -67,6 +67,14 @@ ingester. Playbooks, scripts, docs and NAT configuration are mounted. Local code
 and an old image can disagree; a mounted edit can already affect running jobs.
 Keep image IDs/start times with runtime evidence and avoid assuming HEAD is
 deployed. `/api/health` is a shallow application probe.
+
+The dedicated host SSH agent is not supervised by Compose. Compare host
+`make status` with `get_agent_status()` inside web when all SSH targets fail but
+Reachy daemon checks succeed. `make repair-ssh` prepares the agent, recreates
+only the proxy, waits for readiness, and verifies the running web forwarding
+path; it does not run fleet jobs. It is a runtime mutation requiring applicable
+authorization. A host agent exit and stale Docker socket forwarding are distinct
+failure modes; a stack restart alone cannot reload a missing host identity.
 
 The web data directory defaults to `/app/data`: `logs/<job_id>.log`, scan/report
 artifacts, SQLite state, and strict SSH known hosts live there. Never export the

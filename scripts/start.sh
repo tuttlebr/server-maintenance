@@ -30,10 +30,11 @@ die() {
 
 usage() {
     cat <<'EOF'
-Usage: scripts/start.sh [start|prepare|enroll-hosts|status]
+Usage: scripts/start.sh [start|prepare|repair-ssh|enroll-hosts|status]
 
   start         Prepare SSH, start the Compose stack, and sync hosts.csv.
   prepare       Create/reuse the fleet key, agent socket, and known_hosts seed.
+  repair-ssh    Restore the agent and proxy; verify access from running web.
   enroll-hosts  Prepare SSH and sync hosts.csv into an already-running stack.
   status        Show the dedicated SSH agent status.
 
@@ -436,6 +437,17 @@ case "$COMMAND" in
     prepare)
         prepare_ssh
         log "SSH prerequisites are ready."
+        ;;
+    repair-ssh)
+        require_command docker
+        require_env_file
+        prepare_ssh
+        compose config --quiet
+        log "Recreating only the SSH agent proxy and waiting for an agent response."
+        compose up -d --build --force-recreate --wait --wait-timeout "${FLEET_START_TIMEOUT_SECONDS:-600}" ssh-agent-proxy
+        log "Verifying the agent from the running web container."
+        compose exec -T web python -c 'from backend.services.ssh_enrollment import get_agent_status; status = get_agent_status(); print(status["detail"]); raise SystemExit(0 if status["ready"] else 1)'
+        log "SSH access is ready. Scan devices to refresh their status."
         ;;
     enroll-hosts)
         require_command docker

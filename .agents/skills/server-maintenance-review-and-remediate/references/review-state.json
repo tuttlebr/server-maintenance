@@ -5,107 +5,67 @@
     "etcd": "2026-10-26T12:47:08.831444Z",
     "milvus": "2026-10-26T12:47:08.831444Z",
     "nat": "2026-10-26T12:47:08.831444Z",
-    "ssh-agent-proxy": "2026-10-26T12:47:08.831444Z",
-    "web": "2026-10-26T12:47:08.831444Z"
+    "ssh-agent-proxy": "2026-11-01T13:18:45.503263Z",
+    "web": "2026-11-01T13:18:45.503263Z"
   },
   "last_run": {
-    "at": "2026-10-26T12:57:08.279887Z",
-    "starting_head": "421c60a7b9a9cf1d6f04ec5c0015bee8a846cc03",
-    "scope": "Incremental 3fcce1e..421c60a (21 files), prior pending findings and bounded runtime evidence; no whole-repository audit.",
+    "at": "2026-11-01T13:23:29.619630Z",
+    "starting_head": "075f2ec93ad9e36c78d9609f8d2fa92ba48f017b",
+    "scope": "Focused shared SSH agent outage investigation; agent lifecycle, proxy health, startup/recovery and Reachy transport. Compared range metadata since baseline; unrelated Git changes not reviewed.",
     "status": "partial",
-    "status_reason": "Entire incremental Git range and related contracts reviewed; local fix verified. Provider connectivity, live retrieval/completion, deployment of this fix, and prior Rust gates remain unresolved.",
+    "status_reason": "Confirmed current host agent absent and forwarding query timeout. Local detection/recovery changes validated; host agent termination trigger and deployed recovery remain unverified.",
     "dirty_worktree_coverage": {
       "initial": [],
-      "reviewed": "Reviewed all 21 range files, related contracts, new local changes and regressions. No staged or relevant untracked work was present at start."
+      "reviewed": "All local changes from this investigation; no prior dirty files."
     },
     "fixed_findings": [
-      "FLEET-HELP-DEVICE-OUTCOMES"
+      "SSH-PROXY-FALSE-HEALTH"
     ],
     "checks": [
       {
-        "command": "bash scripts/check-backend.sh tests/test_scan_scheduler.py tests/test_job_log_indexer.py tests/test_job_context.py",
+        "command": "bash scripts/check-backend.sh tests/test_ssh_agent_proxy.py tests/test_startup_enrollment.py tests/test_hardening.py tests/test_check_workflows.py",
         "status": "passed",
-        "result": "39 tests, 5 subtests"
-      },
-      {
-        "command": "bash scripts/check-backend.sh",
-        "status": "passed",
-        "result": "561 tests, 39 subtests, no skips, one upstream Starlette/httpx deprecation warning",
-        "evidence": "backend-tests.txt"
-      },
-      {
-        "command": "npm --prefix frontend test",
-        "status": "passed",
-        "result": "90 tests, no skips",
-        "evidence": "frontend-tests.txt"
-      },
-      {
-        "command": "npm --prefix frontend run build",
-        "status": "passed",
-        "evidence": "frontend-build.txt"
-      },
-      {
-        "command": ".venv/bin/pre-commit run --all-files",
-        "status": "passed",
-        "result": "All hygiene, YAML, Ruff, shell and credential hooks"
-      },
-      {
-        "command": ".venv/bin/python -m compileall -q backend scripts nat",
-        "status": "passed"
-      },
-      {
-        "command": ".venv/bin/python -m pip check",
-        "status": "passed"
+        "result": "49 tests, 10 subtests"
       },
       {
         "command": "docker compose config --quiet",
         "status": "passed"
       },
       {
-        "command": "python3 -m unittest discover -s .agents/skills/server-maintenance-review-and-remediate/scripts -p 'test_*.py'",
+        "command": "docker compose exec -T web sh -s < ssh-agent-proxy/healthcheck.sh",
         "status": "passed",
-        "result": "11 collector tests"
+        "result": "Expected exit 1 within three seconds for the currently broken forwarding path; no fleet connection."
       },
       {
-        "command": "skill-creator/scripts/quick_validate.py .agents/skills/server-maintenance-review-and-remediate",
-        "status": "passed"
+        "command": "docker build -t fleet-ssh-agent-validation:local ssh-agent-proxy",
+        "status": "passed",
+        "result": "Validation image only; no service recreated."
       },
       {
-        "command": "Skill relative links, review-state reader, private evidence permissions and Git ignore check",
+        "command": ".venv/bin/pre-commit run --files <changed application files>",
         "status": "passed"
       },
       {
         "command": "git diff --check",
         "status": "passed"
-      },
-      {
-        "command": "cargo test --locked --manifest-path tools/dgx-doc-ingester/Cargo.toml",
-        "status": "unavailable",
-        "result": "Cargo absent from PATH and standard local locations; no Rust files changed in this range. Prior Rust validation gap retained."
       }
     ],
     "documentation": [
-      "README.md: per-device versus aggregate outcome semantics, old-index limits, automatic scan configuration table and embedding connectivity checks.",
-      "docs/fleet-manager-ui.md: mixed scan outcomes, unknown historical results and fresh-context evidence."
+      "README.md: shared SSH outage diagnosis, host agent lifecycle and make repair-ssh."
     ],
     "learning": [
-      "Added L006 for exact per-device evidence in fresh context and derived snapshots; three regressions fail before the fix and pass afterward.",
-      "Repository guide now maps automatic scan lifecycle/cadence and per-device evidence ownership.",
-      "SKILL.md and evidence guide unchanged: existing bounded collection, read-only runtime and cursor rules covered this run; no workflow defect or helper change was established."
-    ],
-    "baseline_verification": [
-      "Read-only runtime hashes matched starting-HEAD backend modules, the complete frontend build and prepared NAT system prompt. This establishes prior code/config deployment, not live chat behavior or existing index content.",
-      "Recent SQL activity confirmed hourly automatic scans and no active jobs/reservations at inspection; partial runs retained device outcomes."
+      "L007: validate end-to-end agent response, distinguish host process loss from stale forwarding, and identify startup helper behavior.",
+      "Repository guide maps updated health probe and targeted repair.",
+      "SKILL.md and collector unchanged: current bounded evidence and authorization workflow covers this investigation."
     ],
     "limits": [
-      "Incremental review, not a comprehensive codebase audit; preserve original baseline exclusions.",
-      "24h time cap and 500-line tails omit history; web/nat/etcd/milvus reached tail cap; proxy sample empty. Containers started after the previous sample, so predecessor logs remain unavailable.",
-      "No services started/recreated, fleet jobs executed, provider calls initiated, index rebuilds, credentials changed, commits or pushes.",
-      "No browser audit, live Fleet Help answer verification, image build or deployment.",
-      "Cargo and Rust minimum-version checks unavailable. Unchanged Ansible/playbook and dependency files did not require standalone Ansible lint/syntax or dependency vulnerability audit reruns; full backend tests included isolated Ansible fixtures.",
-      "Frontend validated locally on Node 26.12.0; CI uses Node 22. Pre-push tests/build ran directly once; the wrapper was not repeated."
+      "Host process termination trigger not established; missing process/socket do not prove why it exited.",
+      "No services restarted, credentials changed, host jobs run, commits or pushes. Recovery may require interactive key passphrase.",
+      "Four-hour evidence window, web tail capped at 100 lines, proxy sample empty. Prior containers/logs unavailable.",
+      "No full backend/frontend/Rust checks: only SSH packaging, shell and docs changed; prior unrelated gaps retained.",
+      "Narrow scope does not advance the Git review baseline."
     ],
-    "evidence_path": "data/skill-reviews/20261026T124708Z-0an073ii"
+    "evidence_path": "data/skill-reviews/20261101T131845Z-oh50cior"
   },
   "pending_work": [
     {
@@ -116,8 +76,8 @@
     },
     {
       "id": "RUNTIME-SAMPLE-GAPS",
-      "summary": "Preserve initial-run exclusions and new 2026-10-26 gaps: default window capped to 24h; web/nat/etcd/milvus hit 500 lines. All current containers started after the prior review; predecessor logs were not collected. Proxy sample empty.",
-      "evidence": "data/skill-reviews/20261026T124708Z-0an073ii/evidence.json:docker.logs; docker.inspection",
+      "summary": "Preserve initial-run exclusions and new 2026-10-26 gaps: default window capped to 24h; web/nat/etcd/milvus hit 500 lines. All current containers started after the prior review; predecessor logs were not collected. Proxy sample empty. Focused 2026-11-01 sample adds a four-hour web/proxy window with web capped at 100 lines and proxy empty; other services not sampled.",
+      "evidence": "data/skill-reviews/20261026T124708Z-0an073ii/evidence.json:docker.logs; docker.inspection; data/skill-reviews/20261101T131845Z-oh50cior/evidence.json",
       "next_check": "Collect a focused service/time window only for a concrete symptom; cursors track inspected bounded samples, not continuous coverage or proof of remote SSH."
     },
     {
@@ -137,6 +97,12 @@
       "summary": "Current web reconciliation repeatedly fails with TCP connection refused from the configured separate embedding endpoint; Milvus and web health probes do not establish provider health.",
       "evidence": "data/skill-reviews/20261026T124708Z-0an073ii/evidence.json:docker.logs.web; runtime-partial-scans.json",
       "next_check": "Check provider listener and network reachability from web. Correct runtime configuration or restart provider only with authorization covering that action; verify embeddings and derived-index recovery afterward."
+    },
+    {
+      "id": "SSH-AGENT-LIFECYCLE",
+      "summary": "Dedicated host agent absent; shared forwarding times out. Local health probe and targeted repair command are not deployed. The event terminating the agent is unknown.",
+      "evidence": "data/skill-reviews/20261101T131845Z-oh50cior/ledger.json; tests/test_ssh_agent_proxy.py",
+      "next_check": "Run make repair-ssh when authorized and unlock the existing key if prompted; then refresh device scans. If the agent exits again, correlate the host process/session lifecycle before choosing supervision."
     }
   ],
   "baseline_scope": {

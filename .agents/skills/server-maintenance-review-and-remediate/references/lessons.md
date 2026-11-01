@@ -4,6 +4,28 @@ These lessons come from source, regression tests, and bounded runtime reviews.
 Their verification levels distinguish synthetic regressions from live evidence.
 Recheck their applicability before using them.
 
+## L007: Socket existence is not SSH agent readiness
+
+- **Condition/mechanism:** SSH connections and host-key verification succeed,
+  but shared-agent identity queries fail across SSH targets. Reachy daemon
+  health is independent. A proxy listener and its bind-mounted socket can remain
+  present after the dedicated host agent exits, producing false healthy status
+  under the old socket-only probe.
+- **Future check:** query identities on the host and from web with a timeout;
+  inspect the recorded host PID and socket separately. Ask whether the reported
+  restart includes `make start`, which recreates the agent and proxy. Do not
+  infer bad host credentials or change host trust from this failure pattern.
+- **Evidence:** `scripts/start.sh`; `ssh-agent-proxy/healthcheck.sh`;
+  `docker-compose.yml`; `tests/test_ssh_agent_proxy.py`; README SSH troubleshooting.
+- **Verification:** live read-only inspection found the dedicated host socket
+  absent, its recorded PID gone, and a web identity query timing out despite
+  healthy proxy status. The new probe detected this failure within three seconds;
+  isolated regressions cover healthy, empty, disconnected, hung and incorrect
+  identity sets. The proxy image builds. No repair/deployment was performed.
+- **Limits/invalidation:** the reason the host agent terminated remains unknown.
+  This detects failure and provides targeted recovery; it does not supervise or
+  unlock a dead host agent. Revisit if agent ownership or forwarding changes.
+
 ## L001: Service scope differs from legacy CLI scope
 
 - **Condition/mechanism:** older reviews describe Kubernetes prerequisites and

@@ -42,6 +42,7 @@ Useful narrower targets are:
 
 ```bash
 make prepare       # Prepare only the key, agent socket, and known_hosts seed
+make repair-ssh    # Restore SSH agent/proxy access without restarting the stack
 make enroll-hosts  # Sync hosts.csv into an already-running stack
 make status        # Show the dedicated agent's loaded identity
 ```
@@ -154,6 +155,45 @@ rm -f "$PWD/.fleet-ssh/agent.sock"
 export SSH_AUTH_SOCK_PATH="$PWD/.fleet-ssh/agent.sock"
 docker compose up -d --build --force-recreate ssh-agent-proxy
 ```
+
+### All SSH devices become Unreachable while Reachy still works
+
+If the SSH log shows `Connection established` and a matching host key, followed
+by `ssh_fetch_identitylist: communication with agent failed`, the shared SSH
+agent path has failed. Missing `/home/fleet/.ssh/id_*` files are expected: the
+container uses the dedicated host agent instead of mounted private keys. Reachy
+health uses its HTTP daemon and does not depend on this SSH path.
+
+Check both the host agent and the forwarding path, without contacting devices:
+
+```bash
+make status
+docker compose exec -T web python -c 'from backend.services.ssh_enrollment import get_agent_status; s = get_agent_status(); print(s["detail"]); raise SystemExit(0 if s["ready"] else 1)'
+```
+
+The dedicated agent is a host process started by `make start` or `make prepare`;
+Docker's restart policy does not supervise it. If it exits, the key must be
+loaded into a new agent. A recreated host socket also requires recreating the
+proxy's socket mount. `make start` does both, which can make a stack restart look
+like the cure. Use the narrower recovery instead:
+
+```bash
+make repair-ssh
+```
+
+This prepares the dedicated agent (prompting to unlock the key when needed),
+rebuilds/recreates only the proxy, waits for its agent query to succeed, and checks
+access from the running web container. It does not enroll devices or run fleet
+jobs. Afterward, use **Scan** or wait for the next automatic scan to refresh
+device status. It restores access but does not prevent external termination of
+the host agent; investigate host session/process lifecycle if it recurs.
+
+The proxy health check now queries identities through the forwarded socket with
+a three-second timeout and requires exactly one Ed25519 identity. Older images
+only checked for a socket file and could remain healthy after losing the host
+agent. Docker marks a failed health check unhealthy; it does not automatically
+restart unhealthy containers, and restarting the proxy cannot recreate a missing
+host agent.
 
 ## Create the `.env` secrets
 
