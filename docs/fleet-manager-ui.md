@@ -78,7 +78,7 @@ Results show per-device outcomes, available packages, reboot requirements, runti
 
 ## Fleet Help Evidence Rules
 
-Fleet Help receives fresh activity evidence with each question and can search completed operation logs for additional history when needed. Results are time-stamped historical observations. Integration documentation covers products and procedures; it does not establish a device's current state.
+Fleet Help answers the user's request and uses activity evidence only when relevant. Standalone greetings and acknowledgements receive brief conversational replies without an unsolicited fleet report; these turns skip automatic evidence and reference lookups. Questions, including greetings followed by questions and short follow-ups, receive fresh activity evidence and can search completed operation logs for additional history when needed. Results are time-stamped historical observations. Integration documentation covers products and procedures; it does not establish a device's current state.
 
 If a required fact has not been recorded, say which evidence is missing and direct the user to the narrowest eligible operation that collects it. Carry device names and scope forward in follow-up questions.
 ## User management

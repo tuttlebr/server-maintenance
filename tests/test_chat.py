@@ -1,5 +1,6 @@
 import json
 import unittest
+from itertools import product
 from pathlib import Path
 from unittest.mock import patch
 
@@ -118,6 +119,32 @@ class NatChatCompletionTests(unittest.TestCase):
 
 
 class DirectChatCompletionTests(unittest.TestCase):
+    def test_social_turn_skips_reference_lookup_and_preserves_conversation(self):
+        for query in ("Hello", " THANKS! ", "OK."):
+            with (
+                self.subTest(query=query),
+                patch.object(chat_router.chat_prompt, "load_system_prompt", return_value="Shared policy"),
+                patch.object(chat_router.docs_loader, "get_relevant_sections") as get_docs,
+                patch.object(chat_router.context_manager, "get_relevant_context") as get_context,
+                patch.object(chat_router.settings, "ai_helper_base_url", "https://example.test/v1"),
+                patch.object(chat_router.settings, "ai_helper_api_key", "test-key"),
+                patch.object(chat_router.settings, "ai_helper_model", "test-model"),
+                patch.object(chat_router.urllib.request, "urlopen") as urlopen,
+            ):
+                urlopen.return_value = _StreamingResponse([b"data: [DONE]\n\n"])
+                messages = [
+                    {"role": "user", "content": "Why did the job fail?"},
+                    {"role": "assistant", "content": "A device was unreachable."},
+                    {"role": "user", "content": query},
+                ]
+                list(chat_router._stream_from_llm(messages, query))
+                payload = json.loads(urlopen.call_args.args[0].data)
+                self.assertEqual(payload["messages"], [
+                    {"role": "system", "content": "Shared policy"}, *messages,
+                ])
+                get_docs.assert_not_called()
+                get_context.assert_not_called()
+
     def test_uses_exact_nat_prompt_and_keeps_reference_data_in_current_user_turn(self):
         config = yaml.safe_load((Path(__file__).parents[1] / "nat" / "config.yml").read_text())
         messages = [
@@ -175,10 +202,40 @@ class DirectChatCompletionTests(unittest.TestCase):
 
 
 class GroundedChatTests(unittest.IsolatedAsyncioTestCase):
-    async def test_both_transports_receive_fresh_job_evidence_and_history(self):
-        for use_nat in (False, True):
+    async def test_social_turns_skip_job_evidence_in_both_transports(self):
+        for use_nat, query, with_history in product(
+            (False, True), ("Hello", " Hi there! ", "Thanks", "OK.", "Good morning"), (False, True),
+        ):
             with (
-                self.subTest(use_nat=use_nat),
+                self.subTest(use_nat=use_nat, query=query, with_history=with_history),
+                patch.object(chat_router.settings, "nat_base_url", "http://nat:8000"),
+                patch.object(chat_router, "_nat_available", return_value=use_nat),
+                patch.object(chat_router.job_context, "get_job_context") as retrieve,
+                patch.object(chat_router, "_stream_from_nat", return_value=iter([])) as nat,
+                patch.object(chat_router, "_stream_from_llm", return_value=iter([])) as direct,
+            ):
+                history = [
+                    {"role": "user", "content": "Why did the job fail?"},
+                    {"role": "assistant", "content": "A device was unreachable."},
+                ] if with_history else []
+                request = ChatRequest(job_id="selected-job", device_id=1, messages=[
+                    *history, {"role": "user", "content": query},
+                ])
+                response = await chat_router.chat(request, user="admin")
+                events = "".join([chunk async for chunk in response.body_iterator])
+                sent = (nat if use_nat else direct).call_args.args[0]
+                self.assertEqual(sent, [m.model_dump() for m in request.messages])
+                self.assertNotIn("current job records", events)
+                self.assertIn("event: done", events)
+                retrieve.assert_not_called()
+
+    async def test_both_transports_receive_fresh_job_evidence_and_history(self):
+        for use_nat, query in product((False, True), (
+            "Why did this fail?", "Hello, why did this fail?", "Thanks, which device failed?",
+            "Why?", "Status?", "And the other device?", "OK, show the log",
+        )):
+            with (
+                self.subTest(use_nat=use_nat, query=query),
                 patch.object(chat_router.settings, "nat_base_url", "http://nat:8000"),
                 patch.object(chat_router, "_nat_available", return_value=use_nat),
                 patch.object(chat_router, "_direct_llm_available", return_value=True),
@@ -189,14 +246,14 @@ class GroundedChatTests(unittest.IsolatedAsyncioTestCase):
                 request = ChatRequest(job_id="selected-job", device_id=1, messages=[
                     {"role": "user", "content": "First question"},
                     {"role": "assistant", "content": "Previous answer"},
-                    {"role": "user", "content": "Why did this fail?"},
+                    {"role": "user", "content": query},
                 ])
                 response = await chat_router.chat(request, user="admin")
                 events = "".join([chunk async for chunk in response.body_iterator])
                 sent = (nat if use_nat else direct).call_args.args[0]
                 self.assertEqual(sent[1]["content"], "Previous answer")
                 self.assertIn("FAILED disk full", sent[-1]["content"])
-                self.assertIn("Why did this fail?", sent[-1]["content"])
+                self.assertTrue(sent[-1]["content"].endswith(query))
                 self.assertIn("event: done", events)
                 self.assertIn("current job records", events)
                 retrieve.assert_called_once_with(

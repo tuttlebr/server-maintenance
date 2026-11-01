@@ -26,6 +26,17 @@ TOOL_STATUS = {
 }
 
 
+def _is_social_turn(query: str) -> bool:
+    """Skip automatic context only for unambiguous standalone social messages."""
+    text = " ".join(query.casefold().split()).strip(".! ")
+    return text in {
+        "hi", "hello", "hey", "hi there", "hello there", "hey there",
+        "good morning", "good afternoon", "good evening",
+        "thanks", "thank you", "thanks a lot", "ok", "okay", "got it",
+        "bye", "goodbye",
+    }
+
+
 def _humanize_tool(name: str) -> str:
     return TOOL_STATUS.get(name, f"Calling {name}")
 
@@ -168,25 +179,27 @@ def _stream_from_llm(messages: list[dict], query: str):
     SSE endpoint can forward both paths uniformly.
     """
     system_msg = chat_prompt.load_system_prompt()
-    docs_context = "\n\n---\n\n".join(
-        filter(
-            None,
-            [
-                docs_loader.get_relevant_sections(query, max_chars=18000),
-                context_manager.get_relevant_context(query, max_chars=18000),
-            ],
+    grounded_messages = messages
+    if not _is_social_turn(query):
+        docs_context = "\n\n---\n\n".join(
+            filter(
+                None,
+                [
+                    docs_loader.get_relevant_sections(query, max_chars=18000),
+                    context_manager.get_relevant_context(query, max_chars=18000),
+                ],
+            )
         )
-    )
-    # Reference data belongs to this user turn, never to the shared system policy.
-    grounded_messages = messages[:-1] + [{
-        **messages[-1],
-        "content": (
-            "<fleet_reference_context>\n"
-            + (docs_context or "No matching reference context was found.")
-            + "\n</fleet_reference_context>\n\n"
-            + messages[-1]["content"]
-        ),
-    }]
+        # Reference data belongs to this user turn, never to the shared system policy.
+        grounded_messages = messages[:-1] + [{
+            **messages[-1],
+            "content": (
+                "<fleet_reference_context>\n"
+                + (docs_context or "No matching reference context was found.")
+                + "\n</fleet_reference_context>\n\n"
+                + messages[-1]["content"]
+            ),
+        }]
     full_messages = [{"role": "system", "content": system_msg}] + grounded_messages
 
     url = settings.ai_helper_base_url.rstrip("/") + "/chat/completions"
@@ -225,21 +238,23 @@ async def chat(body: ChatRequest, user: str = Depends(get_current_user)):
 
     def produce_events():
         try:
-            yield {"type": "status", "text": "Reading current job records and relevant Ansible output"}
-            try:
-                evidence = job_context.get_job_context(
-                    messages, job_id=body.job_id, device_id=body.device_id,
-                )
-            except Exception:
-                logger.exception("Could not load job evidence for chat")
-                evidence = "Job evidence is unavailable for this request."
-            grounded_messages = messages[:-1] + [{
-                "role": "user",
-                "content": (
-                    "<fleet_job_evidence>\n" + evidence + "\n</fleet_job_evidence>\n\n"
-                    "User question:\n" + query
-                ),
-            }]
+            grounded_messages = messages
+            if not _is_social_turn(query):
+                yield {"type": "status", "text": "Reading current job records and relevant Ansible output"}
+                try:
+                    evidence = job_context.get_job_context(
+                        messages, job_id=body.job_id, device_id=body.device_id,
+                    )
+                except Exception:
+                    logger.exception("Could not load job evidence for chat")
+                    evidence = "Job evidence is unavailable for this request."
+                grounded_messages = messages[:-1] + [{
+                    "role": "user",
+                    "content": (
+                        "<fleet_job_evidence>\n" + evidence + "\n</fleet_job_evidence>\n\n"
+                        "User question:\n" + query
+                    ),
+                }]
             generator = _stream_from_nat(grounded_messages) if use_nat else _stream_from_llm(grounded_messages, query)
             # yield-from propagates close() to the provider on disconnect.
             yield from generator
