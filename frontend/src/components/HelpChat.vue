@@ -74,33 +74,21 @@
               @click="stepsOpen[i] = !stepsOpen[i]"
             >
               <i :class="['fas', stepsOpen[i] ? 'fa-chevron-down' : 'fa-chevron-right']" aria-hidden="true"></i>
-              {{ msg.steps.length }} {{ msg.steps.length === 1 ? "step" : "steps" }}
+              Search activity
             </button>
+            <!-- Streamed tool calls indicate activity, not successful retrieval. -->
             <ul v-if="stepsOpen[i]" class="chat-steps-list">
               <li v-for="(s, si) in msg.steps" :key="si">
-                <i class="fas fa-check" aria-hidden="true"></i> {{ s }}
+                <i class="fas fa-minus" aria-hidden="true"></i> {{ s }}
               </li>
             </ul>
           </div>
         </template>
 
         <div v-if="isStreaming" class="chat-msg chat-msg-assistant chat-msg-streaming">
-          <ul v-if="currentSteps.length" class="chat-streaming-steps">
-            <li v-for="(s, i) in currentSteps.slice(0, -1)" :key="i" class="chat-streaming-step done">
-              <i class="fas fa-check" aria-hidden="true"></i> {{ s }}
-            </li>
-            <li v-if="!streamingContent.trim()" class="chat-streaming-step active">
-              <span class="dot dot-blue dot-pulse" aria-hidden="true"></span>
-              {{ currentSteps[currentSteps.length - 1] }}
-              <span class="chat-streaming-dots"><span></span><span></span><span></span></span>
-            </li>
-            <li v-else class="chat-streaming-step done">
-              <i class="fas fa-check" aria-hidden="true"></i> {{ currentSteps[currentSteps.length - 1] }}
-            </li>
-          </ul>
-          <div v-else-if="!streamingContent.trim()" class="chat-streaming-step active chat-streaming-step-solo">
+          <div v-if="!streamingContent.trim()" class="chat-streaming-step active chat-streaming-step-solo" role="status">
             <span class="dot dot-blue dot-pulse" aria-hidden="true"></span>
-            Thinking
+            {{ currentStatus || "Preparing response" }}
             <span class="chat-streaming-dots"><span></span><span></span><span></span></span>
           </div>
 
@@ -141,7 +129,7 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute } from "vue-router";
-import { getChatStatus, streamChat } from "../api";
+import { getChatStatus, streamChat } from "../api.js";
 import { copyText } from "../utils/clipboard.js";
 
 const MARKDOWN_TAGS = [
@@ -168,7 +156,8 @@ const isStreaming = ref(false);
 const showCoach = ref(false);
 let coachTimer = null;
 const streamingContent = ref("");
-const currentSteps = ref([]); // status updates received during this turn
+const currentSteps = ref([]); // distinct search activities, not reasoning or tool arguments
+const currentStatus = ref("");
 const currentTurnPriorAssistantAnswers = ref([]);
 const stepsOpen = reactive({});
 const messagesEl = ref(null);
@@ -308,6 +297,7 @@ function clearHistory() {
   if (isStreaming.value) return;
   messages.value = [];
   currentSteps.value = [];
+  currentStatus.value = "";
   currentTurnPriorAssistantAnswers.value = [];
   streamingContent.value = "";
   copiedKey.value = null;
@@ -336,6 +326,7 @@ function send() {
   isStreaming.value = true;
   streamingContent.value = "";
   currentSteps.value = [];
+  currentStatus.value = "";
   scrollToBottom();
 
   const chatMessages = messages.value
@@ -348,17 +339,11 @@ function send() {
     jobId: ["/activity", "/operations", "/access"].includes(route.path) ? route.query.job || undefined : undefined,
     deviceId: route.path.startsWith("/devices/") ? Number(route.params.id) || undefined : undefined,
     signal: streamController.signal,
-    onStatus: (statusText) => {
-      // De-dupe back-to-back identical statuses; collapse minor variants
-      // (e.g., the same tool announced twice as it accumulates arguments).
+    onStatus: (statusText, metadata = {}) => {
       const trimmed = statusText.trim();
       if (!trimmed) return;
-      const last = currentSteps.value[currentSteps.value.length - 1];
-      if (last === trimmed) return;
-      // Replace the last step if the new one is a superset (tool name → tool name + query).
-      if (last && trimmed.startsWith(last) && trimmed.length > last.length) {
-        currentSteps.value[currentSteps.value.length - 1] = trimmed;
-      } else {
+      currentStatus.value = trimmed;
+      if (metadata.activity === "search" && !currentSteps.value.includes(trimmed)) {
         currentSteps.value.push(trimmed);
       }
       scrollToBottom();
@@ -378,6 +363,7 @@ function send() {
       }
       streamingContent.value = "";
       currentSteps.value = [];
+      currentStatus.value = "";
       currentTurnPriorAssistantAnswers.value = [];
       isStreaming.value = false;
       streamController = null;
@@ -392,6 +378,7 @@ function send() {
       });
       streamingContent.value = "";
       currentSteps.value = [];
+      currentStatus.value = "";
       currentTurnPriorAssistantAnswers.value = [];
       isStreaming.value = false;
       streamController = null;
@@ -659,7 +646,7 @@ function leadingWhitespaceInsensitiveMatchEnd(text, prefix) {
 .chat-copy-btn:hover { background: var(--surface-white); color: var(--text-primary); }
 .chat-copy-btn:disabled { cursor: wait; opacity: 0.6; }
 
-/* While streaming, the wrapper can be wider so the steps list reads well. */
+/* Leave room for a concise live progress cue. */
 .chat-msg-streaming { max-width: 95%; width: 95%; }
 
 .chat-msg-content {
@@ -793,36 +780,11 @@ function leadingWhitespaceInsensitiveMatchEnd(text, prefix) {
   margin-left: 1px;
 }
 
-/* Streaming step list (current turn) */
-.chat-streaming-steps {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  background: var(--surface-info-soft);
-  border: 1px solid rgba(0, 116, 223, 0.25);
-  border-radius: var(--radius-md);
-  padding: 8px 10px;
-}
-
 .chat-streaming-step {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 1px 0;
-}
-
-.chat-streaming-step.done {
-  color: var(--text-secondary);
-}
-
-.chat-streaming-step.done i {
-  color: var(--color-success);
-  font-size: 10px;
 }
 
 .chat-streaming-step.active {

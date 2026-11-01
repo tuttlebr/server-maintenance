@@ -26,6 +26,10 @@ class _StreamingResponse:
         return iter(self._lines)
 
 
+def _delta_line(delta, finish_reason=None):
+    return ("data: " + json.dumps({"choices": [{"delta": delta, "finish_reason": finish_reason}]}) + "\n\n").encode()
+
+
 class ChatRequestTests(unittest.TestCase):
     def test_accepts_openai_style_conversation_history(self):
         request = ChatRequest(
@@ -53,6 +57,59 @@ class ChatRequestTests(unittest.TestCase):
 
 
 class NatChatCompletionTests(unittest.TestCase):
+    @patch("backend.routers.chat.urllib.request.urlopen")
+    def test_tool_turn_text_and_reasoning_never_reach_the_client(self, urlopen):
+        completed = False
+
+        class Response(_StreamingResponse):
+            def __iter__(self):
+                nonlocal completed
+                for line in self._lines:
+                    if line == b"data: [DONE]\n\n":
+                        completed = True
+                    yield line
+
+        urlopen.return_value = Response([
+            _delta_line({"content": "to=fleet_"}),
+            _delta_line({"content": "job_logsatem:function_calls"}),
+            _delta_line({"content": "internal tool text", "tool_calls": [{
+                "index": 0, "id": "job-search", "function": {
+                    "name": "fleet_job_logs", "arguments": '{"query":"host_facts.yml gpu_model"}',
+                },
+            }]}),
+            _delta_line({"reasoning_content": "private analysis", "reasoning": "more analysis"}),
+            _delta_line({"content": "<thi"}),
+            _delta_line({"content": "nk>internal reasoning</think>\nThere are "}),
+            _delta_line({"content": "8 GPUs in the recorded inventory."}),
+            b"data: [DONE]\n\n",
+        ])
+        events = []
+        for event in _stream_from_nat([{"role": "user", "content": "How many GPUs?"}]):
+            if event["type"] == "content":
+                self.assertTrue(completed, "Answer text must not appear before workflow completion")
+            events.append(event)
+        self.assertEqual([event for event in events if event["type"] == "content"], [{
+            "type": "content", "content": "There are 8 GPUs in the recorded inventory.",
+        }])
+        wire = json.dumps(events)
+        for leaked in ("to=", "function_calls", "host_facts.yml", "gpu_model", "internal", "private analysis", "more analysis"):
+            self.assertNotIn(leaked, wire)
+        self.assertIn({"type": "status", "text": "Searching indexed job history", "activity": "search"}, events)
+
+    @patch("backend.routers.chat.urllib.request.urlopen")
+    def test_unfinished_or_unparsed_tool_output_is_not_a_final_answer(self, urlopen):
+        for text in ("", "to=fleet_job_logsatem:function_calls", "<function_calls><invoke name='fleet_docs'>", "<think>unfinished"):
+            with self.subTest(text=text):
+                urlopen.return_value = _StreamingResponse([_delta_line({"content": text}), b"data: [DONE]\n\n"])
+                events = []
+                with self.assertRaisesRegex(RuntimeError, "did not return a final answer"):
+                    events.extend(_stream_from_nat([{"role": "user", "content": "Question"}]))
+                self.assertFalse(any(event["type"] == "content" for event in events))
+
+    def test_normal_answers_and_quoted_code_are_preserved(self):
+        for text in ("The tool call failed. Check Activity.", '```xml\n<function_calls>example</function_calls>\n```'):
+            self.assertEqual(chat_router._final_answer(text), text)
+
     @patch("backend.routers.chat.urllib.request.urlopen")
     def test_sends_and_parses_openai_chat_completion_stream(self, urlopen):
         chunk = {
@@ -98,7 +155,75 @@ class NatChatCompletionTests(unittest.TestCase):
                 "temperature": 0.3,
             },
         )
-        self.assertEqual(events, [{"type": "content", "content": "Answer"}])
+        self.assertEqual(events, [
+            {"type": "status", "text": "Preparing response"},
+            {"type": "content", "content": "Answer"},
+        ])
+
+    @patch("backend.routers.chat.urllib.request.urlopen")
+    def test_nat_rounds_reuse_indexes_without_finish_markers(self, urlopen):
+        # Mirrors NAT 1.9's tool_calling_agent stream: unique call IDs, reused
+        # indexes, split arguments, and no finish_reason between agent rounds.
+        urlopen.return_value = _StreamingResponse([
+            _delta_line({"tool_calls": [{"index": 0, "id": "docs-1", "function": {
+                "name": "fleet_docs", "arguments": '{"query":"storage',
+            }}]}),
+            _delta_line({"tool_calls": [{"index": 0, "function": {"arguments": ' checks"}'}}]}),
+            _delta_line({"tool_calls": [{"index": 0, "id": "jobs-2", "function": {
+                "name": "fleet_job_logs", "arguments": '{"query":"last storage job"}',
+            }}]}),
+            _delta_line({"tool_calls": [{"index": 0, "id": "docs-3", "function": {
+                "name": "dynamo_mcp_server__searchDocs", "arguments": '{"query":"KV cache"}',
+            }}]}),
+            _delta_line({"content": "Answer"}),
+            _delta_line({"content": " continues"}),
+            b"data: [DONE]\n\n",
+        ])
+        events = list(_stream_from_nat([{"role": "user", "content": "Question"}]))
+        statuses = [event["text"] for event in events if event["type"] == "status"]
+        self.assertEqual(statuses, [
+            "Preparing response",
+            "Searching indexed knowledge sources",
+            "Searching indexed job history",
+            "Searching NVIDIA Dynamo documentation",
+            "Preparing response",
+        ])
+        self.assertEqual("".join(event["content"] for event in events if event["type"] == "content"), "Answer continues")
+
+    @patch("backend.routers.chat.urllib.request.urlopen")
+    def test_parallel_tools_and_legacy_round_boundaries(self, urlopen):
+        urlopen.return_value = _StreamingResponse([
+            _delta_line({"content": "I'll check."}),
+            _delta_line({"tool_calls": [
+                {"index": 0, "function": {"name": "fleet_docs", "arguments": '{"query":'}},
+                {"index": 1, "function": {"name": "fleet_job_logs", "arguments": '{"q":"history"}'}},
+            ]}),
+            _delta_line({"tool_calls": [{"index": 0, "function": {"arguments": '"guide"}'}}]}),
+            _delta_line({}, "tool_calls"),
+            _delta_line({"tool_calls": [{"index": 0, "function": {
+                "name": "aiperf_mcp_server.searchDocs", "arguments": '[]',
+            }}]}),
+            _delta_line({"content": "Result"}),
+            b"data: [DONE]\n\n",
+        ])
+        events = list(_stream_from_nat([{"role": "user", "content": "Question"}]))
+        statuses = [event["text"] for event in events if event["type"] == "status"]
+        self.assertIn('Searching indexed job history', statuses)
+        self.assertIn('Searching indexed knowledge sources', statuses)
+        self.assertIn("Searching NVIDIA AIPerf documentation", statuses)
+        self.assertEqual(statuses.count("Preparing response"), 2)
+        self.assertEqual([event for event in events if event["type"] == "content"], [{"type": "content", "content": "Result"}])
+        self.assertEqual(events[-1], {"type": "content", "content": "Result"})
+
+    def test_documentation_tools_have_readable_labels(self):
+        for group, product_name in (
+            ("dynamo", "Dynamo"), ("aiperf", "AIPerf"), ("nvcf", "Cloud Functions"), ("dsx", "DSX"),
+        ):
+            for separator in ("__", "."):
+                with self.subTest(group=group, separator=separator):
+                    self.assertEqual(chat_router._humanize_tool(f"{group}_mcp_server{separator}searchDocs"),
+                                     f"Searching NVIDIA {product_name} documentation")
+        self.assertEqual(chat_router._humanize_tool("new_tool"), "Checking a reference source")
 
     @patch("backend.routers.chat.urllib.request.urlopen")
     def test_surfaces_workflow_errors_embedded_in_a_stream(self, urlopen):
@@ -119,6 +244,21 @@ class NatChatCompletionTests(unittest.TestCase):
 
 
 class DirectChatCompletionTests(unittest.TestCase):
+    @patch("backend.routers.chat.urllib.request.urlopen")
+    def test_direct_mode_hides_reasoning_and_releases_only_the_completed_answer(self, urlopen):
+        with patch.object(chat_router.settings, "ai_helper_base_url", "http://provider.test"):
+            urlopen.return_value = _StreamingResponse([
+                _delta_line({"reasoning_content": "hidden"}),
+                _delta_line({"content": "<analysis>hidden analysis</analysis>Hel"}),
+                _delta_line({"content": "lo."}),
+                b"data: [DONE]\n\n",
+            ])
+            events = list(chat_router._stream_from_llm([{"role": "user", "content": "Hello"}], "Hello"))
+        self.assertEqual(events, [
+            {"type": "status", "text": "Preparing response"},
+            {"type": "content", "content": "Hello."},
+        ])
+
     def test_social_turn_skips_reference_lookup_and_preserves_conversation(self):
         for query in ("Hello", " THANKS! ", "OK."):
             with (
@@ -131,7 +271,7 @@ class DirectChatCompletionTests(unittest.TestCase):
                 patch.object(chat_router.settings, "ai_helper_model", "test-model"),
                 patch.object(chat_router.urllib.request, "urlopen") as urlopen,
             ):
-                urlopen.return_value = _StreamingResponse([b"data: [DONE]\n\n"])
+                urlopen.return_value = _StreamingResponse([_delta_line({"content": "Hello."}), b"data: [DONE]\n\n"])
                 messages = [
                     {"role": "user", "content": "Why did the job fail?"},
                     {"role": "assistant", "content": "A device was unreachable."},
@@ -187,7 +327,11 @@ class DirectChatCompletionTests(unittest.TestCase):
                 self.assertIn("No matching reference context was found.", latest)
             self.assertNotIn("tools", payload)
             self.assertEqual(messages, original)
-            self.assertEqual(events, [{"type": "content", "content": "Answer"}])
+            self.assertEqual(events, [
+                {"type": "status", "text": "Looking up local reference context"},
+                {"type": "status", "text": "Preparing response"},
+                {"type": "content", "content": "Answer"},
+            ])
             get_docs.assert_called_once_with("Why?", max_chars=18000)
             get_context.assert_called_once_with("Why?", max_chars=18000)
 
@@ -202,6 +346,30 @@ class DirectChatCompletionTests(unittest.TestCase):
 
 
 class GroundedChatTests(unittest.IsolatedAsyncioTestCase):
+    async def test_nat_tool_progress_reaches_the_client_after_context_preparation(self):
+        with (
+            patch.object(chat_router.settings, "nat_base_url", "http://nat:8000"),
+            patch.object(chat_router, "_nat_available", return_value=True),
+            patch.object(chat_router.job_context, "get_job_context", return_value="Recorded activity"),
+            patch.object(chat_router.urllib.request, "urlopen") as urlopen,
+        ):
+            urlopen.return_value = _StreamingResponse([
+                _delta_line({"tool_calls": [{"index": 0, "id": "docs-1", "function": {
+                    "name": "fleet_docs", "arguments": '{"query":"storage"}',
+                }}]}),
+                _delta_line({"content": "Answer"}),
+                b"data: [DONE]\n\n",
+            ])
+            response = await chat_router.chat(ChatRequest(messages=[{"role": "user", "content": "Explain storage checks"}]), user="admin")
+            events = [chunk async for chunk in response.body_iterator]
+        progress = [json.loads(chunk[6:])["text"] for chunk in events if chunk.startswith('data: {"type": "status"')]
+        self.assertEqual(progress, [
+            "Loading recent activity context", "Preparing response",
+            "Searching indexed knowledge sources", "Preparing response",
+        ])
+        self.assertIn('"content": "Answer"', events[-2])
+        self.assertEqual(events[-1], "event: done\ndata: {}\n\n")
+
     async def test_social_turns_skip_job_evidence_in_both_transports(self):
         for use_nat, query, with_history in product(
             (False, True), ("Hello", " Hi there! ", "Thanks", "OK.", "Good morning"), (False, True),
@@ -225,7 +393,7 @@ class GroundedChatTests(unittest.IsolatedAsyncioTestCase):
                 events = "".join([chunk async for chunk in response.body_iterator])
                 sent = (nat if use_nat else direct).call_args.args[0]
                 self.assertEqual(sent, [m.model_dump() for m in request.messages])
-                self.assertNotIn("current job records", events)
+                self.assertNotIn("Loading recent activity context", events)
                 self.assertIn("event: done", events)
                 retrieve.assert_not_called()
 
@@ -255,7 +423,7 @@ class GroundedChatTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("FAILED disk full", sent[-1]["content"])
                 self.assertTrue(sent[-1]["content"].endswith(query))
                 self.assertIn("event: done", events)
-                self.assertIn("current job records", events)
+                self.assertIn("Loading recent activity context", events)
                 retrieve.assert_called_once_with(
                     [m.model_dump() for m in request.messages], job_id="selected-job", device_id=1,
                 )

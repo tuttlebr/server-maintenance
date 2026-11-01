@@ -88,6 +88,28 @@ test('truncated chat reports an error instead of a successful completion', async
   assert.equal(content,'Partial');assert.equal(completed,false);assert.match(error.message,/disconnected before completion/);
 });
 
+test('chat forwards search metadata and final content in stream order', async t => {
+  setup(t);
+  const events = [
+    {type:'status',text:'Preparing response'},
+    {type:'status',text:'Searching indexed knowledge sources',activity:'search'},
+    {type:'status',text:'Searching NVIDIA Dynamo documentation',activity:'search'},
+    {type:'status',text:'Preparing response'},
+    {type:'content',content:'Answer'},
+  ];
+  t.mock.method(globalThis,'fetch',async()=>new Response(
+    events.map(event=>`data: ${JSON.stringify(event)}\n\n`).join('')+'event: done\ndata: {}\n\n',
+  ));
+  const observed=[];
+  await streamChat([{role:'user',content:'Question'}],{
+    onStatus:(text,metadata)=>{assert.equal(text,metadata.text);observed.push(metadata);},
+    onContent:content=>observed.push({type:'content',content}),
+    onDone:()=>observed.push({type:'done'}),
+    onError:error=>assert.fail(error),
+  });
+  assert.deepEqual(observed,[...events,{type:'done'}]);
+});
+
 test('chat errors cancel and unlock the stream', async t => {
   setup(t);
   let cancelled=false,error;

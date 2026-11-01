@@ -226,7 +226,7 @@ export async function streamJobOutput(jobId, { onLine, onDone, onError, signal }
 }
 
 // Stream a chat response from the backend. Callback shape:
-//   { onContent(text), onStatus(text), onDone(), onError(err), signal? }
+//   { onContent(text), onStatus(text, metadata), onDone(), onError(err), signal? }
 export async function streamChat(messages, handlers = {}) {
   const onContent = handlers.onContent || (() => {});
   const onStatus = handlers.onStatus || (() => {});
@@ -265,7 +265,7 @@ export async function streamChat(messages, handlers = {}) {
       try { payload = JSON.parse(event.data); }
       catch { throw new ApiError("The chat stream returned invalid data. Please retry."); }
       if (payload.type === 'content' && payload.content) onContent(payload.content);
-      else if (payload.type === 'status' && payload.text) onStatus(payload.text);
+      else if (payload.type === 'status' && payload.text) onStatus(payload.text, payload);
       else if (payload.type === 'error') throw new ApiError(payload.message || "Chat error");
     }
     throw new ApiError("Chat disconnected before completion. Please retry.");

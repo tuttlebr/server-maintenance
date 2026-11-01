@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 import threading
 import urllib.error
 import urllib.request
@@ -21,8 +22,12 @@ logger = logging.getLogger(__name__)
 
 # Human-readable labels for the agent's tool calls. Extend as new tools are added.
 TOOL_STATUS = {
-    "fleet_docs": "Searching fleet documentation and UI guidance",
-    "fleet_job_logs": "Reviewing recent fleet job results",
+    "fleet_docs": "Searching indexed knowledge sources",
+    "fleet_job_logs": "Searching indexed job history",
+    "dynamo_mcp_server__searchDocs": "Searching NVIDIA Dynamo documentation",
+    "aiperf_mcp_server__searchDocs": "Searching NVIDIA AIPerf documentation",
+    "nvcf_mcp_server__searchDocs": "Searching NVIDIA Cloud Functions documentation",
+    "dsx_mcp_server__searchDocs": "Searching NVIDIA DSX documentation",
 }
 
 
@@ -38,7 +43,20 @@ def _is_social_turn(query: str) -> bool:
 
 
 def _humanize_tool(name: str) -> str:
-    return TOOL_STATUS.get(name, f"Calling {name}")
+    return TOOL_STATUS.get(name.replace(".", "__"), "Checking a reference source")
+
+
+def _final_answer(text: str) -> str:
+    """Remove explicit leading reasoning envelopes and reject raw tool routing."""
+    text = text.strip()
+    while re.match(r"^<(think|analysis)>", text):
+        reasoning = re.match(r"^<(think|analysis)>.*?</\1>\s*", text, re.DOTALL)
+        if not reasoning:
+            raise RuntimeError("Fleet Help did not return a final answer. Please retry.")
+        text = text[reasoning.end():]
+    if not text or re.match(r"^(?:to=[\w.-]+|</?(?:tool_call|function_calls|invoke)(?:\s|>))", text):
+        raise RuntimeError("Fleet Help did not return a final answer. Please retry.")
+    return text
 
 
 def _nat_available() -> bool:
@@ -99,9 +117,8 @@ def _stream_from_nat(messages: list[dict]):
     """Stream chat completions from NeMo Agent Toolkit.
 
     Yields dicts that the SSE endpoint forwards to the client:
-      - {"type": "status", "text": "Searching fleet documentation"} when a
-        tool call begins. Optionally includes "query" once arguments parse.
-      - {"type": "content", "content": "..."} for answer tokens.
+      - Status events for requested searches, without raw names or arguments.
+      - Final answer text only after the workflow acknowledges completion.
     """
     url = settings.nat_base_url.rstrip("/") + "/v1/chat/completions"
     payload = {
@@ -121,55 +138,55 @@ def _stream_from_nat(messages: list[dict]):
         method="POST",
     )
 
-    # Track tool call deltas by index. OpenAI streams the function name in the
-    # first delta for an index, then arguments accumulate over many deltas.
+    # NAT 1.9 reuses indexes across agent rounds without emitting tool_calls
+    # finish markers. A new call ID starts fresh state even at the same index.
     tool_state: dict[int, dict] = {}
+    answer_parts: list[str] = []
+    preparing = True
 
+    yield {"type": "status", "text": "Preparing response"}
     with urllib.request.urlopen(req, timeout=120) as resp:
         for chunk in _completion_chunks(resp):
             try:
                 choice = chunk.get("choices", [{}])[0]
                 delta = choice.get("delta", {})
 
-                # 1) Tool call deltas — accumulate name + arguments per index.
-                for tc in delta.get("tool_calls") or []:
+                tool_calls = delta.get("tool_calls") or []
+                if tool_calls:
+                    # NAT mixes every agent turn into one stream without turn
+                    # boundaries. Text preceding a tool call is not the final
+                    # answer and must never reach the browser or chat history.
+                    answer_parts.clear()
+                for tc in tool_calls:
                     idx = tc.get("index", 0)
-                    state = tool_state.setdefault(idx, {"name": None, "args": "", "announced": False})
+                    state = tool_state.get(idx)
+                    if state is None or (tc.get("id") and tc["id"] != state["id"]):
+                        state = {"id": tc.get("id"), "name": None, "announced": False}
+                        tool_state[idx] = state
                     fn = tc.get("function") or {}
                     if fn.get("name"):
                         state["name"] = fn["name"]
-                    if fn.get("arguments"):
-                        state["args"] += fn["arguments"]
                     # Announce the call as soon as we know the tool name.
                     if state["name"] and not state["announced"]:
                         state["announced"] = True
-                        yield {"type": "status", "text": _humanize_tool(state["name"])}
+                        preparing = False
+                        yield {"type": "status", "text": _humanize_tool(state["name"]), "activity": "search"}
 
-                # 2) When the model finishes a tool-call turn, try to surface
-                #    the actual query so the status reads naturally.
                 if choice.get("finish_reason") == "tool_calls":
-                    for state in tool_state.values():
-                        if state["args"]:
-                            try:
-                                parsed = json.loads(state["args"])
-                                query = parsed.get("query") or parsed.get("q") or ""
-                                if query:
-                                    yield {
-                                        "type": "status",
-                                        "text": f"{_humanize_tool(state['name'])} for \"{query}\"",
-                                    }
-                            except json.JSONDecodeError:
-                                pass
-                    # Reset for the next round (the agent may call multiple tools).
                     tool_state.clear()
 
-                # 3) Content tokens — the final answer.
                 content = delta.get("content")
-                if content:
-                    yield {"type": "content", "content": content}
+                if isinstance(content, str) and content and not tool_calls:
+                    if not preparing:
+                        preparing = True
+                        yield {"type": "status", "text": "Preparing response"}
+                    answer_parts.append(content)
 
             except (json.JSONDecodeError, IndexError, KeyError):
                 continue
+
+    answer = _final_answer("".join(answer_parts))
+    yield {"type": "content", "content": answer}
 
 
 def _stream_from_llm(messages: list[dict], query: str):
@@ -181,6 +198,7 @@ def _stream_from_llm(messages: list[dict], query: str):
     system_msg = chat_prompt.load_system_prompt()
     grounded_messages = messages
     if not _is_social_turn(query):
+        yield {"type": "status", "text": "Looking up local reference context"}
         docs_context = "\n\n---\n\n".join(
             filter(
                 None,
@@ -218,15 +236,18 @@ def _stream_from_llm(messages: list[dict], query: str):
         headers=headers,
         method="POST",
     )
+    yield {"type": "status", "text": "Preparing response"}
+    answer_parts: list[str] = []
     with urllib.request.urlopen(req, timeout=120) as resp:
         for chunk in _completion_chunks(resp):
             try:
                 delta = chunk.get("choices", [{}])[0].get("delta", {})
                 content = delta.get("content", "")
-                if content:
-                    yield {"type": "content", "content": content}
+                if isinstance(content, str) and content:
+                    answer_parts.append(content)
             except (json.JSONDecodeError, IndexError, KeyError):
                 continue
+    yield {"type": "content", "content": _final_answer("".join(answer_parts))}
 
 
 @router.post("")
@@ -240,7 +261,7 @@ async def chat(body: ChatRequest, user: str = Depends(get_current_user)):
         try:
             grounded_messages = messages
             if not _is_social_turn(query):
-                yield {"type": "status", "text": "Reading current job records and relevant Ansible output"}
+                yield {"type": "status", "text": "Loading recent activity context"}
                 try:
                     evidence = job_context.get_job_context(
                         messages, job_id=body.job_id, device_id=body.device_id,

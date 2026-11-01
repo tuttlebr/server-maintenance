@@ -676,6 +676,17 @@ context, not a guarantee that arbitrary log text is free of secrets.
 
 NAT uses `tool_calling_agent` to preserve conversation history, the system prompt and streamed tool calls. The optional Kubernetes MCP definition is omitted at startup unless both its server URL and token are configured; missing optional settings do not prevent Fleet Help from starting. UniFi is not defined in the current config. Embedding failures can still limit historical semantic search, but do not prevent fresh job evidence from reaching either chat mode.
 
+Fleet Help shows one live progress cue for context preparation or the source being
+searched. Search activity is collapsed beneath the completed answer and omits raw
+tool names and arguments. These labels record requested searches, not proof that
+retrieval succeeded or every source was consulted. Direct fallback reports its
+local reference lookup instead of implying NAT tool access. Both modes hold answer
+text until the provider acknowledges completion. NAT text from turns that invoke
+tools is discarded; explicit leading reasoning blocks are removed, and unfinished
+or raw tool-routing output reports an error instead of entering chat history. This
+keeps tool syntax from briefly flashing in the conversation while progress remains
+live; answer text appears together when the run finishes.
+
 If web logs report `Connection refused` during job-log embedding or reconciliation,
 check that the configured embedding service is listening and reachable from the
 web container. Healthy web and Milvus containers do not verify provider access.

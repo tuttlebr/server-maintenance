@@ -128,7 +128,8 @@ def test_upstream_chat_failure_never_reports_success(monkeypatch, provider, endi
         response = await chat.chat(ChatRequest(messages=[{"role": "user", "content": "Question"}]), user="test")
         return "".join([item async for item in response.body_iterator])
     events = asyncio.run(scenario())
-    assert '"content": "partial"' in events
+    # No candidate answer is released before acknowledged provider completion.
+    assert '"content": "partial"' not in events
     assert '"type": "error"' in events
     assert "event: done" not in events
     assert stream.closed
