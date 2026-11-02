@@ -255,6 +255,13 @@ class ContextDocumentResponse(BaseModel):
     created_at: datetime
 
 
+class SkippedContextSection(BaseModel):
+    chunk: int
+    source: str
+    heading: str
+    reason: str
+
+
 class ContextStatusResponse(BaseModel):
     parser_enabled: bool = False
     upload_max_bytes: int = 10 * 1024 * 1024
@@ -272,6 +279,8 @@ class ContextStatusResponse(BaseModel):
     completed_at: str | None = None
     last_indexed_at: str | None = None
     error: str | None = None
+    skipped_count: int = 0
+    skipped_sections: list[SkippedContextSection] = Field(default_factory=list)
 
 
 class DiscoveryResponse(BaseModel):

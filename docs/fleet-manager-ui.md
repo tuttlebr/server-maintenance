@@ -50,6 +50,8 @@ When the optional document parser is enabled, Context also accepts PDFs and PNG/
 
 Uploads, deletions, and attribute edits are staged changes. Select **Re-index context** to rebuild `fleet_docs`. The page reports the current indexed record count, source counts, phase, progress, completion time, and errors. Removing a document does not remove its old vector records until the next successful re-index.
 
+If the embedding provider rejects a batch with HTTP 400, 413, or 422, re-indexing tries smaller batches. It skips any section that still fails on its own and continues. **Re-index completed with warnings** means the valid sections are searchable, but skipped sections are absent from the rebuilt index. The status card shows the skipped count and source details for up to 20 sections. Review those sources and re-index to retry them; successful embeddings are reused. If all sections fail, or authentication, service availability, or invalid vectors prevent completion, the existing index remains unchanged.
+
 ## Operations and Safety
 
 Select devices once in the left panel. Run **Scan devices** first to discover hardware, software, health, and supported capabilities. It supports SSH and Reachy daemon devices in one job, saves timestamped results in Activity, and refreshes operation eligibility. Failed devices stay blocked; successful devices can be selected for later actions. A discovery scan does not clear an existing recovery requirement. Use Scan in device settings for explicit recovery verification.

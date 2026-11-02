@@ -81,6 +81,20 @@ class ContextRouteTests(unittest.TestCase):
         self.assertEqual(state["document_id"], response.json()["id"])
         self.assertEqual(self.db.query(ContextDocument).count(), 1)
 
+    def test_status_exposes_partial_index_and_skipped_source_details(self):
+        skipped = [{'chunk': 114, 'source': 'Manual', 'heading': 'Rejected section', 'reason': 'HTTP 400'}]
+        with patch('backend.routers.context.docs_indexer.get_status', return_value={
+            'phase': 'partial', 'skipped_count': 1, 'skipped_sections': skipped, 'last_count': 143,
+        }):
+            response = self.client.get('/api/v2/context/status')
+        self.assertEqual(response.status_code, 200)
+        state = response.json()
+        self.assertEqual(state['phase'], 'partial')
+        self.assertEqual(state['record_count'], 143)
+        self.assertEqual(state['skipped_count'], 1)
+        self.assertEqual(state['skipped_sections'], skipped)
+        self.assertIsNone(state['error'])
+
     def test_failed_upload_and_validation_have_terminal_status_and_save_nothing(self):
         for filename, parser_error, expected in [("manual.pdf", ParserUnavailable("Timed out on page 15"), 502), ("bad.exe", None, 422)]:
             key = self.client.post("/api/v2/context/uploads").json()["upload_id"]

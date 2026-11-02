@@ -318,8 +318,10 @@ async fn main() -> Result<()> {
     embedder.cache_dir = Some(cache_dir);
     embedder.refresh = cli.refresh_embeddings;
     embedder.max_attempts = cli.embedding_max_attempts;
-    let texts: Vec<&str> = chunks.iter().map(|chunk| chunk.text.as_str()).collect();
-    let embeddings = embedder.embed_texts(&texts).await?;
+    let result = embedder.embed_chunks(&chunks).await?;
+    let skipped_count = chunks.len() - result.chunks.len();
+    let chunks = result.chunks;
+    let embeddings = result.vectors;
     let actual_dim = validate_vector_dimensions(&embeddings, config.embed_dim)?;
 
     let milvus = MilvusClient::new(
@@ -348,6 +350,9 @@ async fn main() -> Result<()> {
         local_docs.len(),
         milvus.collection
     );
+    if skipped_count > 0 {
+        status!("Completed with warnings: {skipped_count} rejected chunk(s) were excluded; re-index again to retry them");
+    }
 
     Ok(())
 }
@@ -1092,10 +1097,12 @@ struct EmbeddingCheckpoint {
     vector: Vec<f32>,
 }
 
+#[derive(Debug)]
 struct EmbeddingFailure {
     error: anyhow::Error,
     retryable: bool,
     retry_after: Option<Duration>,
+    status: Option<StatusCode>,
 }
 
 fn retryable_embedding_status(status: StatusCode) -> bool {
@@ -1104,7 +1111,13 @@ fn retryable_embedding_status(status: StatusCode) -> bool {
 
 fn embedding_transport_failure(error: reqwest::Error) -> EmbeddingFailure {
     let retryable = error.is_connect() || error.is_timeout() || error.is_body() || error.is_request();
-    EmbeddingFailure { error: error.into(), retryable, retry_after: None }
+    EmbeddingFailure { error: error.into(), retryable, retry_after: None, status: None }
+}
+
+#[derive(Debug)]
+struct EmbeddedChunks {
+    chunks: Vec<DocChunk>,
+    vectors: Vec<Vec<f32>>,
 }
 
 struct EmbeddingClient {
@@ -1173,33 +1186,72 @@ impl EmbeddingClient {
         Ok(())
     }
 
-    async fn embed_texts(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        let mut embeddings = Vec::with_capacity(texts.len());
-        let total_batches = (texts.len() + self.batch_size - 1) / self.batch_size;
+    async fn embed_chunks(&self, chunks: &[DocChunk]) -> Result<EmbeddedChunks> {
+        let mut embedded = EmbeddedChunks { chunks: Vec::new(), vectors: Vec::new() };
+        let total_batches = (chunks.len() + self.batch_size - 1) / self.batch_size;
         let mut reused = 0;
-        for (batch_idx, batch) in texts.chunks(self.batch_size).enumerate() {
+        let mut skipped = 0;
+        for (batch_idx, batch) in chunks.chunks(self.batch_size).enumerate() {
             status!("Embedding batch {}/{}", batch_idx + 1, total_batches);
-            let mut vectors: Vec<Option<Vec<f32>>> = batch.iter().map(|text| self.cached(text)).collect();
+            let mut vectors: Vec<Option<Vec<f32>>> = batch.iter().map(|chunk| self.cached(&chunk.text)).collect();
             let missing: Vec<usize> = vectors.iter().enumerate().filter_map(|(index, vector)| vector.is_none().then_some(index)).collect();
             reused += batch.len() - missing.len();
+            let mut pending = Vec::new();
             if !missing.is_empty() {
-                let inputs: Vec<&str> = missing.iter().map(|&index| batch[index]).collect();
-                let results = self.call_embeddings(&inputs).await
-                    .context("embedding batch failed; completed checkpoints are saved; re-index again to resume")?;
-                validate_vector_dimensions(&results, self.expected_dim)?;
-                for (index, vector) in missing.into_iter().zip(results) {
-                    self.save_checkpoint(batch[index], &vector)?;
-                    vectors[index] = Some(vector);
+                pending.push(missing);
+            }
+            while let Some(indices) = pending.pop() {
+                let inputs: Vec<&str> = indices.iter().map(|&index| batch[index].text.as_str()).collect();
+                match self.call_embeddings(&inputs).await {
+                    Ok(results) => {
+                        validate_vector_dimensions(&results, self.expected_dim)?;
+                        for (index, vector) in indices.into_iter().zip(results) {
+                            self.save_checkpoint(&batch[index].text, &vector)?;
+                            vectors[index] = Some(vector);
+                        }
+                    }
+                    Err(failure) if matches!(failure.status, Some(StatusCode::BAD_REQUEST | StatusCode::PAYLOAD_TOO_LARGE | StatusCode::UNPROCESSABLE_ENTITY)) => {
+                        if indices.len() > 1 {
+                            // Retry smaller requests, never the identical rejected batch.
+                            // Keep original positions so cached and recovered vectors stay aligned.
+                            status!("Splitting rejected embedding request with {} chunks", indices.len());
+                            let middle = indices.len() / 2;
+                            pending.push(indices[middle..].to_vec());
+                            pending.push(indices[..middle].to_vec());
+                        } else {
+                            let index = indices[0];
+                            skipped += 1;
+                            // Do not log provider bodies or document text. JSON escapes source
+                            // metadata so it cannot inject extra status lines.
+                            status!("Skipped embedding: {}", json!({
+                                "chunk": batch_idx * self.batch_size + index + 1,
+                                "source": batch[index].source,
+                                "heading": batch[index].heading,
+                                "reason": format!("HTTP {}", failure.status.unwrap()),
+                            }));
+                        }
+                    }
+                    Err(failure) => return Err(failure.error)
+                        .context("embedding service failed; completed checkpoints are saved; existing index has not been changed"),
                 }
             }
-            embeddings.extend(vectors.into_iter().map(|vector| vector.expect("validated or cached embedding")));
-            status!("Embedded batch {}/{} ({} cached chunks reused)", batch_idx + 1, total_batches, reused);
+            for (chunk, vector) in batch.iter().zip(vectors) {
+                if let Some(vector) = vector {
+                    embedded.chunks.push(chunk.clone());
+                    embedded.vectors.push(vector);
+                }
+            }
+            status!("Processed embedding batch {}/{} ({} cached chunks reused, {} chunks skipped)", batch_idx + 1, total_batches, reused, skipped);
         }
-        Ok(embeddings)
+        if embedded.vectors.is_empty() {
+            bail!("no chunks could be embedded; existing index has not been changed; check embedding model and input settings");
+        }
+        validate_vector_dimensions(&embedded.vectors, self.expected_dim)?;
+        Ok(embedded)
     }
 
-    async fn call_embeddings(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        for attempt in 1..=self.max_attempts {
+    async fn call_embeddings(&self, texts: &[&str]) -> std::result::Result<Vec<Vec<f32>>, EmbeddingFailure> {
+        for attempt in 1..=self.max_attempts.max(1) {
             match self.call_embeddings_once(texts).await {
                 Ok(vectors) => return Ok(vectors),
                 Err(failure) if failure.retryable && attempt < self.max_attempts => {
@@ -1208,10 +1260,13 @@ impl EmbeddingClient {
                     status!("Retrying embedding batch after transient failure in {}s (attempt {}/{})", delay.as_secs(), attempt + 1, self.max_attempts);
                     tokio::time::sleep(delay).await;
                 }
-                Err(failure) => return Err(failure.error).context(format!("embedding request failed after {attempt} attempt(s)")),
+                Err(mut failure) => {
+                    failure.error = failure.error.context(format!("embedding request failed after {attempt} attempt(s)"));
+                    return Err(failure);
+                }
             }
         }
-        bail!("embedding attempts must be positive")
+        unreachable!("at least one embedding attempt")
     }
 
     async fn call_embeddings_once(&self, texts: &[&str]) -> std::result::Result<Vec<Vec<f32>>, EmbeddingFailure> {
@@ -1226,13 +1281,14 @@ impl EmbeddingClient {
             return Err(EmbeddingFailure {
                 error: anyhow::anyhow!("embedding API returned HTTP {status}"),
                 retryable: retryable_embedding_status(status), retry_after,
+                status: Some(status),
             });
         }
         let body = response.text().await.map_err(embedding_transport_failure)?;
         let vectors = serde_json::from_str::<EmbeddingResponse>(&body)
             .context("invalid embedding response JSON")
             .and_then(|parsed| parsed.validated(texts.len()));
-        vectors.map_err(|error| EmbeddingFailure { error, retryable: false, retry_after: None })
+        vectors.map_err(|error| EmbeddingFailure { error, retryable: false, retry_after: None, status: None })
     }
 }
 
@@ -1615,6 +1671,76 @@ mod recovery_tests {
 
     const VECTOR: &str = r#"{"data":[{"index":0,"embedding":[1.0,2.0]}]}"#;
 
+    fn chunks(texts: &[&str]) -> Vec<DocChunk> {
+        texts.iter().map(|text| DocChunk {
+            source: "Test manual".into(), heading: (*text).into(), text: (*text).into(),
+        }).collect()
+    }
+
+    #[tokio::test]
+    async fn rejected_chunk_is_isolated_without_losing_cached_or_later_content() {
+        let cache = Cache::new();
+        let (url, requests) = server(vec![
+            Some(("400 Bad Request", "private provider body")),
+            Some(("200 OK", VECTOR)),
+            Some(("400 Bad Request", "private provider body")),
+            Some(("400 Bad Request", "private provider body")),
+            Some(("200 OK", r#"{"data":[{"index":0,"embedding":[3.0,4.0]}]}"#)),
+            Some(("200 OK", r#"{"data":[{"index":0,"embedding":[5.0,6.0]}]}"#)),
+            Some(("200 OK", VECTOR)),
+        ]);
+        let mut embedder = client(url);
+        embedder.cache_dir = Some(cache.0.clone());
+        embedder.batch_size = 4;
+        embedder.save_checkpoint("cached", &[7.0, 8.0]).unwrap();
+        let input = chunks(&["cached", "one", "rejected", "three", "later batch"]);
+        let result = embedder.embed_chunks(&input).await.unwrap();
+        assert_eq!(result.chunks.iter().map(|chunk| chunk.text.as_str()).collect::<Vec<_>>(),
+            vec!["cached", "one", "three", "later batch"]);
+        assert_eq!(result.vectors, vec![vec![7.0, 8.0], vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]]);
+        assert!(embedder.cached("rejected").is_none());
+        // A new run retries only the rejected chunk, using all successful checkpoints.
+        embedder.batch_size = 2;
+        assert_eq!(embedder.embed_chunks(&input).await.unwrap().vectors.len(), 5);
+        assert_eq!(requests.join().unwrap(), vec![
+            json!(["one", "rejected", "three"]), json!(["one"]), json!(["rejected", "three"]),
+            json!(["rejected"]), json!(["three"]), json!(["later batch"]), json!(["rejected"]),
+        ]);
+    }
+
+    #[tokio::test]
+    async fn oversized_or_unprocessable_batches_recover_with_smaller_requests() {
+        for status in ["400 Bad Request", "413 Payload Too Large", "422 Unprocessable Entity"] {
+            let (url, requests) = server(vec![Some((status, "rejected")), Some(("200 OK", VECTOR)), Some(("200 OK", VECTOR))]);
+            let mut embedder = client(url);
+            embedder.batch_size = 2;
+            assert_eq!(embedder.embed_chunks(&chunks(&["one", "two"])).await.unwrap().vectors.len(), 2);
+            assert_eq!(requests.join().unwrap(), vec![json!(["one", "two"]), json!(["one"]), json!(["two"])]);
+        }
+    }
+
+    #[tokio::test]
+    async fn all_rejected_chunks_cannot_replace_the_existing_index() {
+        let (url, requests) = server(vec![Some(("400 Bad Request", "private body")), Some(("400 Bad Request", "private body"))]);
+        let error = client(url).embed_chunks(&chunks(&["one", "two"])).await.unwrap_err();
+        assert!(error.to_string().contains("existing index has not been changed"));
+        assert!(!format!("{error:#}").contains("private body"));
+        assert_eq!(requests.join().unwrap(), vec![json!(["one"]), json!(["two"])]);
+    }
+
+    #[tokio::test]
+    async fn systemic_failures_stop_before_collection_replacement() {
+        for (status, body) in [
+            ("401 Unauthorized", "private body"), ("403 Forbidden", "private body"),
+            ("404 Not Found", "bad endpoint"), ("200 OK", "invalid json"),
+            ("200 OK", r#"{"data":[{"index":0,"embedding":[1.0]}]}"#),
+        ] {
+            let (url, requests) = server(vec![Some((status, body))]);
+            assert!(client(url).embed_chunks(&chunks(&["one", "later"])).await.is_err());
+            assert_eq!(requests.join().unwrap(), vec![json!(["one"])]);
+        }
+    }
+
     #[tokio::test]
     async fn transient_http_and_connection_failures_retry_the_same_batch() {
         for first in [Some(("503 Service Unavailable", "unavailable")), Some(("429 Too Many Requests", "busy")), None] {
@@ -1629,7 +1755,7 @@ mod recovery_tests {
         for (status, body) in [("401 Unauthorized", "private body"), ("422 Unprocessable Entity", "bad model"), ("200 OK", "invalid json"), ("200 OK", r#"{"data":[]}"#)] {
             let (url, requests) = server(vec![Some((status, body))]);
             let error = client(url).call_embeddings(&["one"]).await.unwrap_err();
-            assert!(!format!("{error:#}").contains("private body"));
+            assert!(!format!("{:#}", error.error).contains("private body"));
             assert_eq!(requests.join().unwrap().len(), 1);
         }
     }
@@ -1640,16 +1766,16 @@ mod recovery_tests {
         let (url, requests) = server(vec![Some(("200 OK", VECTOR)), Some(("503 Service Unavailable", "busy")), Some(("503 Service Unavailable", "busy")), Some(("200 OK", VECTOR)), Some(("200 OK", VECTOR))]);
         let mut first = client(url.clone());
         first.cache_dir = Some(cache.0.clone());
-        assert!(first.embed_texts(&["one", "two", "three"]).await.is_err());
+        assert!(first.embed_chunks(&chunks(&["one", "two", "three"])).await.is_err());
         assert!(first.cached("one").is_some());
         assert!(first.cached("two").is_none());
         let mut resumed = client(url);
         resumed.cache_dir = Some(cache.0.clone());
-        assert_eq!(resumed.embed_texts(&["one", "two", "three"]).await.unwrap().len(), 3);
+        assert_eq!(resumed.embed_chunks(&chunks(&["one", "two", "three"])).await.unwrap().vectors.len(), 3);
         assert_eq!(requests.join().unwrap(), vec![json!(["one"]), json!(["two"]), json!(["two"]), json!(["two"]), json!(["three"])]);
         // Even after batching/order changes, every exact input is reusable offline.
         resumed.batch_size = 2;
-        assert_eq!(resumed.embed_texts(&["three", "one", "two"]).await.unwrap().len(), 3);
+        assert_eq!(resumed.embed_chunks(&chunks(&["three", "one", "two"])).await.unwrap().vectors.len(), 3);
     }
 
     #[test]

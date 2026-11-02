@@ -137,6 +137,53 @@ async function uploadHarness(t) {
   }};
 }
 
+test('reindex completion keeps skipped sources visible and a new run clears them', async t => {
+  const originals = Object.fromEntries(['localStorage', 'window'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  Object.defineProperty(globalThis, 'localStorage', {configurable: true, value: {getItem: () => 'test'}});
+  Object.defineProperty(globalThis, 'window', {configurable: true, value: {location: {hash: ''}}});
+  t.after(() => {
+    for (const [key, value] of Object.entries(originals)) {
+      if (value) Object.defineProperty(globalThis, key, value); else delete globalThis[key];
+    }
+  });
+  const polls = new Map();
+  const realTimeout = globalThis.setTimeout, realClear = globalThis.clearTimeout;
+  t.mock.method(globalThis, 'setTimeout', (callback, delay, ...args) => {
+    if (delay !== 1500) return realTimeout(callback, delay, ...args);
+    const id = {}; polls.set(id, callback); return id;
+  });
+  t.mock.method(globalThis, 'clearTimeout', id => { polls.delete(id); realClear(id); });
+  let state = {running: true, phase: 'embedding', progress: 16, total: 18};
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (url.endsWith('/context/status')) return new Response(JSON.stringify(state));
+    if (url.endsWith('/context/reindex')) return new Response('{"detail":"Context re-index started"}');
+    return new Response('[]');
+  });
+  const router = createRouter({history: createMemoryHistory(), routes: [{path: '/context', component: ContextManagement}]});
+  await router.push('/context'); await router.isReady();
+  const app = renderer.createApp(ContextManagement).use(router), root = element('root');
+  app.mount(root); t.after(() => app.unmount()); await flush();
+  assert.equal(polls.size, 1);
+  state = {
+    running: false, phase: 'partial', message: 'Indexed 17 sections; skipped 1 rejected section.',
+    progress: 17, total: 17, record_count: 17, skipped_count: 1,
+    skipped_sections: [{chunk: 2, source: 'Cooling manual', heading: 'Fan table', reason: 'HTTP 400 Bad Request'}],
+  };
+  const [id, callback] = polls.entries().next().value;
+  polls.delete(id); await callback(); await flush();
+  assert.equal(polls.size, 0);
+  assert.match(text(root), /Re-index completed with warnings/);
+  assert.match(text(root), /Indexed 17 sections/);
+  assert.match(text(root), /Cooling manual: Fan table \(section 2, HTTP 400 Bad Request\)/);
+  assert.doesNotMatch(text(root), /Re-index failed/);
+  const button = find(root, node => node.tag === 'button' && text(node).includes('Re-index context'));
+  assert.equal(button.props.disabled, false);
+  await button.props.onClick(); await flush();
+  assert.equal(polls.size, 1);
+  assert.match(text(root), /Starting re-index/);
+  assert.doesNotMatch(text(root), /Cooling manual|completed with warnings/);
+});
+
 test('upload shows measured stages, survives a polling failure, and confirms saving',async t=>{
   const h=await uploadHarness(t);
   assert.equal(h.xhr.timeout,120_000);

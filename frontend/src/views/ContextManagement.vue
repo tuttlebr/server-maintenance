@@ -12,11 +12,16 @@
       <article class="stat-card"><div class="stat-value stat-time">{{ status.last_indexed_at ? formatLongTime(status.last_indexed_at) : 'Never' }}</div><div class="stat-label">Last indexed</div></article>
     </div>
 
-    <section v-if="status.running || status.error" :class="['card', 'index-state', { error: status.error }]">
+    <section v-if="status.running || status.error || status.phase === 'partial'" :class="['card', 'index-state', { warning: status.skipped_count, error: status.error }]" aria-label="Re-index status">
       <div class="card-body">
         <div class="index-state-row"><strong>{{ status.error ? 'Re-index failed' : phaseLabel }}</strong><span v-if="status.total">{{ status.progress }} / {{ status.total }}</span></div>
         <div v-if="status.running" class="progress-bar"><div class="progress-fill" :style="{ width: `${progressPercent}%` }"></div></div>
         <p>{{ status.error || status.message }}</p>
+        <p v-if="status.skipped_count">{{ status.skipped_count }} section{{ status.skipped_count === 1 ? '' : 's' }} could not be embedded.</p>
+        <ul v-if="status.skipped_sections.length" class="skipped-sections">
+          <li v-for="section in status.skipped_sections" :key="section.chunk">{{ section.source }}: {{ section.heading }} (section {{ section.chunk }}, {{ section.reason }})</li>
+        </ul>
+        <p v-if="status.skipped_count > status.skipped_sections.length">Showing the first {{ status.skipped_sections.length }} skipped sections.</p>
       </div>
     </section>
 
@@ -64,17 +69,17 @@ import ConfirmDialog from "../components/ConfirmDialog.vue";
 import { formatLongTime } from "../utils/time.js";
 
 const route = useRoute();
-const status = reactive({ parser_enabled: false, upload_max_bytes: 10 * 1024 * 1024, parser_max_pages: 20, parser_timeout_seconds: 100, record_count: null, document_count: 0, annotated_device_count: 0, running: false, phase: "idle", message: "", progress: 0, total: 0, last_indexed_at: null, error: null });
+const status = reactive({ parser_enabled: false, upload_max_bytes: 10 * 1024 * 1024, parser_max_pages: 20, parser_timeout_seconds: 100, record_count: null, document_count: 0, annotated_device_count: 0, running: false, phase: "idle", message: "", progress: 0, total: 0, last_indexed_at: null, error: null, skipped_count: 0, skipped_sections: [] });
 const acceptedFiles = computed(() => ".txt,.md,.markdown,text/plain,text/markdown" + (status.parser_enabled ? ",.pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" : ""));
 const documents = ref([]); const devices = ref([]); const loading = ref(true); const uploading = ref(false); const deleteTarget = ref(null); const fileInputKey = ref(0); let pollTimer, disposed = false;
 const uploadForm = reactive({ file: null, title: "", device_id: route.query.device ? String(route.query.device) : "" });
-const phaseLabel = computed(() => ({ loading: "Loading sources", embedding: "Creating embeddings", inserting: "Updating search index" }[status.phase] || "Re-indexing context"));
+const phaseLabel = computed(() => ({ loading: "Loading sources", embedding: "Creating embeddings", inserting: "Updating search index", partial: "Re-index completed with warnings" }[status.phase] || "Re-indexing context"));
 const progressPercent = computed(() => status.total ? Math.min(100, Math.round((status.progress / status.total) * 100)) : 5);
 
 async function loadStatus() { try { const result = await getContextStatus(); if (disposed) return; Object.assign(status, result); } catch (error) { if (!disposed) window.$toast?.error("Couldn't load context index status", error); } finally { if (!disposed && status.running) schedulePoll(); } }
 async function load() { if (disposed) return; loading.value = true; try { [documents.value, devices.value] = await Promise.all([getContextDocuments(), getDevices()]); if (!disposed) await loadStatus(); } catch (error) { window.$toast?.error("Couldn't load context", error); } finally { loading.value = false; } }
 function schedulePoll() { clearTimeout(pollTimer); if (disposed) return; pollTimer = setTimeout(async () => { await loadStatus(); if (!status.running) await load(); }, 1500); }
-async function startReindex() { try { const result = await reindexContext(); window.$toast?.success(result.detail); status.running = true; status.error = null; schedulePoll(); } catch (error) { window.$toast?.error("Couldn't start context re-index", error); } }
+async function startReindex() { try { const result = await reindexContext(); window.$toast?.success(result.detail); Object.assign(status, { running: true, phase: "loading", error: null, message: "Starting re-index", progress: 0, total: 0, skipped_count: 0, skipped_sections: [] }); schedulePoll(); } catch (error) { window.$toast?.error("Couldn't start context re-index", error); } }
 const uploadState = ref(null);
 const uploadAccepted = ref(false);
 const UPLOAD_STORAGE_KEY = "fleet_context_upload";
@@ -238,6 +243,9 @@ onMounted(async () => { await load(); if (!disposed) await restoreUpload(); }); 
 </script>
 
 <style scoped>
+.index-state.warning { border-left-color: var(--color-warning); }
+.index-state.error { border-left-color: var(--color-danger); }
+.skipped-sections { padding-left: 20px; font-size: 12px; overflow-wrap: anywhere; }
 .upload-progress { margin-top: 16px; padding: 12px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--surface-light); }
 .upload-progress strong { font-size: 13px; }
 .upload-progress p { margin: 6px 0 0; font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }

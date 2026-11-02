@@ -7,6 +7,7 @@ that is built into the web Docker image at /usr/local/bin/fleet-doc-ingester.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -26,7 +27,7 @@ INSERT_BATCH_SIZE = 64
 
 _PREPARED_RE = re.compile(r"Prepared (?P<count>\d+) Markdown chunk")
 _EMBED_RE = re.compile(r"Embedding batch (?P<current>\d+)/(?P<total>\d+)")
-_EMBED_DONE_RE = re.compile(r"Embedded batch (?P<current>\d+)/(?P<total>\d+)")
+_EMBED_DONE_RE = re.compile(r"(?:Embedded batch|Processed embedding batch) (?P<current>\d+)/(?P<total>\d+)")
 _INSERT_RE = re.compile(r"Inserting Milvus batch (?P<current>\d+)/(?P<total>\d+)")
 _INGESTED_RE = re.compile(r"Ingested (?P<count>\d+) chunk")
 
@@ -34,7 +35,7 @@ _state_lock = threading.Lock()
 _last_count_check = float("-inf")
 _state: dict = {
     "running": False,
-    "phase": "idle",  # idle | loading | embedding | inserting | success | error
+    "phase": "idle",  # idle | loading | embedding | inserting | success | partial | error
     "message": "",
     "progress": 0,
     "total": 0,
@@ -43,6 +44,8 @@ _state: dict = {
     "last_count": None,
     "last_indexed_at": None,
     "error": None,
+    "skipped_count": 0,
+    "skipped_sections": [],
 }
 
 
@@ -68,7 +71,7 @@ def start_reindex() -> bool:
     with _state_lock:
         if _state["running"]:
             return False
-        _state["running"] = True
+        _state.update(running=True, phase="loading", error=None, skipped_count=0, skipped_sections=[])
     threading.Thread(target=_safe_run, daemon=True, name="docs-reindex").start()
     return True
 
@@ -122,6 +125,8 @@ def _run_reindex_inner() -> None:
         started_at=started.isoformat(),
         completed_at=None,
         error=None,
+        skipped_count=0,
+        skipped_sections=[],
     )
 
     if not settings.docs_urls_file.exists():
@@ -209,11 +214,17 @@ def _run_ingester(command: list[str], local_docs_dir: Path) -> None:
         return
 
     count = _extract_count_from_lines(recent_lines) or _peek_count() or total_chunks
+    with _state_lock:
+        skipped_count = _state["skipped_count"]
+    message = f"Indexed {count} sections"
+    if skipped_count:
+        noun = "section" if skipped_count == 1 else "sections"
+        message += f"; skipped {skipped_count} rejected {noun}. Review the sources below, then re-index to retry them."
     completed = datetime.now(timezone.utc).isoformat()
     _set(
         running=False,
-        phase="success",
-        message=f"Indexed {count} sections",
+        phase="partial" if skipped_count else "success",
+        message=message,
         progress=count,
         total=count,
         last_count=count,
@@ -224,6 +235,28 @@ def _run_ingester(command: list[str], local_docs_dir: Path) -> None:
 
 
 def _handle_ingester_line(line: str, total_chunks: int) -> int:
+    if line.startswith("Skipped embedding: "):
+        try:
+            section = json.loads(line.removeprefix("Skipped embedding: "))
+            if not isinstance(section, dict) or not isinstance(section.get("chunk"), int):
+                raise ValueError("Invalid skipped section")
+            section = {
+                "chunk": section["chunk"],
+                "source": str(section.get("source", ""))[:256],
+                "heading": str(section.get("heading", ""))[:512],
+                "reason": str(section.get("reason", ""))[:200],
+            }
+        except (ValueError, TypeError):
+            _set(message="An embedding warning could not be read")
+            return total_chunks
+        with _state_lock:
+            _state["skipped_count"] += 1
+            # Bound status payloads while retaining the full skipped count.
+            if len(_state["skipped_sections"]) < 20:
+                _state["skipped_sections"] = [*_state["skipped_sections"], section]
+            _state["message"] = f"Skipped rejected section {section['chunk']}; continuing with remaining content"
+        return total_chunks
+
     if line.startswith("Crawling "):
         _set(phase="loading", message=line, progress=0, total=0)
         return total_chunks
@@ -248,6 +281,8 @@ def _handle_ingester_line(line: str, total_chunks: int) -> int:
         return total_chunks
 
     if line.startswith("Creating Milvus collection") or line.startswith("Dropping existing Milvus collection"):
+        with _state_lock:
+            total_chunks -= _state["skipped_count"] if _state["phase"] == "embedding" else 0
         _set(phase="inserting", message=line, progress=0, total=total_chunks)
         return total_chunks
 

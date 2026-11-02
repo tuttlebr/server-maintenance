@@ -39,6 +39,8 @@ def context_status(db: Session = Depends(get_db), user: str = Depends(get_curren
         completed_at=index.get("completed_at"),
         last_indexed_at=index.get("last_indexed_at"),
         error=index.get("error"),
+        skipped_count=index.get("skipped_count", 0),
+        skipped_sections=index.get("skipped_sections", []),
     )
 
 
