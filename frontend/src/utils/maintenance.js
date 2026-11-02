@@ -1,4 +1,5 @@
 export const SCAN = 'system.scan';
+export const IP_CHECK = 'system.ip.check';
 export const CHECK = 'system.packages.preview';
 export const INSTALL = 'system.update';
 export const CLEANUP = 'containers.cleanup';
@@ -6,8 +7,8 @@ export const REBOOT = 'system.reboot';
 export const STORAGE = 'storage.inspect';
 export const GPU = 'gpu.inspect';
 export const REACHY_RESTART = 'reachy.daemon.restart';
-export const ACTION_IDS = [SCAN, CHECK, INSTALL, CLEANUP, REBOOT, STORAGE, GPU, REACHY_RESTART];
-export const PLAYBOOKS = {[SCAN]:'host_facts.yml',[CHECK]:'package_preview.yml',[INSTALL]:'system_update.yml',[CLEANUP]:'docker_cleanup.yml',[REBOOT]:'reboot.yml',[STORAGE]:'storage_analysis.yml',[GPU]:'gpu_usage.yml',[REACHY_RESTART]:REACHY_RESTART};
+export const ACTION_IDS = [SCAN, IP_CHECK, CHECK, INSTALL, CLEANUP, REBOOT, STORAGE, GPU, REACHY_RESTART];
+export const PLAYBOOKS = {[SCAN]:'host_facts.yml',[IP_CHECK]:'host_ip_check.yml',[CHECK]:'package_preview.yml',[INSTALL]:'system_update.yml',[CLEANUP]:'docker_cleanup.yml',[REBOOT]:'reboot.yml',[STORAGE]:'storage_analysis.yml',[GPU]:'gpu_usage.yml',[REACHY_RESTART]:REACHY_RESTART};
 export const ACTIVE = ['pending', 'running', 'cancelling'];
 export const namesFor = (job) => String(job?.target_devices || '').split(',').filter(Boolean);
 export function needsScan(device, now = Date.now()) {

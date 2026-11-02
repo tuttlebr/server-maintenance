@@ -69,9 +69,10 @@
                   <router-link v-if="expandedJob?.playbook === 'package_preview.yml' && expandedJob.status === 'success'" :to="`/operations?preview=${expandedJob.job_id}`" class="btn btn-primary btn-sm">Review and apply this preview</router-link>
                   <div v-if="job.recap && job.playbook !== 'storage_analysis.yml'" class="job-recap-expanded"><pre>{{ job.recap }}</pre></div>
                   <DiscoveryResults :reports="expandedJob?.result_artifacts || []" />
+                  <HostIpResults :reports="expandedJob?.result_artifacts || []" />
                   <StorageResults :reports="expandedJob?.result_artifacts || []" />
-                  <section v-if="expandedJob?.result_artifacts?.some(result => !['execution','storage','discovery'].includes(result.report_type))" class="result-grid" aria-label="Structured operation results">
-                    <article v-for="result in expandedJob.result_artifacts.filter(item => !['execution','storage','discovery'].includes(item.report_type))" :key="`${result.report_type}-${result.hostname}`" class="result-card">
+                  <section v-if="expandedJob?.result_artifacts?.some(result => !['execution','storage','discovery','host_ip'].includes(result.report_type))" class="result-grid" aria-label="Structured operation results">
+                    <article v-for="result in expandedJob.result_artifacts.filter(item => !['execution','storage','discovery','host_ip'].includes(item.report_type))" :key="`${result.report_type}-${result.hostname}`" class="result-card">
                       <div class="result-heading">
                         <span>{{ resultTitle(result.report_type) }}</span>
                         <strong>{{ result.hostname }}</strong>
@@ -172,6 +173,7 @@ import { getJobs, getJob, getJobProgress, streamJobOutput, cancelJob } from "../
 import { ACTIVE } from "../utils/maintenance.js";
 import StatusBadge from "../components/StatusBadge.vue";
 import { formatTargetList, operationLabel, OPERATION_LABELS } from "../utils/devices.js";
+import HostIpResults from "../components/HostIpResults.vue";
 import { targetNames } from "../utils/fleetOverview.js";
 import { formatLongTime, ageInMs } from "../utils/time.js";
 

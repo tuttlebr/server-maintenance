@@ -15,6 +15,7 @@ from backend.capabilities import (
     OPERATION_BY_ID,
     OPERATIONS,
     REACHY_DAEMON_RESTART,
+    SYSTEM_IP_CHECK,
     facts_are_stale,
     operation_ineligibility,
 )
@@ -86,6 +87,8 @@ async def run_operation(
     operation = OPERATION_BY_ID.get(operation_id)
     if not operation:
         raise HTTPException(status_code=404, detail="Operation not found")
+    if payload.discovery_subnet and operation.id != SYSTEM_IP_CHECK:
+        raise HTTPException(status_code=400, detail="A discovery subnet is only supported by Find current IP")
 
     devices = db.query(Device).filter(Device.id.in_(payload.device_ids)).order_by(Device.hostname).all()
     if len(devices) != len(payload.device_ids):
@@ -98,9 +101,10 @@ async def run_operation(
         if previous:
             previous_vars = json.loads(previous.extra_vars or "{}")
             same_preview = operation.id != "system.update" or _preview_matches_accepted(db, payload.preview_job_id, previous_vars)
+            same_subnet = operation.id != SYSTEM_IP_CHECK or (previous_vars.get("ip_discovery_subnet") or "") == (payload.discovery_subnet or "")
             if (previous.playbook != (operation.playbook or operation.id) or
                     set((previous.target_hosts or "").split(",")) != {d.hostname for d in devices} or
-                    previous.triggered_by != user or not same_preview):
+                    previous.triggered_by != user or not same_preview or not same_subnet):
                 raise HTTPException(status_code=409, detail="Request key already used for a different operation")
             return {"job_id": previous.job_id, "detail": "Operation already accepted"}
 
@@ -118,6 +122,8 @@ async def run_operation(
     extra_vars = None
     if operation.id == "system.update":
         extra_vars = {"fleet_approved_package_plans": _approved_package_plans(db, payload.preview_job_id, devices)}
+    elif operation.id == SYSTEM_IP_CHECK:
+        extra_vars = {"ip_discovery_subnet": payload.discovery_subnet or ""}
 
     job_id = await run_playbook(
         db=db,

@@ -17,7 +17,7 @@ READ_ONLY_PLAYBOOKS = {
     "host_facts.yml", "maintenance_assessment.yml", "preflight_check.yml",
     "health_diagnostics.yml", "storage_analysis.yml", "gpu_usage.yml",
     "firmware_inventory.yml", "package_preview.yml", "access_inspect.yml",
-    "recovery_check.yml",
+    "recovery_check.yml", "host_ip_check.yml",
 }
 
 

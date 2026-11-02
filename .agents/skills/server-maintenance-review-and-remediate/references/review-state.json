@@ -9,41 +9,62 @@
     "web": "2026-11-01T13:18:45.503263Z"
   },
   "last_run": {
-    "at": "2026-11-01T13:23:29.619630Z",
-    "starting_head": "075f2ec93ad9e36c78d9609f8d2fa92ba48f017b",
-    "scope": "Focused shared SSH agent outage investigation; agent lifecycle, proxy health, startup/recovery and Reachy transport. Compared range metadata since baseline; unrelated Git changes not reviewed.",
-    "status": "partial",
-    "status_reason": "Confirmed current host agent absent and forwarding query timeout. Local detection/recovery changes validated; host agent termination trigger and deployed recovery remain unverified.",
+    "at": "2026-11-02T13:36:06.282122+00:00",
+    "starting_head": "cf0bca0b552bf6e13eceeec9ca734ce656f7b40b",
+    "scope": "Review the five initially untracked host-IP discovery files and complete required API, runner, UI, packaging, and documentation integrations. Prior re-index changes committed separately as cf0bca0.",
+    "status": "complete",
+    "status_reason": "All requested outstanding source changes reviewed and remediated. Isolated tests and image packaging verified. Runtime deployment and the unrelated historical Git range were outside this review.",
     "dirty_worktree_coverage": {
-      "initial": [],
-      "reviewed": "All local changes from this investigation; no prior dirty files."
+      "initial": [
+        "frontend/src/components/HostIpResults.vue",
+        "playbooks/files/host_ip_discovery.py",
+        "playbooks/host_ip_check.yml",
+        "scripts/ssh-discovered-hosts.sh",
+        "tests/test_host_ip_check.py"
+      ],
+      "reviewed": "All five initial files and every supporting change in this review."
     },
     "fixed_findings": [
-      "SSH-PROXY-FALSE-HEALTH"
+      "IP-DISCOVERY-UNREGISTERED",
+      "IP-DISCOVERY-REVOKED-ALIAS",
+      "INTERACTIVE-DISCOVERY-SCOPE"
     ],
     "checks": [
       {
-        "command": "bash scripts/check-backend.sh tests/test_ssh_agent_proxy.py tests/test_startup_enrollment.py tests/test_hardening.py tests/test_check_workflows.py",
+        "command": "bash scripts/check-backend.sh tests",
         "status": "passed",
-        "result": "49 tests, 10 subtests"
+        "result": "660 passed, 1 warning, 106 subtests passed in 176.17s (0:02:56)"
       },
       {
-        "command": "docker compose config --quiet",
+        "command": "npm --prefix frontend test",
+        "status": "passed",
+        "result": "103 tests"
+      },
+      {
+        "command": "npm --prefix frontend run build",
         "status": "passed"
       },
       {
-        "command": "docker compose exec -T web sh -s < ssh-agent-proxy/healthcheck.sh",
-        "status": "passed",
-        "result": "Expected exit 1 within three seconds for the currently broken forwarding path; no fleet connection."
-      },
-      {
-        "command": "docker build -t fleet-ssh-agent-validation:local ssh-agent-proxy",
-        "status": "passed",
-        "result": "Validation image only; no service recreated."
-      },
-      {
-        "command": ".venv/bin/pre-commit run --files <changed application files>",
+        "command": "ansible-playbook -i localhost, playbooks/host_ip_check.yml --syntax-check; ansible-lint --profile min playbooks/host_ip_check.yml",
         "status": "passed"
+      },
+      {
+        "command": "bash -n scripts/ssh-discovered-hosts.sh; docker compose config --quiet",
+        "status": "passed"
+      },
+      {
+        "command": "docker build -t fleet-host-ip-review:local .; isolated network-disabled image smoke checks",
+        "status": "passed",
+        "result": "Nmap, ingester, operation registration and subnet schema verified; no services recreated."
+      },
+      {
+        "command": "pre-commit run --files <changed source files>",
+        "status": "passed"
+      },
+      {
+        "command": "skill collector unittests and skill-creator quick_validate.py",
+        "status": "passed",
+        "result": "11 collector tests; skill metadata valid"
       },
       {
         "command": "git diff --check",
@@ -51,21 +72,21 @@
       }
     ],
     "documentation": [
-      "README.md: shared SSH outage diagnosis, host agent lifecycle and make repair-ssh."
+      "README and UI guide: IP discovery, saved trust, bounded subnet, verified results, unchanged inventory and stale-fact exception.",
+      "NAT prompt: operation catalog and exemption updated; 6 words and 35 characters added."
     ],
     "learning": [
-      "L007: validate end-to-end agent response, distinguish host process loss from stale forwarding, and identify startup helper behavior.",
-      "Repository guide maps updated health probe and targeted repair.",
-      "SKILL.md and collector unchanged: current bounded evidence and authorization workflow covers this investigation."
+      "L001 expanded to trace complete operation integration, including queued gates and runtime dependencies.",
+      "Repository guide documents host-IP entry points and validation boundaries.",
+      "SKILL.md and collector unchanged; current workflow covers this bounded review."
     ],
     "limits": [
-      "Host process termination trigger not established; missing process/socket do not prove why it exited.",
-      "No services restarted, credentials changed, host jobs run, commits or pushes. Recovery may require interactive key passphrase.",
-      "Four-hour evidence window, web tail capped at 100 lines, proxy sample empty. Prior containers/logs unavailable.",
-      "No full backend/frontend/Rust checks: only SSH packaging, shell and docs changed; prior unrelated gaps retained.",
-      "Narrow scope does not advance the Git review baseline."
+      "No live host discovery, SSH authentication, provider calls, re-index, service recreation, push, or deployment.",
+      "Runtime collection inspected for service metadata and relevant operation mentions only; Docker review cursors unchanged.",
+      "Historical baseline-to-HEAD range contains unrelated changes; Git review baseline unchanged.",
+      "Rust 1.95 tests passed during the preceding re-index fix; Rust 1.85 remains unverified locally."
     ],
-    "evidence_path": "data/skill-reviews/20261101T131845Z-oh50cior"
+    "evidence_path": "data/skill-reviews/20261102T131607Z-nmzi5sxo"
   },
   "pending_work": [
     {
@@ -82,15 +103,15 @@
     },
     {
       "id": "DEPLOYMENT-VERIFICATION",
-      "summary": "Prior backend/frontend fixes and prepared NAT prompt match starting HEAD. This run\u2019s per-device context/snapshot fix remains local; existing index documents and live model answers remain unverified.",
-      "evidence": "data/skill-reviews/20261026T124708Z-0an073ii/deployment-fingerprints.json; runtime-checks.json; ledger.json",
-      "next_check": "When authorized, rebuild/recreate web, verify fresh-context outcomes on an existing mixed job, and verify refreshed snapshot evidence after provider recovery. Existing indexed job documents require a separately authorized refresh; do not replay fleet operations."
+      "summary": "Prior deployment comparisons are historical. The re-index fix and completed host-IP discovery integration are local; the validation image was built without recreating services.",
+      "evidence": "data/skill-reviews/20261102T131607Z-nmzi5sxo/ledger.json; prior deployment-fingerprints.json references remain historical",
+      "next_check": "When authorized, rebuild/recreate web and verify the new IP discovery action against an approved device. Re-index activation and provider-backed validation require their own runtime authorization."
     },
     {
       "id": "RUST-VALIDATION-UNAVAILABLE",
-      "summary": "Prior reviewed Rust changes remain unvalidated locally: Cargo is still absent. No Rust files changed in the current incremental range.",
-      "evidence": "tools/dgx-doc-ingester/src/main.rs; .github/workflows/ci.yml",
-      "next_check": "Run cargo test --locked --manifest-path tools/dgx-doc-ingester/Cargo.toml and the Rust 1.85.0 gate when a toolchain or CI result is available."
+      "summary": "The preceding re-index fix passed all 15 Rust tests using an isolated Rust 1.95 image. The Rust 1.85 minimum-version gate remains unverified locally.",
+      "evidence": "tools/dgx-doc-ingester/src/main.rs; .github/workflows/ci.yml; re-index commit cf0bca0",
+      "next_check": "Run the Rust 1.85.0 CI gate when its toolchain or CI result is available."
     },
     {
       "id": "EMBEDDING-PROVIDER-CONNECTIVITY",

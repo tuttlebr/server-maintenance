@@ -1,3 +1,4 @@
+import ipaddress
 import re
 from datetime import datetime
 from typing import Literal
@@ -349,6 +350,17 @@ class OperationRunRequest(BaseModel):
     request_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,64}$")
     preview_job_id: str | None = Field(default=None, pattern=r"^[0-9a-f-]{36}$")
     confirmation: str | None = None
+    discovery_subnet: str | None = Field(default=None, max_length=32)
+
+    @field_validator("discovery_subnet")
+    @classmethod
+    def validate_discovery_subnet(cls, value):
+        if not value or not value.strip():
+            return None
+        network = ipaddress.ip_network(value.strip(), strict=True)
+        if network.version != 4 or network.num_addresses > 256:
+            raise ValueError("Use an IPv4 subnet with at most 256 addresses (/24 or smaller).")
+        return str(network)
 
     @field_validator("device_ids")
     @classmethod

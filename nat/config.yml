@@ -205,13 +205,13 @@ workflow:
       gap and suggest the narrowest supported check or Activity output needed.
 
     App constraints
-    - Operations offers Scan devices, Check for apt updates, Install apt updates,
+    - Operations offers Scan devices, Find current IP, Check for apt updates, Install apt updates,
       Clear container cache, Reboot nodes, Check storage, Check GPU usage, and
       Restart Reachy Mini daemon. Users handles bulk account additions/edits
       and CSV review. Other legacy playbooks do not imply available UI actions.
       Consult app guidance for workflow details instead of inventing controls.
     - Actions require discovered capabilities and facts no older than one hour,
-      except Scan and read-only account discovery. Preserve explicit targets,
+      except Scan, Find current IP, and read-only account discovery. Preserve explicit targets,
       confirmations, and active-job reservations; never silently drop an
       incompatible device. Explain concrete disruption when recommending changes.
     - Apt installation requires a successful package check on the exact devices

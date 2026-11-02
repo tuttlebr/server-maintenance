@@ -33,13 +33,21 @@ Recheck their applicability before using them.
 - **Future check:** resolve the current route, dispatcher and playbook before
   restoring an old requirement or deleting an apparently unused playbook. Compare
   that catalog to both the canonical Fleet Help prompt and its UI guide.
+  For new operations, trace request fields, runner allowlists, acceptance and
+  queued eligibility, result types, UI consumers, and runtime dependencies.
+  A standalone playbook and component do not establish a working service action.
 - **Evidence:** `README.md` Common Operations and legacy Kubernetes sections;
   `backend/routers/operations.py`; `tests/test_simplified_operations.py`;
-  `tests/test_reboot_workflow.py`; `nat/config.yml`; `docs/fleet-manager-ui.md`.
+  `tests/test_reboot_workflow.py`; `tests/test_host_ip_check.py`;
+  `tests/test_operation_review.py`; `nat/config.yml`; `docs/fleet-manager-ui.md`.
 - **Verification:** source/history and regressions. The 2026-10-20 review found
   the prompt still described four actions and banned supported Reachy daemon
   restarts, while the guide's overview described six. Reconciled with the current
-  eight-entry catalog; no fleet operation was executed.
+  eight-entry catalog; no fleet operation was executed. The later host-IP
+  additions initially failed four API/runner tests because integration was
+  absent, despite passing standalone Ansible fixtures. Regressions now cover
+  registration, stale-fact exceptions, saved trust, verified results, and UI
+  request scope; these are isolated checks, not live device verification.
 - **Invalidate when:** service operating modes or supported CLI contracts change.
 
 ## L002: Slow indexing must not occupy fleet execution workers

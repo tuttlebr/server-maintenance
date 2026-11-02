@@ -1,5 +1,6 @@
 import asyncio
 import errno
+import ipaddress
 import sys
 import time
 import json
@@ -58,6 +59,7 @@ ALLOWED_PLAYBOOKS = {
     "host_bootstrap.yml",
     "host_drain.yml",
     "host_facts.yml",
+    "host_ip_check.yml",
     "install_docker.yml",
     "manage_groups.yml",
     "manage_sudoers.yml",
@@ -745,7 +747,7 @@ async def run_playbook(
                 raise PlaybookRequestError("Request key already used for a different operation", 409)
             return previous.job_id
     devices = db.query(Host).filter(Host.hostname.in_(targets)).all()
-    if playbook not in {"host_facts.yml", "recovery_check.yml", "access_inspect.yml"}:
+    if playbook not in {"host_facts.yml", "host_ip_check.yml", "recovery_check.yml", "access_inspect.yml"}:
         stale = [host.name for host in devices if facts_are_stale(host)]
         if stale:
             raise PlaybookRequestError(f"Scan devices first. Facts are missing or stale for: {', '.join(stale)}", 409)
@@ -785,7 +787,7 @@ async def run_playbook(
                 started_at = datetime.now(timezone.utc)
                 with SessionLocal() as state_db:
                     # A queued job may outlive the facts that authorized it.
-                    if playbook not in {"host_facts.yml", "recovery_check.yml", "access_inspect.yml"}:
+                    if playbook not in {"host_facts.yml", "host_ip_check.yml", "recovery_check.yml", "access_inspect.yml"}:
                         stale = [host.name for host in state_db.query(Host).filter(Host.hostname.in_(targets)).all() if facts_are_stale(host)]
                         if stale:
                             _update_job(job_id, status="failed", phase="discovery_required", finished_at=datetime.now(timezone.utc),
@@ -857,6 +859,23 @@ async def run_playbook(
                             else:
                                 _save_discovery_result(job_id, host)
                     output = log_path.read_text() if log_path.exists() else ""
+                elif playbook == "host_ip_check.yml":
+                    # A successful recap cannot prove identity without the verified
+                    # report. Discovery must not refresh facts or change inventory.
+                    reports = {r["hostname"]: r for r in get_job_results(job_id) if r["report_type"] == "host_ip"}
+                    for item in outcomes:
+                        report = reports.get(item["hostname"], {})
+                        verified = (report.get("verified") is True and report.get("status") in {"changed", "unchanged", "located"}
+                                    and isinstance(report.get("current_ip"), str))
+                        try:
+                            ipaddress.IPv4Address(report.get("current_ip"))
+                        except (ValueError, TypeError):
+                            verified = False
+                        if item["status"] == "success" and not verified:
+                            item["status"] = "verification_failed"
+                            item["detail"] = "A verified IP address report is missing or invalid. Review the discovery result."
+                            failed.append(item["hostname"])
+                            errors.append(f"{item['hostname']}: verified IP address report missing or invalid")
                 elif playbook == "reachy_app_reset.yml" and successful:
                     from backend.services.device_discovery import probe_reachy
                     for name in successful:

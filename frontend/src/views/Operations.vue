@@ -23,12 +23,13 @@
       </aside>
 
       <div class="main-panel">
-        <div v-if="scanRequired.length" class="callout callout-warn" role="status"><div><strong>Scan devices before other actions</strong><p>{{ scanRequired.map(d => d.name).join(', ') }}: facts are missing or stale. A successful scan is valid for one hour.</p><button class="btn btn-primary btn-sm" :disabled="busy || loading || !!loadError || !!missingTargets.length" @click="choose(SCAN)">Scan selected devices</button></div></div>
+        <div v-if="scanRequired.length" class="callout callout-warn" role="status"><div><strong>Scan devices before maintenance</strong><p>{{ scanRequired.map(d => d.name).join(', ') }}: facts are missing or stale. A successful scan is valid for one hour. Find current IP remains available for SSH devices.</p><button class="btn btn-primary btn-sm" :disabled="busy || loading || !!loadError || !!missingTargets.length" @click="choose(SCAN)">Scan selected devices</button></div></div>
         <div class="action-grid" aria-label="Available operations">
           <article v-for="action in visibleActions" :key="action.id" :class="['card', 'action-card', {chosen:focused === action.id}]">
             <span class="action-icon" aria-hidden="true"><i :class="['fas', action.icon]"></i></span>
             <h3>{{ action.label }}</h3><p>{{ action.description }}</p>
             <span class="action-meta">{{ action.meta }}</span>
+            <label v-if="action.id === IP_CHECK" class="form-label" for="discovery-subnet">Optional IPv4 subnet<input id="discovery-subnet" v-model.trim="discoverySubnet" class="form-input" maxlength="32" :disabled="busy" placeholder="192.0.2.0/24" /><small>Use /24 or smaller. Leave blank to check the saved endpoint and DNS.</small></label>
             <button class="btn btn-primary" :disabled="!selectedIds.length || busy || loading || !!loadError || !!missingTargets.length" @click="choose(action.id)">{{ starting === action.id ? 'Starting…' : action.cta }}</button>
           </article>
         </div>
@@ -63,6 +64,7 @@
           <div v-for="report in (job.result_artifacts || []).filter(r => r.report_type === 'apt_install')" :key="report.hostname" class="install-summary"><strong>{{ report.hostname }}</strong>: {{ report.package_count }} {{ report.package_count === 1 ? 'package' : 'packages' }} installed.<span v-if="report.reboot_required" class="warning-text"> Reboot required. Use Reboot nodes when ready.</span></div>
           <div v-for="report in (job.result_artifacts || []).filter(r => r.report_type === 'cleanup')" :key="report.hostname" class="cleanup-summary"><h4>{{ report.hostname }}</h4><p>{{ report.summary }}</p><details v-for="step in report.steps" :key="step.label"><summary>{{ step.label }} · {{ step.status === 'skipped' ? 'Skipped' : statusLabel(step.status) }}</summary><pre>{{ step.output || 'Nothing to remove.' }}</pre></details></div>
           <DiscoveryResults :reports="job.result_artifacts || []" :devices="devices" />
+          <HostIpResults :reports="job.result_artifacts || []" />
           <InspectionResults :reports="job.result_artifacts || []" :devices="devices" />
           <div v-if="!jobActive" class="result-actions"><button v-if="checkReady && packageCount(check) > 0 && job.playbook === 'package_preview.yml'" class="btn btn-primary" :disabled="busy" @click="choose(INSTALL)">Install {{ updateLabel(packageCount(check)) }}</button><button v-if="job.status !== 'success' && job.playbook === 'package_preview.yml'" class="btn btn-ghost" :disabled="busy" @click="choose(CHECK)">Check selected devices again</button><router-link :to="{path:'/activity',query:{job:job.job_id}}">View full activity</router-link></div>
           <details v-if="job.output_log" class="output-log"><summary>Technical log</summary><pre>{{ job.output_log }}</pre></details>
@@ -79,15 +81,17 @@ import { useRoute, useRouter } from 'vue-router';
 import PackageResults from '../components/PackageResults.vue';
 import InspectionResults from '../components/InspectionResults.vue';
 import DiscoveryResults from '../components/DiscoveryResults.vue';
+import HostIpResults from '../components/HostIpResults.vue';
 import {visibleStorageOutcomes} from '../utils/storage.js';
 import { getDevices, getOperations, runOperation, getJobs, getJob, getJobProgress } from '../api.js';
 import { parseDeviceIds } from '../utils/fleetOverview.js';
 import { formatLongTime } from '../utils/time.js';
-import { SCAN, needsScan, CHECK, INSTALL, CLEANUP, REBOOT, STORAGE, GPU, REACHY_RESTART, PLAYBOOKS, ACTION_IDS, ACTIVE, namesFor, sameTargets, validPackageCheck, blockers, packageCount, statusLabel, updateLabel } from '../utils/maintenance.js';
+import { SCAN, IP_CHECK, needsScan, CHECK, INSTALL, CLEANUP, REBOOT, STORAGE, GPU, REACHY_RESTART, PLAYBOOKS, ACTION_IDS, ACTIVE, namesFor, sameTargets, validPackageCheck, blockers, packageCount, statusLabel, updateLabel } from '../utils/maintenance.js';
 
 
 const actions = [
   {id:SCAN,label:'Scan devices',description:'Discover hardware, software, health, and supported capabilities for every selected device.',meta:'Required first · Facts valid for one hour',cta:'Scan now',icon:'fa-magnifying-glass'},
+  {id:IP_CHECK,label:'Find current IP',description:'Locate an SSH device using its saved host key and verify access with existing credentials.',meta:'Works with stale facts · Inventory unchanged',cta:'Find IP',icon:'fa-network-wired'},
   {id:CHECK,label:'Check for apt updates',description:'See which packages can be updated on your Debian and Ubuntu devices.',meta:'No packages installed',cta:'Check now',icon:'fa-magnifying-glass'},
   {id:INSTALL,label:'Install apt updates',description:'Review available updates, then install the checked versions.',meta:'One device at a time · No reboot',cta:'Review & install',icon:'fa-arrow-down'},
   {id:CLEANUP,label:'Clear container cache',description:'Clear unused Docker and containerd/nerdctl images and build cache.',meta:'Keep containers and volumes',cta:'Clear cache…',icon:'fa-box'},
@@ -100,6 +104,7 @@ const route = useRoute(), router = useRouter();
 const devices = ref([]), operations = ref([]), selectedIds = ref(parseDeviceIds(route.query.devices || route.query.device));
 const loading = ref(true), loadError = ref(''), search = ref(''), starting = ref(''), focused = ref(ACTION_IDS.includes(route.query.operation) ? route.query.operation : ''), confirmation = ref(null), actionError = ref(''), retryRequest = ref(null);
 const job = ref(null), check = ref(null), pollError = ref(''), now = ref(Date.now()), resultPanel = ref(null), jobPanel = ref(null), unresolvedNames = ref([]);
+const discoverySubnet = ref('');
 let installAfterCheck = false;
 let timer, clockTimer, disposed = false, generation = 0, selectionGeneration = 0, initialized = false;
 const selectedDevices = computed(() => devices.value.filter(d => selectedIds.value.includes(d.id)));
@@ -114,7 +119,7 @@ const focusedLabel = computed(() => actions.find(a => a.id === focused.value)?.l
 const selectionBlockers = computed(() => {
   if (!focused.value) return [];
   const unavailable = blockers(operations.value.find(o => o.id === focused.value), selectedIds.value, devices.value);
-  if (focused.value !== SCAN) for (const device of scanRequired.value) {
+  if (![SCAN, IP_CHECK].includes(focused.value)) for (const device of scanRequired.value) {
     if (!unavailable.some(item => item.id === device.id)) unavailable.push({id:device.id,name:device.name,reason:'Scan devices first. Device facts are missing or stale.'});
   }
   return unavailable;
@@ -124,6 +129,7 @@ const jobHeadline = computed(() => {
   if (jobActive.value) return job.value.status === 'pending' ? 'Waiting to start…' : ['checking_health','checking_facts'].includes(job.value.phase) ? 'Checking device health' : 'Operation in progress';
   if (job.value.phase === 'health_check_failed') return 'Device health check failed';
   if (job.value.status !== 'success') return job.value.status === 'partial' ? 'Some devices need attention' : 'This operation needs attention';
+  if (job.value.playbook === 'host_ip_check.yml') return 'IP address check completed';
   if (job.value.playbook === 'package_preview.yml') return packageCount(job.value) ? `${packageCount(job.value)} package ${packageCount(job.value) === 1 ? "update" : "updates"} available` : 'All packages are up to date';
   return job.value.playbook === 'host_facts.yml' ? 'Device scan completed' : job.value.playbook === 'system_update.yml' ? 'Apt updates installed' : job.value.playbook === 'docker_cleanup.yml' ? 'Cache cleanup completed' : job.value.playbook === 'reboot.yml' ? 'Nodes rebooted' : job.value.playbook === 'storage_analysis.yml' ? 'Storage check completed' : job.value.playbook === 'gpu_usage.yml' ? 'GPU check completed' : job.value.playbook === REACHY_RESTART ? 'Reachy Mini daemon restarted' : 'Device details verified';
 });
@@ -172,7 +178,7 @@ async function choose(id) {
   if (busy.value || loading.value || loadError.value || !selectedIds.value.length || missingTargets.value.length) return;
   focused.value = id; actionError.value = ''; confirmation.value = null; installAfterCheck = id === INSTALL;
   if (selectionBlockers.value.length) return;
-  if ([SCAN, STORAGE, GPU].includes(id)) {
+  if ([SCAN, IP_CHECK, STORAGE, GPU].includes(id)) {
     await submit(makeRequest(id));
   } else if (id === CHECK || (id === INSTALL && !checkReady.value)) {
     // The installation entry point runs a check first, then opens its package
@@ -187,7 +193,7 @@ async function choose(id) {
 }
 function makeRequest(id) {
   const ordered = [...selectedDevices.value].sort((a,b) => a.inventory_name < b.inventory_name ? -1 : a.inventory_name > b.inventory_name ? 1 : 0);
-  return {id, ids:[...selectedIds.value], parameters:{request_key:crypto.randomUUID(), confirmation:ordered.map(d => d.name).join(', '), ...(id === INSTALL ? {preview_job_id:check.value.job_id} : {})}};
+  return {id, ids:[...selectedIds.value], parameters:{request_key:crypto.randomUUID(), confirmation:ordered.map(d => d.name).join(', '), ...(id === INSTALL ? {preview_job_id:check.value.job_id} : {}), ...(id === IP_CHECK ? {discovery_subnet:discoverySubnet.value || null} : {})}};
 }
 async function confirmRun() {
   if (!confirmation.value || busy.value || loading.value || loadError.value || selectionBlockers.value.length || (confirmation.value.id === INSTALL && !checkReady.value)) return;

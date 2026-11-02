@@ -1,0 +1,166 @@
+---
+- name: Find the current IP of trusted hosts
+  hosts: managed_hosts
+  gather_facts: false
+  become: false
+  vars:
+    ansible_become: false
+    ip_discovery_subnet: ""
+  tasks:
+    - name: Remember the configured endpoint
+      ansible.builtin.set_fact:
+        ip_check_previous_endpoint: "{{ ansible_host | default(inventory_hostname) }}"
+        ip_check_common_args: "{{ ansible_ssh_common_args | default('') }}"
+        ip_check_port: "{{ ansible_port | default(22) }}"
+
+    - name: Locate matching host keys from the controller
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - "{{ playbook_dir }}/files/host_ip_discovery.py"
+          - --hostname
+          - "{{ inventory_hostname }}"
+          - --endpoint
+          - "{{ ip_check_previous_endpoint }}"
+          - --known-hosts
+          - "{{ fleet_ssh_known_hosts_file | default(lookup('env', 'HOME') ~ '/.ssh/known_hosts') }}"
+          - --port
+          - "{{ ip_check_port | string }}"
+          - --subnet
+          - "{{ ip_discovery_subnet }}"
+      delegate_to: localhost
+      vars:
+        ansible_connection: local
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
+      register: ip_check_discovery
+      throttle: 1
+      changed_when: false
+      check_mode: false
+
+    - name: Read discovery evidence
+      ansible.builtin.set_fact:
+        ip_check_probe: "{{ ip_check_discovery.stdout | from_json }}"
+        ip_check_verified: false
+        ip_check_remote_hostname: ""
+
+    - name: Verify the unique candidate with the existing SSH credentials
+      when: ip_check_probe.status == 'candidate'
+      block:
+        - name: Create a temporary pinned trust file
+          ansible.builtin.tempfile:
+            state: file
+            prefix: fleet-ip-trust-
+          delegate_to: localhost
+          vars:
+            ansible_connection: local
+            ansible_python_interpreter: "{{ ansible_playbook_python }}"
+          register: ip_check_trust
+          check_mode: false
+
+        - name: Pin only the previously trusted host key
+          ansible.builtin.copy:
+            dest: "{{ ip_check_trust.path }}"
+            content: "{{ ip_check_probe.pinned_key }}"
+            mode: "0600"
+          delegate_to: localhost
+          vars:
+            ansible_connection: local
+            ansible_python_interpreter: "{{ ansible_playbook_python }}"
+          check_mode: false
+
+        - name: Read the remote hostname using existing credentials
+          ansible.builtin.raw: hostname
+          vars:
+            ansible_connection: ssh
+            ansible_host: "{{ ip_check_probe.candidate_ip }}"
+            ansible_port: "{{ ip_check_port }}"
+            ansible_ssh_timeout: 5
+            ansible_ssh_args: -C -o ControlMaster=no -o ControlPath=none
+            ansible_ssh_common_args: >-
+              -o StrictHostKeyChecking=yes -o HostKeyAlias=fleet-ip-discovery
+              -o UserKnownHostsFile={{ ip_check_trust.path | quote }} -o GlobalKnownHostsFile=/dev/null
+              -o HostKeyAlgorithms=ssh-ed25519 -o CheckHostIP=no -o UpdateHostKeys=no
+              -o ForwardAgent=no -o ForwardX11=no -o ClearAllForwardings=yes -o PermitLocalCommand=no
+              -o ConnectionAttempts=1 -o NumberOfPasswordPrompts=1
+              {{ ip_check_common_args }}
+          register: ip_check_ssh
+          changed_when: false
+          failed_when: false
+          ignore_unreachable: true
+          no_log: true
+          check_mode: false
+
+        - name: Validate the authenticated hostname response
+          ansible.builtin.set_fact:
+            ip_check_verified: >-
+              {{ not (ip_check_ssh.unreachable | default(false)) and
+                 (ip_check_ssh.rc | default(1) | int) == 0 and
+                 (ip_check_ssh.stdout | default('') | trim is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$')) }}
+            ip_check_remote_hostname: >-
+              {{ ip_check_ssh.stdout | default('') | trim
+                 if (ip_check_ssh.stdout | default('') | trim is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$')) else '' }}
+          no_log: true
+      always:
+        - name: Remove the temporary trust file
+          ansible.builtin.file:
+            path: "{{ ip_check_trust.path }}"
+            state: absent
+          when: ip_check_trust.path is defined
+          delegate_to: localhost
+          vars:
+            ansible_connection: local
+            ansible_python_interpreter: "{{ ansible_playbook_python }}"
+          check_mode: false
+
+    - name: Compile the IP address report
+      ansible.builtin.set_fact:
+        ip_check_report: >-
+          {{ {
+            'schema_version': 1,
+            'report_type': 'host_ip',
+            'hostname': inventory_hostname,
+            'previous_endpoint': ip_check_previous_endpoint,
+            'current_ip': ip_check_probe.candidate_ip if ip_check_verified else none,
+            'remote_hostname': ip_check_remote_hostname if ip_check_verified else none,
+            'verified': ip_check_verified,
+            'status': ('unchanged' if ip_check_previous_endpoint == ip_check_probe.candidate_ip else
+                ('changed' if ip_check_previous_endpoint is match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$') else 'located'))
+                if ip_check_verified else ('verification_failed' if ip_check_probe.status == 'candidate' else ip_check_probe.status),
+            'candidate_ips': ip_check_probe.candidate_ips,
+            'fingerprint': ip_check_probe.fingerprint | default(none),
+            'subnet': ip_discovery_subnet or none,
+            'detail': 'The saved SSH host key and existing credentials verified this address. Inventory was not changed.'
+               if ip_check_verified else ('The host key matched, but SSH authentication or the hostname command failed.'
+               if ip_check_probe.status == 'candidate' else ip_check_probe.detail)
+          } }}
+
+    - name: Create the controller result directory
+      ansible.builtin.file:
+        path: "{{ __fleet_results_dir | default('/tmp/fleet-job-results') }}/{{ __fleet_job_id | default('manual') }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      vars:
+        ansible_connection: local
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
+      check_mode: false
+
+    - name: Save the IP address report
+      ansible.builtin.copy:
+        content: "{{ ip_check_report | to_nice_json }}"
+        dest: "{{ __fleet_results_dir | default('/tmp/fleet-job-results') }}/{{ __fleet_job_id | default('manual') }}/host_ip_{{ inventory_hostname }}.json"
+        mode: "0600"
+      delegate_to: localhost
+      vars:
+        ansible_connection: local
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
+      check_mode: false
+
+    - name: Report the current IP address
+      ansible.builtin.debug:
+        var: ip_check_report
+
+    - name: Require a verified address
+      ansible.builtin.assert:
+        that: ip_check_verified
+        fail_msg: "{{ ip_check_report.detail }}"

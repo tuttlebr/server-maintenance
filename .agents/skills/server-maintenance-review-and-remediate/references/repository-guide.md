@@ -19,12 +19,20 @@ CI on every review; update it when ownership or commands move.
 | NAT and ingestion | `nat/config.yml`, `nat/ingest.py`, `nat/embedding_response.py`, `tools/dgx-doc-ingester/src/main.rs` | Cross-language embedding contracts, image packaging and index rebuild behavior |
 | Delivery and SSH | `docker-compose.yml`, `Dockerfile`, `nat/Dockerfile`, `ssh-agent-proxy/`, `scripts/start.sh`, `scripts/enroll_hosts.py` | Dedicated agent, strict host trust, secrets, volumes and running-image drift |
 
-The current service has seven maintenance actions plus device scanning and bulk
-user management. Service operations treat devices as standalone; legacy CLI
+The current service has seven maintenance actions plus device scanning, IP discovery, and
+bulk user management. Service operations treat devices as standalone; legacy CLI
 Kubernetes workflows still exist. Confirm the current catalog in
 `backend/routers/operations.py` rather than reviving requirements from old reviews.
 Scan freshness, automatic recovery checks, and package approval have distinct
 contracts. Read their implementations before changing a shared gate.
+
+`system.ip.check` dispatches `host_ip_check.yml` with an optional IPv4 subnet
+of at most 256 addresses. It is read-only and exempt from stale-fact gates at
+acceptance and execution. The controller matches saved ED25519 keys before
+Ansible authenticates with existing credentials. A successful recap also needs
+a verified `host_ip` artifact. Inventory, facts, and recovery flags stay unchanged.
+Trace the operation catalog, request schema, runner, report allowlist, Operations
+and Activity components, and Docker's Nmap dependency together.
 
 SQL activity and full job logs are authoritative; Milvus is derived retrieval.
 `/api/v2/jobs/{job_id}/progress` deliberately avoids full logs and artifacts.

@@ -43,6 +43,7 @@ def test_every_ansible_operation_dispatches_only_selected_hosts(sessions, operat
         assert run.await_args.kwargs['hosts'] == ['selected']
         assert run.await_args.kwargs['playbook'] == operation.playbook
         expected = {
+            'system.ip.check': {'ip_discovery_subnet': ''},
             'system.update': {'fleet_approved_package_plans': {'selected':'a'*64}},
             'services.inspect': {'service_action':'status','service_name':'nginx.service'},
             'services.manage': {'service_action':'restarted','service_name':'nginx.service'},

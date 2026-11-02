@@ -10,6 +10,7 @@ from typing import Iterable
 
 
 SYSTEM_SCAN = "system.scan"
+SYSTEM_IP_CHECK = "system.ip.check"
 SYSTEM_ASSESS = "system.assess"
 SYSTEM_BOOTSTRAP = "system.bootstrap"
 SYSTEM_REBOOT = "system.reboot"
@@ -121,6 +122,11 @@ OPERATIONS = (
         "Discovery", SYSTEM_SCAN, "low", "none", "host_facts.yml", "fa-magnifying-glass",
     ),
     OperationDefinition(
+        SYSTEM_IP_CHECK, "Find current IP",
+        "Locate SSH devices using their saved host keys, then verify the address with existing credentials. Inventory is unchanged.",
+        "Discovery", SYSTEM_SCAN, "low", "none", "host_ip_check.yml", "fa-network-wired",
+    ),
+    OperationDefinition(
         "system.packages.preview", "Check for apt updates",
         "Refresh package lists and show available updates. No packages are installed.",
         "Packages", SYSTEM_UPDATE, "low", "none", "package_preview.yml", "fa-magnifying-glass",
@@ -169,6 +175,8 @@ def facts_are_stale(device) -> bool:
 def operation_ineligibility(device, operation) -> str | None:
     if operation.id == SYSTEM_SCAN:
         return None if (device.transport or "ssh") in {"ssh", "reachy_daemon"} else "Unsupported discovery transport"
+    if operation.id == SYSTEM_IP_CHECK:
+        return None if (device.transport or "ssh") == "ssh" else "Requires an SSH-managed device"
     if facts_are_stale(device):
         return "Scan devices first. Device facts are missing or stale (valid for one hour)."
     if operation.id == REACHY_DAEMON_RESTART:

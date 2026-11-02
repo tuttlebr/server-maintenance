@@ -141,7 +141,7 @@ def test_scan_preserves_existing_recovery_requirement(fleet):
 
 
 @pytest.mark.parametrize("staleness", ["missing", "flagged", "expired"])
-def test_every_other_operation_requires_current_discovery(fleet, staleness, monkeypatch):
+def test_maintenance_requires_current_discovery_but_identity_checks_remain_available(fleet, staleness, monkeypatch):
     sessions, _, _, _ = fleet
     fake = AsyncMock()
     monkeypatch.setattr(operations, "run_playbook", fake)
@@ -151,8 +151,9 @@ def test_every_other_operation_requires_current_discovery(fleet, staleness, monk
         host.discovered_at = None if staleness == "missing" else datetime.now(timezone.utc) - timedelta(hours=2 if staleness == "expired" else 0)
         db.commit()
         assert operation_ineligibility(host, OPERATION_BY_ID["system.scan"]) is None
+        assert operation_ineligibility(host, OPERATION_BY_ID["system.ip.check"]) is None
         for operation in OPERATIONS:
-            if operation.id == "system.scan":
+            if operation.id in {"system.scan", "system.ip.check"}:
                 continue
             with pytest.raises(HTTPException, match="Scan devices first") as exc:
                 asyncio.run(operations.run_operation(operation.id, OperationRunRequest(device_ids=[1], confirmation="node"), db, "test"))

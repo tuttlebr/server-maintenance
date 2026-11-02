@@ -34,10 +34,10 @@ def db():
     engine.dispose()
 
 
-def test_empty_fleet_still_explains_the_eight_actions(db):
+def test_empty_fleet_still_explains_available_actions(db):
     db.query(Device).delete(); db.commit()
     catalog = list_operations(db, 'test')
-    assert [op.id for op in catalog] == ['system.scan', 'system.packages.preview', 'system.update', 'containers.cleanup', 'system.reboot', 'storage.inspect', 'gpu.inspect', 'reachy.daemon.restart']
+    assert [op.id for op in catalog] == ['system.scan', 'system.ip.check', 'system.packages.preview', 'system.update', 'containers.cleanup', 'system.reboot', 'storage.inspect', 'gpu.inspect', 'reachy.daemon.restart']
     assert all(op.eligible_count == 0 for op in catalog)
 
 

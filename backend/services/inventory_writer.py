@@ -65,6 +65,7 @@ def _validated_device_vars(device: Device) -> dict[str, str | bool]:
     if device.ansible_user:
         hostvars["ansible_user"] = device.ansible_user
     hostvars["ansible_ssh_common_args"] = _ssh_common_args(not bool(device.encrypted_ansible_password))
+    hostvars["fleet_ssh_known_hosts_file"] = str(settings.ssh_known_hosts_file)
     return hostvars
 
 
