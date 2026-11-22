@@ -4,6 +4,24 @@ These lessons come from source, regression tests, and bounded runtime reviews.
 Their verification levels distinguish synthetic regressions from live evidence.
 Recheck their applicability before using them.
 
+## L008: Check when optional tools open their connections
+
+- NAT 1.9 builds MCP groups before serving chat. A terminated Dynamo documentation
+  session during discovery repeatedly aborted application startup, even though
+  the main web health probe succeeded.
+- Inspect the **prepared** tool catalog in the running container. The shipped
+  workflow now searches indexed documentation, and drops Kubernetes MCP when
+  its URL or token is missing. A fully configured Kubernetes group still opens
+  its connection at startup. Check the advertised tools and token permissions
+  before treating that workflow as read-only.
+- The November 22 runtime samples show the original discovery failure and a
+  replacement container serving a completed NAT greeting with zero MCP groups.
+  The greeting bypasses both retrieval and job evidence. Verify indexing with
+  its own logs or records. `nat/prepare_config.py` and `tests/test_nat_config.py`
+  define and exercise the optional group's activation conditions.
+- Revisit if NAT changes group initialization or the catalog or authentication
+  settings change.
+
 ## L007: Socket existence is not SSH agent readiness
 
 - **Condition/mechanism:** SSH connections and host-key verification succeed,

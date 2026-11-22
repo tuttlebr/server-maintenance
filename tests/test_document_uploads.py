@@ -87,6 +87,16 @@ class DocumentUploadTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(list(Path(self.manager._directory.name).iterdir()), [])
         self.assertEqual(self.manager._pending, 0)
 
+    async def test_concurrent_submissions_of_one_id_share_a_single_work_item(self):
+        key = self.store.create("admin")
+        self.manager.capacity = 1
+        kwargs = dict(content=b"pdf", filename="manual.pdf", title=None, device_id=None)
+        with patch.object(service, "parse_document_async", return_value="Maintenance instructions for the cooling fans.") as parse:
+            await asyncio.gather(*(self.manager.submit(key, "admin", **kwargs) for _ in range(2)))
+            await asyncio.wait_for(self.manager._queue.join(), 2)
+        parse.assert_awaited_once()
+        self.assertEqual(self.store.get(key, "admin")["phase"], "complete")
+
     async def test_failure_does_not_kill_worker_or_save_partial_document(self):
         async def parse(content, extension, progress):
             progress('parsing', 1, 2)
@@ -121,6 +131,40 @@ class DocumentUploadTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.store.get(key, 'admin')['phase'], 'failed')
         with self.sessions() as db:
             self.assertEqual(db.query(ContextDocument).count(), 0)
+
+    async def test_legacy_upload_rechecks_after_a_background_save(self):
+        parsing, release = threading.Event(), threading.Event()
+        text = "Maintenance instructions for the cooling fans."
+
+        def parse(*args, **kwargs):
+            parsing.set()
+            if not release.wait(4):
+                raise TimeoutError("Test parser was never released")
+            return text
+
+        def legacy_upload():
+            with self.sessions() as db:
+                service.context_manager.create_document(
+                    db, filename="manual.pdf", content_bytes=b"pdf", title=None,
+                    device_id=None, uploaded_by="admin",
+                )
+
+        with (
+            patch.object(service.context_manager, "parse_document", side_effect=parse),
+            patch.object(service, "parse_document_async", return_value=text),
+        ):
+            legacy = asyncio.create_task(asyncio.to_thread(legacy_upload))
+            try:
+                self.assertTrue(await asyncio.to_thread(parsing.wait, 2))
+                key = await self.submit()
+                await asyncio.wait_for(self.manager._queue.join(), 2)
+                self.assertEqual(self.store.get(key, "admin")["phase"], "complete")
+            finally:
+                release.set()
+            with self.assertRaises(FileExistsError):
+                await legacy
+        with self.sessions() as db:
+            self.assertEqual(db.query(ContextDocument).count(), 1)
 
     async def test_simultaneous_duplicate_uploads_save_only_once(self):
         async def parse(*args):

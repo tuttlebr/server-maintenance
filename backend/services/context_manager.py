@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 import shutil
+import threading
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -15,6 +16,7 @@ from backend.models import ContextDocument, Device
 from backend.services.document_parser import PARSER_EXTENSIONS, parse_document
 from backend.services.upload_progress import ProgressCallback
 
+_SAVE_LOCK = threading.Lock()
 ALLOWED_EXTENSIONS = {".md", ".markdown", ".txt"}
 
 
@@ -28,7 +30,7 @@ def validate_upload(db: Session, *, filename: str, content_bytes: bytes, device_
     if device_id is not None and not db.query(Device).filter(Device.id == device_id).first():
         raise LookupError("Device not found")
     digest = hashlib.sha256(content_bytes).hexdigest()
-    if db.query(ContextDocument).filter(ContextDocument.sha256 == digest, ContextDocument.device_id == device_id).first():
+    if db.query(ContextDocument.id).filter(ContextDocument.sha256 == digest, ContextDocument.device_id == device_id).first():
         raise FileExistsError("This document is already uploaded for that device")
     return digest
 
@@ -45,41 +47,50 @@ def create_document(
     parsed_content: str | None = None,
 ) -> ContextDocument:
     extension = Path(filename).suffix.lower()
-    digest = validate_upload(db, filename=filename, content_bytes=content_bytes, device_id=device_id)
+    if extension in PARSER_EXTENSIONS and parsed_content is None:
+        # The compatibility route parses synchronously. Release its preflight
+        # session while inference runs, just as the background workers do.
+        with Session(bind=db.get_bind()) as preflight:
+            validate_upload(preflight, filename=filename, content_bytes=content_bytes, device_id=device_id)
+        parsed_content = parse_document(content_bytes, extension, progress=progress)
 
-    if extension in PARSER_EXTENSIONS:
-        content = parsed_content if parsed_content is not None else parse_document(content_bytes, extension, progress=progress)
-    else:
-        try:
-            content = content_bytes.decode("utf-8-sig")
-        except UnicodeDecodeError as exc:
-            raise ValueError("The file must contain UTF-8 text") from exc
-    if len(content.strip()) < 20:
-        raise ValueError("The document does not contain enough text to index")
+    # Both HTTP entry points share one writer in the single web process.
+    # Recheck the association and digest after any concurrent parser finishes.
+    with _SAVE_LOCK:
+        digest = validate_upload(db, filename=filename, content_bytes=content_bytes, device_id=device_id)
+        if parsed_content is not None and extension in PARSER_EXTENSIONS:
+            content = parsed_content
+        else:
+            try:
+                content = content_bytes.decode("utf-8-sig")
+            except UnicodeDecodeError as exc:
+                raise ValueError("The file must contain UTF-8 text") from exc
+        if len(content.strip()) < 20:
+            raise ValueError("The document does not contain enough text to index")
 
-    content_title = None if extension in PARSER_EXTENSIONS else _title_from_content(content)
-    resolved_title = " ".join(
-        (title or content_title or Path(filename).stem).replace("\x00", "").split()
-    )[:200]
-    if not resolved_title:
-        raise ValueError("A document title could not be determined")
-    normalized_content_type = "text/plain" if extension == ".txt" else "text/markdown"
-    document = ContextDocument(
-        title=resolved_title,
-        original_filename=Path(filename).name[:255],
-        content_type=normalized_content_type,
-        content=content,
-        size_bytes=len(content_bytes),
-        sha256=digest,
-        device_id=device_id,
-        uploaded_by=uploaded_by,
-    )
-    if progress:
-        progress("saving", 0, 0)
-    db.add(document)
-    db.commit()
-    db.refresh(document)
-    return document
+        content_title = None if extension in PARSER_EXTENSIONS else _title_from_content(content)
+        resolved_title = " ".join(
+            (title or content_title or Path(filename).stem).replace("\x00", "").split()
+        )[:200]
+        if not resolved_title:
+            raise ValueError("A document title could not be determined")
+        normalized_content_type = "text/plain" if extension == ".txt" else "text/markdown"
+        document = ContextDocument(
+            title=resolved_title,
+            original_filename=Path(filename).name[:255],
+            content_type=normalized_content_type,
+            content=content,
+            size_bytes=len(content_bytes),
+            sha256=digest,
+            device_id=device_id,
+            uploaded_by=uploaded_by,
+        )
+        if progress:
+            progress("saving", 0, 0)
+        db.add(document)
+        db.commit()
+        db.refresh(document)
+        return document
 
 
 def prepare_index_sources(destination: Path) -> int:

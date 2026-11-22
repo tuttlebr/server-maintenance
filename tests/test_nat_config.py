@@ -14,18 +14,20 @@ class NatConfigTests(unittest.TestCase):
         self.config = yaml.safe_load((Path(__file__).parents[1] / "nat" / "config.yml").read_text())
 
     def test_unconfigured_optional_mcp_integrations_are_removed(self):
-        config = prepare_config(copy.deepcopy(self.config), {})
-        self.assertNotIn("k8s_mcp_server", config["function_groups"])
-        self.assertNotIn("unifi_mcp_server", config["authentication"])
-        self.assertIn("fleet_job_logs", config["workflow"]["tool_names"])
-        self.assertIn("dynamo_mcp_server", config["function_groups"])
+        for env in ({}, {"KUBERNETES_MCP_TOKEN": "test-token"}, {"KUBERNETES_MCP_SERVER": "http://example.test/mcp"}):
+            with self.subTest(configured_fields=list(env)):
+                config = prepare_config(copy.deepcopy(self.config), env)
+                self.assertEqual(config["function_groups"], {})
+                self.assertEqual(config["authentication"], {})
+                self.assertEqual(config["workflow"]["tool_names"], ["fleet_docs", "fleet_job_logs"])
 
-    def test_configured_optional_integrations_are_preserved(self):
-        env = {"KUBERNETES_MCP_SERVER": "http://example.test/mcp", "KUBERNETES_MCP_TOKEN": "test"}
+    def test_configured_kubernetes_group_is_exposed_with_its_auth_provider(self):
+        env = {"KUBERNETES_MCP_SERVER": "http://example.test/mcp", "KUBERNETES_MCP_TOKEN": "test-token"}
         config = prepare_config(copy.deepcopy(self.config), env)
-        self.assertIn("k8s_mcp_server", config["function_groups"])
-        self.assertIn("k8s_mcp_server", config["authentication"])
-        self.assertNotIn("unifi_mcp_server", config["function_groups"])
+        self.assertEqual(set(config["function_groups"]), {"k8s_mcp_server"})
+        server = config["function_groups"]["k8s_mcp_server"]["server"]
+        self.assertIn(server["auth_provider"], config["authentication"])
+        self.assertEqual(config["workflow"]["tool_names"], ["fleet_docs", "fleet_job_logs", "k8s_mcp_server"])
 
     def test_agent_supports_history_system_prompt_and_streaming(self):
         self.assertEqual(self.config["workflow"]["_type"], "tool_calling_agent")
@@ -46,7 +48,8 @@ class NatConfigTests(unittest.TestCase):
             self.assertEqual(function["candidate_k"], 40)
             self.assertEqual(function["api_key"], "")
             self.assertEqual(function["api_format"], "rerank")
-        self.assertEqual(config["workflow"]["tool_names"], self.config["workflow"]["tool_names"])
+        vector_only = prepare_config(copy.deepcopy(self.config), {})
+        self.assertEqual(config["workflow"]["tool_names"], vector_only["workflow"]["tool_names"])
 
     def test_reranker_settings_override_defaults(self):
         config = prepare_config(copy.deepcopy(self.config), {

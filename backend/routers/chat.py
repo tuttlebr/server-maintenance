@@ -109,6 +109,9 @@ def _completion_chunks(response):
             error = chunk.get("error")
             message = error.get("message") if isinstance(error, dict) else error
             raise RuntimeError(f"Chat provider failed: {message or chunk.get('message') or 'Unknown error'}")
+        choices = chunk.get("choices")
+        if choices and choices[0].get("finish_reason") in {"length", "content_filter"}:
+            raise RuntimeError("The provider returned an incomplete answer. Please retry or rephrase the question.")
         yield chunk
     raise RuntimeError("Chat provider disconnected before completion. Please retry.")
 

@@ -5,7 +5,6 @@ from dataclasses import dataclass
 import logging
 from pathlib import Path
 import tempfile
-import threading
 
 from backend.database import SessionLocal
 from backend.services import context_manager
@@ -13,7 +12,6 @@ from backend.services.document_parser import PARSER_EXTENSIONS, ParserUnavailabl
 from backend.services.upload_progress import uploads
 
 logger = logging.getLogger(__name__)
-_SAVE_LOCK = threading.Lock()
 
 
 @dataclass
@@ -46,6 +44,10 @@ class DocumentUploads:
         self._workers = [asyncio.create_task(self._worker(), name=f"document-upload-{n}") for n in range(self.worker_count)]
 
     async def submit(self, upload_id, owner, *, content, filename, title, device_id):
+        # Reading a spooled request body can yield after the route checked its ID.
+        # Recheck before capacity and claim, with no await between these steps.
+        if self.progress.get(upload_id, owner)["phase"] != "uploading":
+            return
         if self._closing or self._pending >= self.capacity:
             raise ParserUnavailable("Document upload queue is full or unavailable. Try again shortly.")
         self.progress.claim(upload_id, owner)
@@ -70,7 +72,7 @@ class DocumentUploads:
     def _save(self, work, content, parsed):
         # Each job owns its session. Never keep a request session or database
         # transaction open while waiting for the model. Recheck duplicates here.
-        with _SAVE_LOCK, self.session_factory() as db:
+        with self.session_factory() as db:
             document = context_manager.create_document(
                 db, filename=work.filename, content_bytes=content, title=work.title,
                 device_id=work.device_id, uploaded_by=work.owner, parsed_content=parsed,

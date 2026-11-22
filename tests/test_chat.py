@@ -57,6 +57,12 @@ class ChatRequestTests(unittest.TestCase):
 
 
 class NatChatCompletionTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.multiple(
+            chat_router.settings, nat_base_url="http://nat.test", ai_helper_base_url="http://provider.test",
+            ai_helper_model="test-model", ai_helper_api_key="test-key",
+        ))
+
     @patch("backend.routers.chat.urllib.request.urlopen")
     def test_tool_turn_text_and_reasoning_never_reach_the_client(self, urlopen):
         completed = False
@@ -104,6 +110,22 @@ class NatChatCompletionTests(unittest.TestCase):
                 events = []
                 with self.assertRaisesRegex(RuntimeError, "did not return a final answer"):
                     events.extend(_stream_from_nat([{"role": "user", "content": "Question"}]))
+                self.assertFalse(any(event["type"] == "content" for event in events))
+
+    @patch("backend.routers.chat.urllib.request.urlopen")
+    def test_incomplete_provider_finish_never_publishes_a_partial_answer(self, urlopen):
+        messages = [{"role": "user", "content": "Hello"}]
+        for reason, provider in product(("length", "content_filter"), ("nat", "direct")):
+            with self.subTest(reason=reason, provider=provider):
+                urlopen.return_value = _StreamingResponse([
+                    _delta_line({"content": "Partial response"}), _delta_line({}, reason), b"data: [DONE]\n\n",
+                ])
+                stream = (_stream_from_nat(messages) if provider == "nat"
+                          else chat_router._stream_from_llm(messages, "Hello"))
+                events = []
+                with patch.object(chat_router.chat_prompt, "load_system_prompt", return_value="Test prompt"):
+                    with self.assertRaisesRegex(RuntimeError, "incomplete"):
+                        events.extend(stream)
                 self.assertFalse(any(event["type"] == "content" for event in events))
 
     def test_normal_answers_and_quoted_code_are_preserved(self):
@@ -378,6 +400,7 @@ class GroundedChatTests(unittest.IsolatedAsyncioTestCase):
                 self.subTest(use_nat=use_nat, query=query, with_history=with_history),
                 patch.object(chat_router.settings, "nat_base_url", "http://nat:8000"),
                 patch.object(chat_router, "_nat_available", return_value=use_nat),
+                patch.object(chat_router, "_direct_llm_available", return_value=True),
                 patch.object(chat_router.job_context, "get_job_context") as retrieve,
                 patch.object(chat_router, "_stream_from_nat", return_value=iter([])) as nat,
                 patch.object(chat_router, "_stream_from_llm", return_value=iter([])) as direct,

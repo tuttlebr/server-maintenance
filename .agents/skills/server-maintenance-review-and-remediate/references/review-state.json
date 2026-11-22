@@ -1,129 +1,117 @@
 {
   "schema_version": 1,
-  "repository_reviewed_through": "421c60a7b9a9cf1d6f04ec5c0015bee8a846cc03",
+  "repository_reviewed_through": "ee78df2124fa40050e4517a835e6aaf0c1b28be6",
   "docker_samples_reviewed_through": {
-    "etcd": "2026-10-26T12:47:08.831444Z",
-    "milvus": "2026-10-26T12:47:08.831444Z",
-    "nat": "2026-10-26T12:47:08.831444Z",
-    "ssh-agent-proxy": "2026-11-01T13:18:45.503263Z",
-    "web": "2026-11-01T13:18:45.503263Z"
+    "etcd": "2026-11-22T16:05:54.175969Z",
+    "milvus": "2026-11-22T16:05:54.175969Z",
+    "nat": "2026-11-22T16:05:54.175969Z",
+    "ssh-agent-proxy": "2026-11-22T15:41:38.449072Z",
+    "web": "2026-11-22T16:05:54.175969Z"
   },
   "last_run": {
-    "at": "2026-11-02T13:36:06.282122+00:00",
-    "starting_head": "cf0bca0b552bf6e13eceeec9ca734ce656f7b40b",
-    "scope": "Review the five initially untracked host-IP discovery files and complete required API, runner, UI, packaging, and documentation integrations. Prior re-index changes committed separately as cf0bca0.",
+    "at": "2026-11-22T16:12:46.211782Z",
+    "starting_head": "ee78df2124fa40050e4517a835e6aaf0c1b28be6",
+    "branch": "main",
+    "scope": "Rerun after removing four public documentation MCP definitions and adding optional Kubernetes to workflow.tool_names. No new commits. Reviewed working tree, dependent prompt/tests/docs, previous deployment gaps and five bounded Compose samples.",
     "status": "complete",
-    "status_reason": "All requested outstanding source changes reviewed and remediated. Isolated tests and image packaging verified. Runtime deployment and the unrelated historical Git range were outside this review.",
+    "status_reason": "Removal and live chat completion verified. Separate embedding reachability issue reopened. Config-dependent Kubernetes privileges remain unverified.",
     "dirty_worktree_coverage": {
       "initial": [
-        "frontend/src/components/HostIpResults.vue",
-        "playbooks/files/host_ip_discovery.py",
-        "playbooks/host_ip_check.yml",
-        "scripts/ssh-discovered-hosts.sh",
-        "tests/test_host_ip_check.py"
+        "nat/tests/check_docs_search.py",
+        ".agents/skills/server-maintenance-review-and-remediate/references/lessons.md",
+        ".agents/skills/server-maintenance-review-and-remediate/references/repository-guide.md",
+        ".agents/skills/server-maintenance-review-and-remediate/references/review-state.json",
+        "README.md",
+        "backend/requirements.txt",
+        "backend/routers/chat.py",
+        "backend/services/context_manager.py",
+        "backend/services/document_uploads.py",
+        "docs/fleet-manager-ui.md",
+        "nat/config.yml",
+        "nat/fleet_rag/register.py",
+        "nat/prepare_config.py",
+        "tests/test_chat.py",
+        "tests/test_document_uploads.py",
+        "tests/test_nat_config.py"
       ],
-      "reviewed": "All five initial files and every supporting change in this review."
+      "reviewed": "16 paths including all prior local work and the user config edit. Confirmed exact prior adapter files before retiring them. Preserved unrelated fixes and the user-selected optional Kubernetes group."
     },
     "fixed_findings": [
-      "IP-DISCOVERY-UNREGISTERED",
-      "IP-DISCOVERY-REVOKED-ALIAS",
-      "INTERACTIVE-DISCOVERY-SCOPE"
+      "STALE-DOCS-MCP-CONTRACT"
+    ],
+    "closed_pending": [
+      "PROVIDER-COMPLETION-UNVERIFIED: one live NAT-mode greeting completed and was correlated with its request.",
+      "Prior NAT crash loop and pending web fix activation verified on replacement containers. Host-IP and docs re-index end-to-end observations remain separate."
     ],
     "checks": [
       {
-        "command": "bash scripts/check-backend.sh tests",
+        "command": "One authorized authenticated Fleet Help greeting through running web",
+        "status": "observed",
+        "result": "NAT mode, HTTP 200, final content and terminal SSE done in 0.58 seconds. One matching NAT completion request. No search or fleet evidence events."
+      },
+      {
+        "command": "Container inspection, NAT health from web, prepared catalog and packaged web source",
+        "status": "observed",
+        "result": "NAT completed startup and stayed running at zero restarts. No MCP groups active. Healthy web, SSH proxy, etcd and Milvus. Web Pillow 13.0.0 and source checks passed."
+      },
+      {
+        "command": "Web provider TCP and bounded SQL to Milvus job-key comparison",
+        "status": "observed",
+        "result": "Embedding endpoint probe timed out after four logged connection refusals; separate chat endpoint reachable. First chunks found for 13 of the latest 20 terminal jobs, zero of four finished since startup."
+      },
+      {
+        "command": "bash scripts/check-backend.sh tests in an isolated checkout without operator .env",
         "status": "passed",
-        "result": "660 passed, 1 warning, 106 subtests passed in 176.17s (0:02:56)"
+        "result": "663 passed, 113 subtests passed and one Starlette deprecation warning. Focused chat/prompt/config suite passed after final synthetic credential adjustment."
       },
       {
-        "command": "npm --prefix frontend test",
+        "command": "Offline NAT 1.9 schema validation and installed plugin checks",
         "status": "passed",
-        "result": "103 tests"
+        "result": "Valid with zero groups when disabled, one group with synthetic Kubernetes URL/token and reranking enabled; both registered-retrieval tests passed. No cluster connection."
       },
       {
-        "command": "npm --prefix frontend run build",
-        "status": "passed"
-      },
-      {
-        "command": "ansible-playbook -i localhost, playbooks/host_ip_check.yml --syntax-check; ansible-lint --profile min playbooks/host_ip_check.yml",
-        "status": "passed"
-      },
-      {
-        "command": "bash -n scripts/ssh-discovered-hosts.sh; docker compose config --quiet",
-        "status": "passed"
-      },
-      {
-        "command": "docker build -t fleet-host-ip-review:local .; isolated network-disabled image smoke checks",
+        "command": "Compose config, Python compilation, changed-file hooks, git diff --check, skill validation",
         "status": "passed",
-        "result": "Nmap, ingester, operation registration and subnet schema verified; no services recreated."
-      },
-      {
-        "command": "pre-commit run --files <changed source files>",
-        "status": "passed"
-      },
-      {
-        "command": "skill collector unittests and skill-creator quick_validate.py",
-        "status": "passed",
-        "result": "11 collector tests; skill metadata valid"
-      },
-      {
-        "command": "git diff --check",
-        "status": "passed"
+        "result": "Passed, including 11 collector tests, quick_validate and relative links."
       }
     ],
     "documentation": [
-      "README and UI guide: IP discovery, saved trust, bounded subnet, verified results, unchanged inventory and stale-fact exception.",
-      "NAT prompt: operation catalog and exemption updated; 6 words and 35 characters added."
+      "README and UI guide describe indexed documentation and the optional Kubernetes group. README distinguishes job-log backfill at web startup from the Context documentation re-index. Canonical prompt now routes product questions to indexed docs."
     ],
     "learning": [
-      "L001 expanded to trace complete operation integration, including queued gates and runtime dependencies.",
-      "Repository guide documents host-IP entry points and validation boundaries.",
-      "SKILL.md and collector unchanged; current workflow covers this bounded review."
+      "Refined L008 for verification against the deployed prepared catalog and separate greeting/retrieval evidence. Updated runtime validation entry in repository guide. Existing collection and workflow instructions covered the rerun."
     ],
     "limits": [
-      "No live host discovery, SSH authentication, provider calls, re-index, service recreation, push, or deployment.",
-      "Runtime collection inspected for service metadata and relevant operation mentions only; Docker review cursors unchanged.",
-      "Historical baseline-to-HEAD range contains unrelated changes; Git review baseline unchanged.",
-      "Rust 1.95 tests passed during the preceding re-index fix; Rust 1.85 remains unverified locally."
+      "No cluster endpoint configured. Its advertised tools and token permissions could not be checked.",
+      "No retrieval query, provider change, re-index, fleet job, or service recreation in this run. Current NAT loaded its prompt before the local wording edit.",
+      "Incremental backend/NAT scope. Prior frontend/Rust results were not rerun."
     ],
-    "evidence_path": "data/skill-reviews/20261102T131607Z-nmzi5sxo"
+    "evidence_path": "data/skill-reviews/20261122T160554Z-zjgxf78_"
   },
   "pending_work": [
     {
-      "id": "PROVIDER-COMPLETION-UNVERIFIED",
-      "summary": "Historical NAT upstream connection failures; provider model listing now succeeds but chat completion remains unverified.",
-      "evidence": "data/skill-reviews/20261020T150933Z-qfa35c_8/evidence.json:docker.logs.nat; runtime-checks.json",
-      "next_check": "Correlate the next normal Fleet Help request with NAT/provider logs; no current completion was observed in this run. A synthetic completion requires authorization covering the provider call."
+      "id": "EMBEDDING-PROVIDER-CONNECTIVITY",
+      "summary": "Reopened on the new deployment. All four startup job-log backfill attempts failed in _embed_texts. A subsequent web TCP connection to the configured separate embedding endpoint timed out. Four newly completed jobs lacked first chunks at observation.",
+      "evidence": "data/skill-reviews/20261122T160554Z-zjgxf78_/ledger.md; data/skill-reviews/20261122T160554Z-zjgxf78_/provider-readiness.json; data/skill-reviews/20261122T160554Z-zjgxf78_/index-coverage.json",
+      "next_check": "Verify the configured EMBED_BASE_URL listener and route from web. Once restored, observe normal writes and verify missing job IDs after an authorized job-log backfill or web startup."
+    },
+    {
+      "id": "KUBERNETES-MCP-TOOL-SCOPE",
+      "summary": "The optional Kubernetes group has no include filter. NAT can expose every advertised tool when enabled. It is absent from the live workflow because its URL is unset.",
+      "evidence": "nat/config.yml; nat/prepare_config.py; tests/test_nat_config.py; data/skill-reviews/20261122T160554Z-zjgxf78_/ledger.md",
+      "next_check": "Before enabling this integration, verify that the intended server catalog and cluster credentials enforce Fleet Help\u2019s read-only scope."
     },
     {
       "id": "RUNTIME-SAMPLE-GAPS",
-      "summary": "Preserve initial-run exclusions and new 2026-10-26 gaps: default window capped to 24h; web/nat/etcd/milvus hit 500 lines. All current containers started after the prior review; predecessor logs were not collected. Proxy sample empty. Focused 2026-11-01 sample adds a four-hour web/proxy window with web capped at 100 lines and proxy empty; other services not sampled.",
-      "evidence": "data/skill-reviews/20261026T124708Z-0an073ii/evidence.json:docker.logs; docker.inspection; data/skill-reviews/20261101T131845Z-oh50cior/evidence.json",
+      "summary": "Preserve initial-run exclusions and new 2026-10-26 gaps: default window capped to 24h; web/nat/etcd/milvus hit 500 lines. All current containers started after the prior review; predecessor logs were not collected. Proxy sample empty. Focused 2026-11-01 sample adds a four-hour web/proxy window with web capped at 100 lines and proxy empty; other services not sampled. On 2026-11-22 all five services hit the 24h window cap; etcd, Milvus and NAT hit the line cap. Web returned 499 recent access lines starting only 16 minutes before the sample end. Container restarts, recreation and omitted intervals preclude continuous coverage. The next sample contains replacement containers only. All five reads succeeded without caps, proxy returned zero lines and retained its previous sample cursor.",
+      "evidence": "data/skill-reviews/20261026T124708Z-0an073ii/evidence.json:docker.logs; docker.inspection; data/skill-reviews/20261101T131845Z-oh50cior/evidence.json; data/skill-reviews/20261122T154138Z-qxur4ydp/evidence.json; data/skill-reviews/20261122T160554Z-zjgxf78_/evidence.json",
       "next_check": "Collect a focused service/time window only for a concrete symptom; cursors track inspected bounded samples, not continuous coverage or proof of remote SSH."
     },
     {
       "id": "DEPLOYMENT-VERIFICATION",
-      "summary": "Prior deployment comparisons are historical. The re-index fix and completed host-IP discovery integration are local; the validation image was built without recreating services.",
-      "evidence": "data/skill-reviews/20261102T131607Z-nmzi5sxo/ledger.json; prior deployment-fingerprints.json references remain historical",
-      "next_check": "When authorized, rebuild/recreate web and verify the new IP discovery action against an approved device. Re-index activation and provider-backed validation require their own runtime authorization."
-    },
-    {
-      "id": "RUST-VALIDATION-UNAVAILABLE",
-      "summary": "The preceding re-index fix passed all 15 Rust tests using an isolated Rust 1.95 image. The Rust 1.85 minimum-version gate remains unverified locally.",
-      "evidence": "tools/dgx-doc-ingester/src/main.rs; .github/workflows/ci.yml; re-index commit cf0bca0",
-      "next_check": "Run the Rust 1.85.0 CI gate when its toolchain or CI result is available."
-    },
-    {
-      "id": "EMBEDDING-PROVIDER-CONNECTIVITY",
-      "summary": "Current web reconciliation repeatedly fails with TCP connection refused from the configured separate embedding endpoint; Milvus and web health probes do not establish provider health.",
-      "evidence": "data/skill-reviews/20261026T124708Z-0an073ii/evidence.json:docker.logs.web; runtime-partial-scans.json",
-      "next_check": "Check provider listener and network reachability from web. Correct runtime configuration or restart provider only with authorization covering that action; verify embeddings and derived-index recovery afterward."
-    },
-    {
-      "id": "SSH-AGENT-LIFECYCLE",
-      "summary": "Dedicated host agent absent; shared forwarding times out. Local health probe and targeted repair command are not deployed. The event terminating the agent is unknown.",
-      "evidence": "data/skill-reviews/20261101T131845Z-oh50cior/ledger.json; tests/test_ssh_agent_proxy.py",
-      "next_check": "Run make repair-ssh when authorized and unlock the existing key if prompted; then refresh device scans. If the agent exits again, correlate the host process/session lifecycle before choosing supervision."
+      "summary": "Web source, Pillow, NAT availability and one real chat completion verified. The host-IP action and full documentation re-index still lack end-to-end runtime verification in these reviews.",
+      "evidence": "data/skill-reviews/20261122T160554Z-zjgxf78_/source-checks.json; data/skill-reviews/20261122T160554Z-zjgxf78_/live-greeting.json; data/skill-reviews/20261122T154138Z-qxur4ydp/ledger.md; data/skill-reviews/20261122T154138Z-qxur4ydp/runtime-checks.json; data/skill-reviews/20261122T154138Z-qxur4ydp/nat-status-final.json",
+      "next_check": "Observe an approved host-IP job or operator-initiated documentation re-index if those workflows need runtime verification."
     }
   ],
   "baseline_scope": {

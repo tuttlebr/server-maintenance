@@ -30,9 +30,10 @@ die() {
 
 usage() {
     cat <<'EOF'
-Usage: scripts/start.sh [start|prepare|repair-ssh|enroll-hosts|status]
+Usage: scripts/start.sh [start|test|prepare|repair-ssh|enroll-hosts|status]
 
-  start         Prepare SSH, start the Compose stack, and sync hosts.csv.
+  start         Prepare SSH, start Compose, sync hosts.csv, and test model endpoints.
+  test          Test the configured model endpoints from the running containers.
   prepare       Create/reuse the fleet key, agent socket, and known_hosts seed.
   repair-ssh    Restore the agent and proxy; verify access from running web.
   enroll-hosts  Prepare SSH and sync hosts.csv into an already-running stack.
@@ -377,6 +378,19 @@ compose() {
         docker compose --project-directory "$PROJECT_ROOT" -f "$PROJECT_ROOT/docker-compose.yml" "$@"
 }
 
+test_endpoints() {
+    local endpoint service failed=0
+    for endpoint in embeddings parser reranker; do
+        service=web
+        if [[ "$endpoint" == reranker ]]; then
+            service=nat
+        fi
+        log "Testing $endpoint from $service."
+        compose exec -T "$service" python - "$endpoint" <"$SCRIPT_DIR/check_model_endpoint.py" || failed=1
+    done
+    return "$failed"
+}
+
 sync_hosts() {
     if [[ -z "$HOSTS_CSV" ]]; then
         log "Host enrollment disabled because FLEET_HOSTS_CSV is empty."
@@ -432,7 +446,16 @@ case "$COMMAND" in
         log "Starting Fleet Manager."
         compose up -d --build --wait --wait-timeout "${FLEET_START_TIMEOUT_SECONDS:-600}"
         sync_hosts
+        test_endpoints
         log "Fleet Manager is ready."
+        ;;
+    test)
+        require_command docker
+        # Compose needs mount paths to parse its config even for a read-only exec.
+        SSH_DIR="$(absolute_from_root "$SSH_DIR_INPUT")"
+        SOCKET_PATH="${SSH_AUTH_SOCK_PATH:-$SSH_DIR/agent.sock}"
+        KNOWN_HOSTS_PATH="${SSH_KNOWN_HOSTS_PATH:-$SSH_DIR/known_hosts}"
+        test_endpoints
         ;;
     prepare)
         prepare_ssh

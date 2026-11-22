@@ -16,7 +16,8 @@ CI on every review; update it when ownership or commands move.
 | Persistence | `backend/models.py`, `backend/database.py`, `backend/migrations/` | Database compatibility, startup reconciliation, authoritative job evidence |
 | Frontend | `frontend/src/api.js`, `frontend/src/stores/devices.js`, `frontend/src/views/`, `frontend/src/utils/sse.js` | Polling size/frequency, late responses, streaming completion and per-device results |
 | Fleet Help and retrieval | `backend/routers/chat.py`, `backend/services/chat_prompt.py`, `backend/services/job_context.py`, `backend/services/context_manager.py`, `backend/services/docs_indexer.py`, `backend/services/job_log_indexer.py` | Shared prompt, fresh SQL evidence, redaction, optional retrieval, bounded work and provider failures |
-| NAT and ingestion | `nat/config.yml`, `nat/ingest.py`, `nat/embedding_response.py`, `tools/dgx-doc-ingester/src/main.rs` | Cross-language embedding contracts, image packaging and index rebuild behavior |
+| Knowledge uploads | `backend/routers/context.py`, `backend/services/document_uploads.py`, `backend/services/document_parser.py`, `backend/services/context_manager.py`, `frontend/src/views/ContextManagement.vue` | Queue admission, owner-scoped progress, parser limits, synchronous compatibility and shared final save |
+| NAT and ingestion | `nat/config.yml`, `nat/prepare_config.py`, `nat/fleet_rag/register.py`, `nat/ingest.py`, `nat/embedding_response.py`, `tools/dgx-doc-ingester/src/main.rs` | Cross-language embedding contracts, image packaging and index rebuild behavior |
 | Delivery and SSH | `docker-compose.yml`, `Dockerfile`, `nat/Dockerfile`, `ssh-agent-proxy/`, `scripts/start.sh`, `scripts/enroll_hosts.py` | Dedicated agent, strict host trust, secrets, volumes and running-image drift |
 
 The current service has seven maintenance actions plus device scanning, IP discovery, and
@@ -104,9 +105,12 @@ gates. The baseline is Python 3.12, Node 22, and Rust 1.85 or newer.
 | Changed-file hygiene | `.venv/bin/pre-commit run --files <changed-files>`; include new untracked files explicitly |
 | Push parity | `pre-commit run --all-files --hook-stage pre-push` |
 | Ansible syntax/lint | `ansible-playbook -i localhost, <playbook> --syntax-check`; `ansible-lint --profile min playbooks`; isolated `tests/ansible/dgx_detection.yml` fixture |
+| NAT runtime | With NAT 1.9 and the Fleet plugin installed, run `PYTHONPATH=nat python -m unittest discover -s nat/tests -p 'check_*.py'` for registered retrieval. Use `tests/test_nat_config.py` to check the prepared tool catalog with missing, partial, and complete Kubernetes MCP settings |
 | Configuration | `docker compose config --quiet`; never print resolved configuration or start services for a syntax check |
 | CI-only additions | Python compilation, Python/npm/Cargo dependency audits, and the Rust minimum-version check |
 | Skill collector | `python3 -m unittest discover -s .agents/skills/server-maintenance-review-and-remediate/scripts -p 'test_*.py'` |
+
+Run backend tests in a checkout without an operator `.env` when checking CI parity. Mocked chat transports still construct URLs and evaluate provider availability before calling their test doubles.
 
 Backend tests live in `tests/`; frontend uses Node's built-in test runner,
 including mounted Vue fixtures under `frontend/test-support/`. Inspect mocks and

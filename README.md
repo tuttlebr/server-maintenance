@@ -45,7 +45,12 @@ make prepare       # Prepare only the key, agent socket, and known_hosts seed
 make repair-ssh    # Restore SSH agent/proxy access without restarting the stack
 make enroll-hosts  # Sync hosts.csv into an already-running stack
 make status        # Show the dedicated agent's loaded identity
+make test          # Repeat the live model endpoint checks in the running containers
 ```
+
+`make start` runs the same checks before reporting ready. Using synthetic inputs and the running containers' settings, `web` verifies an embedding vector (including `EMBED_DIM` when set) and reads a known phrase from an image. `nat` verifies that the reranker ranks the relevant passage first.
+
+Each check reports `PASS`, `FAIL`, or `SKIP`. An empty effective URL skips that endpoint. Both commands run all checks and exit nonzero on failure. The containers stay up for diagnosis.
 
 Host sync is idempotent: matching existing devices are skipped. A new SSH device is enrolled only when its discovered Ed25519 fingerprint is already trusted by Fleet Manager, matches the verified `.fleet-ssh/known_hosts` seed, or matches an optional `ssh_fingerprint` column in `hosts.csv`. Verify fingerprints through an independent channel before adding them. Startup never accepts an unverified `ssh-keyscan` result on first sight. Fingerprint pins are checked when creating missing devices; existing devices continue to use Fleet Manager's persistent strict host-key trust.
 
@@ -325,7 +330,7 @@ SSH_AUTH_SOCK_PATH="$PWD/.fleet-ssh/agent.sock" docker compose config --quiet
 make start
 ```
 
-If you used a custom `FLEET_SSH_DIR`, substitute its absolute agent socket path in the validation command. Compose validation checks configuration, not provider access. After startup, log in as `admin`, ask Fleet Help a question, and use the Context page's re-index action to check embedding access. A successful web login alone does not verify the AI or embedding key.
+If you used a custom `FLEET_SSH_DIR`, substitute its absolute agent socket path in the validation command. Startup checks provider access for embeddings, parsing, and reranking. To verify chat, log in as `admin` and ask Fleet Help a question.
 
 After changing `.env`, run `make start` so Compose recreates affected containers. Changing `SECRET_KEY` invalidates existing login tokens. Changing `ADMIN_PASSWORD` changes future logins but does not revoke issued tokens. Preserve `HOST_SECRET_KEY` unless you also migrate the encrypted credentials; the application has no automatic key-rotation migration.
 
@@ -617,11 +622,11 @@ With the parser configured, **Context** also accepts PDF, PNG, and JPEG uploads.
 
 For the local `nv-ingest-parser` adapter, set `PARSER_API_FORMAT=nv-ingest` with a base URL ending in `/v1`. It accepts JSON `{"image": "<base64 PNG>"}` at `/parse` and returns `{"markdown": "..."}`; it serves a fixed model and rejects truncated generation with HTTP 422. This is a different API from the NIM multipart endpoint. Match the format to the service's `/openapi.json`: sending multipart to the JSON adapter can produce HTTP 500 during request validation. Fleet Manager reports upstream HTTP status and logs the page, API format, and error type without logging document content, credentials, or remote response bodies.
 
-The default upload limit is 30 MiB, with at most 50 PDF pages (configurable with `PARSER_MAX_PAGES`), 25 million pixels per input image, and two simultaneous parsing uploads. These model calls send uploaded page content to the configured parser. Invalid documents, failed requests, empty pages, and truncated model output reject the whole upload before saving it. The total parsing budget defaults to 100 seconds. Set `PARSER_TIMEOUT_SECONDS=1800` for a 30-minute budget, or up to 3600 seconds for large or slow documents. Background inference uses this budget independently of the browser. The 120-second browser deadline covers only file transfer and queue admission; rebuild/recreate the web service after changing settings. This is a total budget across all pages, not a per-page timeout. Text/Markdown uploads continue to work when the parser is unavailable or disabled.
+The default upload limit is 30 MiB, with at most 50 PDF pages when `PARSER_MAX_PAGES` is unset. The example environment sets a 20-page limit. The parser allows 25 million pixels per input image and two simultaneous parsing uploads. These model calls send uploaded page content to the configured parser. Invalid documents, failed requests, empty pages, and truncated model output reject the whole upload before saving it. The total parsing budget defaults to 100 seconds. Set `PARSER_TIMEOUT_SECONDS=1800` for a 30-minute budget, or up to 3600 seconds for large or slow documents. Background inference uses this budget independently of the browser. The 120-second browser deadline covers only file transfer and queue admission; rebuild/recreate the web service after changing settings. This is a total budget across all pages, not a per-page timeout. Text/Markdown uploads continue to work when the parser is unavailable or disabled.
 
 Uploads show measured transfer bytes, queueing, pages prepared, pages parsed, saving, and confirmed completion. Elapsed time and time since the last completed page help identify slow pages; there is no estimated finish time or within-page percentage. The browser reserves an authenticated upload ID, sends the file to `POST /api/v2/context/uploads/{id}/file`, and receives HTTP 202 after queue admission. It polls owner-scoped status once per second until completion. Accepted uploads continue after navigation or disconnection; the browser remembers the ID in session storage and reconnects on returning to Context or reloading. Status failures show a reconnecting notice without resetting page progress or implying the upload failed.
 
-Two lifespan-managed async workers process at most six accepted uploads (running plus queued). Originals are spooled in a private temporary directory and removed on completion, failure, or orderly shutdown. CPU rendering and short database operations run off the event loop; inference uses one reusable HTTP client per document and never holds a database session open while waiting. Page rendering is lazy, bounding image memory to the current page per worker; parsed text keeps its existing size limit. Queue saturation returns HTTP 503. Progress is transient, bounded to 256 records, and retained for 15 minutes after completion; active jobs are retained through their deadline. The current single-process web service keeps jobs/status in memory: server restarts interrupt unfinished uploads, which must be retried. Multi-process or durable execution would need a shared job store/worker service. Saved documents remain in the database. The legacy `POST /api/v2/context/documents` route remains synchronous for existing clients, using the same async parser through a compatibility wrapper.
+Two lifespan-managed async workers process at most six accepted uploads (running plus queued). Originals are spooled in a private temporary directory and removed on completion, failure, or orderly shutdown. CPU rendering and short database operations run off the event loop; inference uses one reusable HTTP client per document and never holds a database session open while waiting. Page rendering is lazy, bounding image memory to the current page per worker; parsed text keeps its existing size limit. Queue saturation returns HTTP 503. Progress is transient, bounded to 256 records, and retained for 15 minutes after completion; active jobs are retained through their deadline. The current single-process web service keeps jobs/status in memory: server restarts interrupt unfinished uploads, which must be retried. Multi-process or durable execution would need a shared job store/worker service. Saved documents remain in the database. The legacy `POST /api/v2/context/documents` route remains synchronous for existing clients, using the same async parser through a compatibility wrapper. Both routes check for duplicates at save time. Concurrent uploads of identical bytes for the same device, or both for general fleet documentation, create one document. A repeat submission using the same background upload ID follows the original work, even when the queue is full.
 
 When `RERANK_BASE_URL` is set, `nat/prepare_config.py` replaces `fleet_docs` and `fleet_job_logs` with the installed `fleet_reranked_retriever` custom function. Each function embeds the query, fetches at least `RERANK_CANDIDATE_K` candidates from its existing Milvus collection, then reranks their text. Documentation returns the best 3 results; job history returns the best 20. Source, heading, job metadata, document IDs, and original vector distances stay attached; successful reranking adds `rerank_score`. Reranking runs automatically inside retrieval, without a separate agent tool call. The parser runs during ingestion, so NAT retrieves its extracted content through the same tools.
 
@@ -678,14 +683,16 @@ password fields. Private-key blocks are filtered even when a running log ends
 before the closing marker. This is pattern-based filtering of model/search
 context, not a guarantee that arbitrary log text is free of secrets.
 
-NAT uses `tool_calling_agent` to preserve conversation history, the system prompt and streamed tool calls. The optional Kubernetes MCP definition is omitted at startup unless both its server URL and token are configured; missing optional settings do not prevent Fleet Help from starting. UniFi is not defined in the current config. Embedding failures can still limit historical semantic search, but do not prevent fresh job evidence from reaching either chat mode.
+NAT exposes `fleet_docs` and `fleet_job_logs`. Product documentation comes from the local index. Setting both `KUBERNETES_MCP_SERVER` and `KUBERNETES_MCP_TOKEN` adds the Kubernetes MCP group to the workflow and makes that server a startup dependency. The group exposes the tools advertised by the server. To keep Fleet Help read-only, use a read-only tool catalog and a token restricted to the intended cluster resources.
+
+Embedding failures can still limit historical semantic search, but do not prevent fresh job evidence from reaching either chat mode.
 
 Fleet Help shows one live progress cue for context preparation or the source being
 searched. Search activity is collapsed beneath the completed answer and omits raw
 tool names and arguments. These labels record requested searches, not proof that
 retrieval succeeded or every source was consulted. Direct fallback reports its
 local reference lookup instead of implying NAT tool access. Both modes hold answer
-text until the provider acknowledges completion. NAT text from turns that invoke
+text until the provider acknowledges completion. A token limit or content-filter finish reports an incomplete answer. NAT text from turns that invoke
 tools is discarded; explicit leading reasoning blocks are removed, and unfinished
 or raw tool-routing output reports an error instead of entering chat history. This
 keeps tool syntax from briefly flashing in the conversation while progress remains
@@ -695,9 +702,9 @@ If web logs report `Connection refused` during job-log embedding or reconciliati
 check that the configured embedding service is listening and reachable from the
 web container. Healthy web and Milvus containers do not verify provider access.
 Inspect `EMBED_BASE_URL` when set; otherwise embeddings use `AI_HELPER_BASE_URL`.
-Restore provider connectivity before retrying an index rebuild.
+Once the embedding endpoint is reachable, web startup reconciliation backfills missing terminal jobs in `fleet_job_logs`. After all four startup attempts fail, the next web startup is the next automatic backfill. The Context page rebuilds the separate `fleet_docs` collection.
 
-Fleet Help's sole system prompt is `workflow.system_prompt` in `nat/config.yml`. NAT uses it directly, and the direct-LLM fallback reads the same text for each request. Supplied documentation, uploaded context, and job evidence stay separate from system instructions. The prompt favors direct answers, evidence-backed diagnoses, and a small number of useful next steps. NAT can search fleet guidance, completed job history, and NVIDIA Dynamo, AIPerf, NVCF, and DSX documentation. The Kubernetes integration is not exposed in `workflow.tool_names`; the fallback has no callable tools.
+Fleet Help's sole system prompt is `workflow.system_prompt` in `nat/config.yml`. NAT uses it directly, and the direct-LLM fallback reads the same text for each request. Supplied documentation, uploaded context, and job evidence stay separate from system instructions. The prompt favors direct answers, evidence-backed diagnoses, and a small number of useful next steps. Direct fallback uses supplied context and has no callable tools.
 
 Use the repository-local [$fleet-nat-maintainer](.agents/skills/fleet-nat-maintainer/SKILL.md)
 to reconcile the full NAT config with current application behavior and keep the

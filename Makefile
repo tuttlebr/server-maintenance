@@ -15,7 +15,7 @@ ifneq ($(origin FLEET_START_TIMEOUT_SECONDS), undefined)
 export FLEET_START_TIMEOUT_SECONDS
 endif
 
-.PHONY: start prepare repair-ssh enroll-hosts status check hooks
+.PHONY: start test prepare repair-ssh enroll-hosts status check hooks
 
 hooks:
 	pre-commit install --hook-type pre-commit --hook-type pre-push
@@ -29,6 +29,9 @@ check:
 
 start:
 	@./scripts/start.sh start
+
+test:
+	@./scripts/start.sh test
 
 prepare:
 	@./scripts/start.sh prepare
