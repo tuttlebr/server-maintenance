@@ -1,6 +1,6 @@
 # Fleet Manager
 
-Fleet maintenance focused on seven operations: check storage, inspect GPU usage, check for apt updates, install apt updates, clear Docker and containerd/nerdctl cache, reboot nodes, and restart Reachy Mini daemons, plus device scanning, IP discovery, and bulk user management with CSV import. The backend uses FastAPI and Ansible; the frontend uses Vue 3.
+Fleet Manager runs Ansible maintenance from a Vue UI backed by FastAPI. Select Linux nodes, check readiness, inspect storage and GPUs, preview and install apt updates, clear unused container cache, or reboot in batches. The UI also supports device discovery, Reachy Mini daemon restarts, and bulk user management.
 
 ## Features
 
@@ -8,7 +8,7 @@ Fleet maintenance focused on seven operations: check storage, inspect GPU usage,
 - **Storage checks:** capacity of the filesystem containing `/home` and each `/etc/fstab` mount. Missing, inaccessible, optional, manual, and pending automount entries remain visible. Swap is excluded; checks do not mount filesystems or scan directory trees.
 - **GPU checks:** NVIDIA GPU utilization and memory, process names, PIDs, effective Linux owners, and available Docker/containerd pod context. Unsupported metrics remain unavailable.
 - **APT checks:** refresh package lists and show exact candidate versions on Debian and Ubuntu, without requiring Python APT bindings.
-- **Reviewed installs:** one confirmation, exact package versions, a 30-minute check validity window, parallel host execution, and no automatic reboots or package removals.
+- **Reviewed installs:** one confirmation, exact package versions, a 30-minute check validity window, optional rolling batches, and no automatic reboots or package removals.
 - **Container cache cleanup:** unused Docker images and build cache, plus unused images in containerd namespaces through nerdctl. Containers, volumes, and networks are retained. BuildKit cache is cleared when available; skipped components are reported.
 - **Clear failures:** individual device errors, persistent activity, safe request retries, and automatic health checks when a previous change may be incomplete.
 - **Device inventory and Fleet Help:** connection management, discovery, documentation, and recorded job history remain available.
@@ -283,17 +283,17 @@ For another OpenAI-compatible provider, create the key in that provider's consol
 
 ### 3. Set `EMBED_API_KEY` only when needed
 
-If chat and embeddings use the same provider and credential, leave `EMBED_API_KEY` and `EMBED_BASE_URL` commented out. The embedding clients fall back to `AI_HELPER_API_KEY` and `AI_HELPER_BASE_URL`. For the standalone Rust ingester, an uncommented empty override prevents that fallback.
+To reuse the chat provider and credential, comment out or remove both `EMBED_API_KEY` and `EMBED_BASE_URL`. The sample includes an empty `EMBED_API_KEY=` assignment. The Rust documentation ingester treats an explicitly empty override as configured, including when launched by the web service.
 
 If embeddings use a different provider or credential:
 
 1. Create a key through that provider's console, using the applicable process in step 2.
 2. Enable access to the chosen embedding model where the provider requires it.
-3. Uncomment `EMBED_API_KEY` and paste the issued key after `=`.
+3. Set `EMBED_API_KEY` to the issued key.
 4. Uncomment `EMBED_BASE_URL` and set the provider's OpenAI-compatible base URL, usually ending in `/v1`.
 5. Set `EMBED_MODEL` to the embedding model's API ID and `EMBED_DIM` to its output dimension.
 
-The template uses `nvidia/qwen/qwen3-embedding-0.6b` with dimension `1024`. Confirm both values for your provider. A chat model ID cannot be used as an embedding model ID. Rebuild the documentation and job-log indexes if you change embedding models or dimensions.
+The template selects `nvidia/Nemotron-3.5-Embed-1B-NVFP4` with dimension `2048`. Confirm both values for your provider. A chat model ID cannot be used as an embedding model ID. Rebuild the documentation and job-log indexes if you change embedding models or dimensions.
 
 ### 4. Prepare SSH and optional Kubernetes credentials
 
@@ -368,8 +368,8 @@ Startup validates the admin password, JWT signing key, and host-encryption key.
 | `AI_HELPER_API_KEY` | empty | Provider-issued credential for Fleet Help; see secret setup above |
 | `AI_HELPER_MODEL` | `aws/anthropic/bedrock-claude-sonnet-4-6` | Chat model API ID in `.env.example` |
 | `AI_HELPER_BASE_URL` | `https://inference-api.nvidia.com/v1` | Chat API base URL in `.env.example`; use the endpoint matching the key |
-| `EMBED_MODEL` | `nvidia/qwen/qwen3-embedding-0.6b` | Embedding model shared by documentation and completed-job retrieval |
-| `EMBED_DIM` | `1024` | Embedding output dimension in `.env.example`; must match the selected model |
+| `EMBED_MODEL` | `nvidia/qwen/qwen3-embedding-0.6b` | Fallback when unset. The template selects `nvidia/Nemotron-3.5-Embed-1B-NVFP4` |
+| `EMBED_DIM` | unset | Expected output dimension. The template sets `2048` for its selected model |
 | `EMBED_API_KEY` | unset | Optional embedding credential; omit to reuse `AI_HELPER_API_KEY` |
 | `EMBED_BASE_URL` | unset | Optional embedding endpoint; omit to reuse `AI_HELPER_BASE_URL` |
 | `MILVUS_URI` | `http://localhost:19530` | Host-facing URI in `.env.example`; Compose sets `http://milvus:19530` inside containers |
@@ -452,7 +452,7 @@ Key specs: Ubuntu 24.04 LTS, Blackwell Ultra GPU, 252 GB HBM3e, 496 GB LPDDR5X, 
 2. Confirm its daemon is available on port `8000`, or enter the configured port.
 3. Add it with **Reachy Mini Wireless** as the connection type.
 4. Discovery reads `/api/state/full` and never sends movement, torque, camera, audio, or app-control commands.
-Reachy Mini devices connected through their daemon support **Restart Reachy Mini daemon**. Select a Reachy Mini in Operations to see the action, review the selected targets, and confirm. It restarts devices one at a time and verifies that each daemon is running with its robot backend ready. Connected apps are interrupted, and the robot may move during initialization. Mixed selections containing non-Reachy Mini devices are rejected. **Scan devices** supports both SSH and Reachy daemon connections. The six Linux maintenance operations require SSH and their respective discovered capabilities. Reachy app resets and software updates remain unavailable as service operations.
+Reachy Mini devices connected through their daemon support **Restart Reachy Mini daemon**. Select a Reachy Mini in Operations to see the action, review the selected targets, and confirm. It restarts devices one at a time and verifies that each daemon is running with its robot backend ready. Connected apps are interrupted, and the robot may move during initialization. Mixed selections containing non-Reachy Mini devices are rejected. **Scan devices** supports both SSH and Reachy daemon connections. Linux maintenance operations require SSH and their respective discovered capabilities. Reachy app resets and software updates remain unavailable as service operations.
 
 Daemon restarts use the [Reachy Mini restart API](https://github.com/pollen-robotics/reachy_mini/blob/v1.10.0/src/reachy_mini/daemon/app/routers/daemon.py) and retain the remote job ID for progress tracking and recovery. Retrying an accepted request reconnects to the same job; uncertain failures are never automatically replayed. If a restart is interrupted, use **Scan** in device settings to verify the recorded remote job and daemon health. If no remote job ID was acknowledged, Fleet keeps the device in recovery for manual investigation.
 
@@ -460,10 +460,12 @@ Daemon restarts use the [Reachy Mini restart API](https://github.com/pollen-robo
 
 **Operations** is the default page after login.
 
-1. Select the devices once.
+1. Select the devices once. Search the catalog by task or Ansible filename. An operation with blocked targets lists the devices that need attention.
 2. **Scan devices** discovers hardware, software, health, and supported capabilities. Fleet Manager runs it automatically every hour; run it manually whenever you need an immediate refresh. Mixed SSH and Reachy selections share one job; failures remain visible per device. Scans do not install updates, reboot devices, or move robots.
-3. Choose **Check now**, **Review & install**, **Clear cache…**, or **Reboot…**. Installation automatically runs a package check if no current check matches the selection. Review the resulting packages, then confirm once.
-4. Follow progress, discovery facts, package results, cleanup output, and device-specific errors inline. **Activity** retains the full history and technical logs.
+3. Choose an inspection or a change. **Review & install** runs a package check when needed and shows the exact versions. For a multi-node install or reboot, choose **In parallel** (default) or **In rolling batches**. Set **Devices per batch** to 1 for one node at a time, then confirm the targets.
+4. Follow progress, discovery facts, package results, cleanup output, and device-specific errors inline. **Activity** retains per-device outcomes and technical logs. Search by inventory name and filter by operation, status, or time across the full history.
+
+**Check maintenance readiness** runs an optional read-only playbook on the selected Linux nodes. It reports root filesystem use, available memory, failed systemd services, and the Debian/Ubuntu reboot marker. Expand a node to see its readings and suggested follow-up. Unavailable observations are labeled individually.
 
 **Find current IP** locates a selected SSH device after an address change. It checks the saved endpoint and DNS first. Optionally enter an IPv4 subnet with at most 256 addresses (`/24` or smaller) to search when those checks find no match. The controller uses Nmap and compares ED25519 keys against the configured `SSH_KNOWN_HOSTS_FILE`, including hashed records. It authenticates only after finding one matching address, pins the trusted key for that connection, and reads `hostname` with the stored credentials. Missing or revoked trust, multiple matching addresses, and failed authentication produce explicit failures. Results show the previous endpoint, verified IP, and remote hostname in Operations and Activity. This read-only check works with stale facts or pending recovery, but never changes inventory, refreshes facts, or clears recovery requirements. Update the endpoint through device settings after reviewing the result, then scan the device.
 
@@ -475,7 +477,7 @@ A selection is never silently reduced to eligible devices. The page explains blo
 
 Cache cleanup targets the privileged system runtime connections on the device. It enumerates containerd namespaces instead of assuming only `k8s.io`, and leaves Docker's `moby` namespace to Docker. BuildKit availability and every skipped or failed runtime are visible in the result. It never prunes containers, volumes, or networks.
 
-**Reboot nodes** requires current discovery facts and restarts the selected nodes in parallel after one confirmation. Multiple nodes can be offline at the same time. It requires no reboot-required flag, package preview, preflight health check, or Kubernetes drain. It remains available when a previous operation needs recovery, while respecting active device reservations. Fleet waits for a new boot and SSH access, then refreshes device details. A failed return is reported as an incomplete change. Existing host-health issues are checked automatically before later installs or cleanup. The CLI `reboot.yml` playbook uses the same unconditional behavior.
+**Reboot nodes** requires current discovery facts. Parallel execution can take all selected nodes offline together. Rolling execution limits how many nodes Ansible handles per batch. Ansible waits for a completed reboot on each returning node before progressing to the next batch. Application availability depends on the workloads and cluster topology. It requires no reboot-required flag, package preview, preflight health check, or Kubernetes drain. It remains available when a previous operation needs recovery, while respecting active device reservations. Fleet waits for a new boot and SSH access, then refreshes device details. A failed return is reported as an incomplete change. Existing host-health issues are checked automatically before later installs or cleanup. The CLI `reboot.yml` playbook uses the same unconditional behavior.
 
 A rejected package plan before any mutation is a failed attempt, not a recovery lock. Interrupted or unverified changes trigger automatic health checks before the next install or cleanup; there is no separate Verify step. Network retries reuse a request key, so reconnecting cannot launch the same accepted action twice.
 
@@ -751,7 +753,8 @@ server-maintenance/
 │   ├── admin_setup.yml         # Single admin sudo setup
 │   ├── host_bootstrap.yml      # Groups, admin, Docker/toolkit, scan
 │   ├── system_update.yml       # Install reviewed package updates
-│   ├── maintenance_assessment.yml # Preflight and health assessment
+│   ├── host_readiness.yml         # Standalone readiness check in Operations
+│   ├── maintenance_assessment.yml # Legacy preflight and health assessment
 │   ├── docker_cleanup.yml      # Docker/containerd image and cache cleanup
 │   ├── preflight_check.yml     # Read-only maintenance readiness checks
 │   ├── health_diagnostics.yml  # Deep host health diagnostics

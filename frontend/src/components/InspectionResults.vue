@@ -1,5 +1,6 @@
 <template>
   <StorageResults :reports="reports" :devices="devices" />
+  <ReadinessResults :reports="reports" :devices="devices" />
   <section v-for="report in inspections" :key="`${report.report_type}-${report.hostname}`" class="inspection">
     <h4>{{ devices.find(device => device.inventory_name === report.hostname)?.name || report.hostname }}</h4>
     <p v-if="report.timestamp" class="muted">Observed {{ formatLongTime(report.timestamp) }}</p>
@@ -27,6 +28,7 @@
 <script setup>
 import {computed} from 'vue';
 import StorageResults from './StorageResults.vue';
+import ReadinessResults from './ReadinessResults.vue';
 import {formatLongTime} from '../utils/time.js';
 const props = defineProps({reports:{type:Array,default:()=>[]},devices:{type:Array,default:()=>[]}});
 const inspections = computed(() => props.reports.filter(report => report.report_type === 'gpu'));

@@ -1,4 +1,5 @@
 export const SCAN = 'system.scan';
+export const READINESS = 'system.assess';
 export const IP_CHECK = 'system.ip.check';
 export const CHECK = 'system.packages.preview';
 export const INSTALL = 'system.update';
@@ -7,8 +8,8 @@ export const REBOOT = 'system.reboot';
 export const STORAGE = 'storage.inspect';
 export const GPU = 'gpu.inspect';
 export const REACHY_RESTART = 'reachy.daemon.restart';
-export const ACTION_IDS = [SCAN, IP_CHECK, CHECK, INSTALL, CLEANUP, REBOOT, STORAGE, GPU, REACHY_RESTART];
-export const PLAYBOOKS = {[SCAN]:'host_facts.yml',[IP_CHECK]:'host_ip_check.yml',[CHECK]:'package_preview.yml',[INSTALL]:'system_update.yml',[CLEANUP]:'docker_cleanup.yml',[REBOOT]:'reboot.yml',[STORAGE]:'storage_analysis.yml',[GPU]:'gpu_usage.yml',[REACHY_RESTART]:REACHY_RESTART};
+export const ACTION_IDS = [SCAN, IP_CHECK, READINESS, CHECK, INSTALL, CLEANUP, REBOOT, STORAGE, GPU, REACHY_RESTART];
+export const PLAYBOOKS = {[SCAN]:'host_facts.yml',[READINESS]:'host_readiness.yml',[IP_CHECK]:'host_ip_check.yml',[CHECK]:'package_preview.yml',[INSTALL]:'system_update.yml',[CLEANUP]:'docker_cleanup.yml',[REBOOT]:'reboot.yml',[STORAGE]:'storage_analysis.yml',[GPU]:'gpu_usage.yml',[REACHY_RESTART]:REACHY_RESTART};
 export const ACTIVE = ['pending', 'running', 'cancelling'];
 export const namesFor = (job) => String(job?.target_devices || '').split(',').filter(Boolean);
 export function needsScan(device, now = Date.now()) {
@@ -28,12 +29,18 @@ export function validPackageCheck(job, devices, now = Date.now()) {
   const reports = job.result_artifacts?.filter(r => r.report_type === 'packages') || [];
   return devices.every(d => reports.some(r => r.hostname === d.inventory_name && /^[a-f0-9]{64}$/.test(r.fingerprint)));
 }
-export function blockers(operation, selectedIds, devices) {
+export function blockers(operation, selectedIds, devices, staleIds = new Set()) {
+  const eligible = new Set(operation?.eligible_device_ids);
+  const excluded = new Map((operation?.excluded_devices || []).map(device => [device.id, device.reason]));
+  const byId = new Map(devices.map(device => [device.id, device]));
   return selectedIds.flatMap(id => {
-    const device = devices.find(d => d.id === id);
+    const device = byId.get(id);
     if (!device) return [{id, name: `Device #${id}`, reason: 'This device is no longer available.'}];
-    if (operation?.eligible_device_ids.includes(id)) return [];
-    return [{id, name: device.name, reason: operation?.excluded_devices?.find(d => d.id === id)?.reason || 'Not available for this action.'}];
+    if (!eligible.has(id)) return [{id, name: device.name, reason: excluded.get(id) || 'Not available for this action.'}];
+    if (staleIds.has(id) && ![SCAN, IP_CHECK].includes(operation.id)) {
+      return [{id, name: device.name, reason:'Scan devices first. Device facts are missing or stale.'}];
+    }
+    return [];
   });
 }
 export function packageCount(job) {

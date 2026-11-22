@@ -531,6 +531,7 @@ def test_failed_recovery_keeps_device_blocked(database, monkeypatch):
 @pytest.mark.parametrize('scan_rc,second_recap,marker,expected_verified', [
     (0, 'ok=9 changed=0 unreachable=0 failed=0', True, ['node-01', 'node-02']),
     (2, 'ok=8 changed=0 unreachable=0 failed=1', True, ['node-01']),
+    (124, 'ok=8 changed=0 unreachable=0 failed=1', True, []),
     (0, '', True, ['node-01']),
     (1, 'ok=9 changed=0 unreachable=0 failed=0', True, []),
     (0, '', False, []),
@@ -556,7 +557,7 @@ def test_followup_scan_requires_report_and_successful_execution(
             for target in targets:
                 (scan / f'{target}.json').write_text(json.dumps({
                     'hostname': target, 'os_family': 'Debian', 'distribution': 'Ubuntu',
-                    'service_manager': 'systemd',
+                    'service_manager': 'systemd', 'os_version': 'observed OS',
                 }))
             if marker:
                 log.write('\n--- Post-operation facts ---\nPLAY RECAP\n')
@@ -583,6 +584,50 @@ def test_followup_scan_requires_report_and_successful_execution(
             assert outcome['status'] == ('success' if verified else 'verification_failed')
             assert host.facts_stale is not verified
             assert host.recovery_required is not verified
+            assert host.os_version == ('observed OS' if verified else None)
+        assert db.query(DeviceReservation).count() == 0
+
+
+@pytest.mark.parametrize('rc,recaps,expected_statuses,expected_recovery', [
+    # With a one-host batch, a failed first host can end the play before the second is reached.
+    (2, [('node-01', 1)], ['failed', 'not_checked'], [True, False]),
+    (2, [], ['recovery_required', 'not_checked'], [True, False]),
+    (124, [('node-01', 0)], ['verification_failed', 'recovery_required'], [True, True]),
+    (2, [('node-01', 0), ('node-02', 0)], ['verification_failed', 'verification_failed'], [True, True]),
+])
+def test_rolling_reboot_retains_only_confirmed_host_outcomes(database, tmp_path, monkeypatch, rc, recaps, expected_statuses, expected_recovery):
+    with database() as db:
+        db.add_all([device('node-01'), device('node-02')])
+        db.commit()
+
+    async def execute(playbook, targets, values, credentials, job_id, timeout, append=False):
+        assert playbook == 'reboot.yml'
+        assert values == {'maintenance_batch_size': 1}
+        reports = tmp_path / 'job-results' / job_id
+        reports.mkdir(parents=True)
+        (reports / 'execution_node-01.json').write_text(json.dumps({
+            'hostname': 'node-01', 'schema_version': 1, 'report_type': 'execution', 'mutation_started': True,
+        }))
+        with runner.get_log_path(job_id).open('w') as log:
+            if recaps:
+                log.write('PLAY RECAP\n')
+            for name, failed in recaps:
+                log.write(f'{name} : ok=3 changed=1 unreachable=0 failed={failed}\n')
+        return rc
+
+    monkeypatch.setattr(runner, '_execute', execute)
+
+    async def run():
+        with database() as db:
+            await runner.run_playbook(db, 'reboot.yml', hosts=['node-01', 'node-02'], extra_vars={'maintenance_batch_size': 1})
+        await asyncio.gather(*list(runner._BACKGROUND_TASKS))
+
+    asyncio.run(run())
+    with database() as db:
+        job = db.query(Job).one()
+        assert job.status == 'recovery_required'
+        assert [item['status'] for item in job.device_results] == expected_statuses
+        assert [host.recovery_required for host in db.query(Device).order_by(Device.hostname)] == expected_recovery
         assert db.query(DeviceReservation).count() == 0
 
 

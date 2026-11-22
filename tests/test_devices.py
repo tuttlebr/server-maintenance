@@ -382,7 +382,7 @@ class OperationEligibilityTests(unittest.TestCase):
         operation_ids = {operation.id for operation in list_operations(self.db, "admin")}
         self.assertEqual(
             operation_ids,
-            {"system.scan", "system.ip.check", "system.packages.preview", "system.update", "containers.cleanup", "system.reboot", "storage.inspect", "gpu.inspect", "reachy.daemon.restart"},
+            {"system.scan", "system.ip.check", "system.assess", "system.packages.preview", "system.update", "containers.cleanup", "system.reboot", "storage.inspect", "gpu.inspect", "reachy.daemon.restart"},
         )
 
     def test_capability_check_blocks_linux_operation_on_robot(self):

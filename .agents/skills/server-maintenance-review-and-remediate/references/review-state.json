@@ -1,92 +1,75 @@
 {
   "schema_version": 1,
-  "repository_reviewed_through": "ee78df2124fa40050e4517a835e6aaf0c1b28be6",
+  "repository_reviewed_through": "2296341364f1b254e7558799de51b26890d3a459",
   "docker_samples_reviewed_through": {
-    "etcd": "2026-11-22T16:05:54.175969Z",
-    "milvus": "2026-11-22T16:05:54.175969Z",
-    "nat": "2026-11-22T16:05:54.175969Z",
+    "etcd": "2026-11-22T17:52:50.546050Z",
+    "milvus": "2026-11-22T17:52:50.546050Z",
+    "nat": "2026-11-22T17:52:50.546050Z",
     "ssh-agent-proxy": "2026-11-22T15:41:38.449072Z",
-    "web": "2026-11-22T16:05:54.175969Z"
+    "web": "2026-11-22T17:52:50.546050Z"
   },
   "last_run": {
-    "at": "2026-11-22T16:12:46.211782Z",
-    "starting_head": "ee78df2124fa40050e4517a835e6aaf0c1b28be6",
+    "at": "2026-11-22T18:03:57.440673Z",
+    "starting_head": "2296341364f1b254e7558799de51b26890d3a459",
     "branch": "main",
-    "scope": "Rerun after removing four public documentation MCP definitions and adding optional Kubernetes to workflow.tool_names. No new commits. Reviewed working tree, dependent prompt/tests/docs, previous deployment gaps and five bounded Compose samples.",
+    "scope": "Operator-facing Ansible selection, pre-maintenance observations, rolling execution, and job evidence. Accounted for 39 unique paths in ee78df2..2296341, including prior model/startup/upload changes and DGX recovery. Incremental review.",
     "status": "complete",
-    "status_reason": "Removal and live chat completion verified. Separate embedding reachability issue reopened. Config-dependent Kubernetes privileges remain unverified.",
+    "status_reason": "Requested improvements verified locally. Live activation, remote devices and independent indexer follow-ups remain open.",
     "dirty_worktree_coverage": {
-      "initial": [
-        "nat/tests/check_docs_search.py",
-        ".agents/skills/server-maintenance-review-and-remediate/references/lessons.md",
-        ".agents/skills/server-maintenance-review-and-remediate/references/repository-guide.md",
-        ".agents/skills/server-maintenance-review-and-remediate/references/review-state.json",
-        "README.md",
-        "backend/requirements.txt",
-        "backend/routers/chat.py",
-        "backend/services/context_manager.py",
-        "backend/services/document_uploads.py",
-        "docs/fleet-manager-ui.md",
-        "nat/config.yml",
-        "nat/fleet_rag/register.py",
-        "nat/prepare_config.py",
-        "tests/test_chat.py",
-        "tests/test_document_uploads.py",
-        "tests/test_nat_config.py"
-      ],
-      "reviewed": "16 paths including all prior local work and the user config edit. Confirmed exact prior adapter files before retiring them. Preserved unrelated fixes and the user-selected optional Kubernetes group."
+      "initial": [],
+      "reviewed": "Clean starting tree. Examined all new local changes, including untracked playbook, collector, component and tests. Security and SSH configurations preserved."
     },
     "fixed_findings": [
-      "STALE-DOCS-MCP-CONTRACT"
-    ],
-    "closed_pending": [
-      "PROVIDER-COMPLETION-UNVERIFIED: one live NAT-mode greeting completed and was correlated with its request.",
-      "Prior NAT crash loop and pending web fix activation verified on replacement containers. Host-IP and docs re-index end-to-end observations remain separate."
+      "No UI control for existing Ansible batches on multi-host apt installs and reboots.",
+      "Catalog and confirmation hid eligibility, inventory names, and targets filtered from view. Restored previews could silently lose removed devices.",
+      "No standalone read-only pre-maintenance readiness report in Operations.",
+      "Activity target/time filters searched only one page, and an exact full page offered an empty following page.",
+      "Multi-stage jobs could save a preflight recap for the requested action, report successful hosts on uncertain exits, or apply unverified follow-up scan artifacts."
     ],
     "checks": [
       {
-        "command": "One authorized authenticated Fleet Help greeting through running web",
-        "status": "observed",
-        "result": "NAT mode, HTTP 200, final content and terminal SSE done in 0.58 seconds. One matching NAT completion request. No search or fleet evidence events."
-      },
-      {
-        "command": "Container inspection, NAT health from web, prepared catalog and packaged web source",
-        "status": "observed",
-        "result": "NAT completed startup and stayed running at zero restarts. No MCP groups active. Healthy web, SSH proxy, etcd and Milvus. Web Pillow 13.0.0 and source checks passed."
-      },
-      {
-        "command": "Web provider TCP and bounded SQL to Milvus job-key comparison",
-        "status": "observed",
-        "result": "Embedding endpoint probe timed out after four logged connection refusals; separate chat endpoint reachable. First chunks found for 13 of the latest 20 terminal jobs, zero of four finished since startup."
-      },
-      {
-        "command": "bash scripts/check-backend.sh tests in an isolated checkout without operator .env",
+        "command": "bash scripts/check-backend.sh (isolated source snapshot without operator .env)",
         "status": "passed",
-        "result": "663 passed, 113 subtests passed and one Starlette deprecation warning. Focused chat/prompt/config suite passed after final synthetic credential adjustment."
+        "result": "707 passed, 113 subtests, one Starlette deprecation warning. Includes local real-Ansible execution against synthetic inventory."
       },
       {
-        "command": "Offline NAT 1.9 schema validation and installed plugin checks",
+        "command": "npm --prefix frontend test and npm --prefix frontend run build",
         "status": "passed",
-        "result": "Valid with zero groups when disabled, one group with synthetic Kubernetes URL/token and reranking enabled; both registered-retrieval tests passed. No cluster connection."
+        "result": "110 tests, production build. Synthetic desktop/mobile Chrome interactions and screenshots for Operations and Activity."
       },
       {
-        "command": "Compose config, Python compilation, changed-file hooks, git diff --check, skill validation",
+        "command": "ansible-playbook --syntax-check for all 32 playbooks; ansible-lint --offline --profile min playbooks",
         "status": "passed",
-        "result": "Passed, including 11 collector tests, quick_validate and relative links."
+        "result": "All syntax checks passed. Lint reported zero failures or warnings."
+      },
+      {
+        "command": "NAT 1.9 offline config schema and registered retriever fixtures",
+        "status": "passed",
+        "result": "Prompt preserved with reranking/Kubernetes disabled or enabled. Two registered-retriever tests passed. No external providers contacted."
+      },
+      {
+        "command": "Changed-file pre-commit, git diff --check, Compose config, compileall, skill metadata/links and collector tests",
+        "status": "passed",
+        "result": "Hygiene checks passed. Both skill packages valid, relative links resolve, 11 collector tests passed."
+      },
+      {
+        "command": "cargo test --offline --locked --manifest-path tools/dgx-doc-ingester/Cargo.toml",
+        "status": "unavailable",
+        "result": "Cargo unavailable on PATH. Rust source and dependencies unchanged. Existing executable used only to reproduce the explicit empty credential override with synthetic inputs."
       }
     ],
     "documentation": [
-      "README and UI guide describe indexed documentation and the optional Kubernetes group. README distinguishes job-log backfill at web startup from the Context documentation re-index. Canonical prompt now routes product questions to indexed docs."
+      "README and fleet-manager-ui.md cover catalog search, readiness thresholds, target review, rolling execution, and history filters. README corrects the embedding template selection and documents explicit blank overrides.",
+      "Updated only workflow.system_prompt in nat/config.yml to reflect readiness and rolling batches. 590 to 592 words, 4154 to 4178 characters. NAT needs reload for this prompt. Direct fallback reads the mount on request."
     ],
     "learning": [
-      "Refined L008 for verification against the deployed prepared catalog and separate greeting/retrieval evidence. Updated runtime validation entry in repository guide. Existing collection and workflow instructions covered the rerun."
+      "Expanded L006 with multi-stage recap and follow-up scan verification. Mapped readiness, batches and Activity filtering in repository-guide.md. Existing review collection and workflow instructions cover these changes."
     ],
     "limits": [
-      "No cluster endpoint configured. Its advertised tools and token permissions could not be checked.",
-      "No retrieval query, provider change, re-index, fleet job, or service recreation in this run. Current NAT loaded its prompt before the local wording edit.",
-      "Incremental backend/NAT scope. Prior frontend/Rust results were not rerun."
+      "Existing Compose services inspected read-only. No deployment, real fleet operations, provider inference, re-indexing or credential changes. No application-quorum check is implied by Ansible batch size.",
+      "Source and bounded logs reviewed, not a full audit of prior history or continuous runtime monitoring. Dependency audits and Rust build were outside the verified gates."
     ],
-    "evidence_path": "data/skill-reviews/20261122T160554Z-zjgxf78_"
+    "evidence_path": "data/skill-reviews/20261122T175250Z-ec4cah7g"
   },
   "pending_work": [
     {
@@ -103,15 +86,21 @@
     },
     {
       "id": "RUNTIME-SAMPLE-GAPS",
-      "summary": "Preserve initial-run exclusions and new 2026-10-26 gaps: default window capped to 24h; web/nat/etcd/milvus hit 500 lines. All current containers started after the prior review; predecessor logs were not collected. Proxy sample empty. Focused 2026-11-01 sample adds a four-hour web/proxy window with web capped at 100 lines and proxy empty; other services not sampled. On 2026-11-22 all five services hit the 24h window cap; etcd, Milvus and NAT hit the line cap. Web returned 499 recent access lines starting only 16 minutes before the sample end. Container restarts, recreation and omitted intervals preclude continuous coverage. The next sample contains replacement containers only. All five reads succeeded without caps, proxy returned zero lines and retained its previous sample cursor.",
-      "evidence": "data/skill-reviews/20261026T124708Z-0an073ii/evidence.json:docker.logs; docker.inspection; data/skill-reviews/20261101T131845Z-oh50cior/evidence.json; data/skill-reviews/20261122T154138Z-qxur4ydp/evidence.json; data/skill-reviews/20261122T160554Z-zjgxf78_/evidence.json",
+      "summary": "Preserve initial-run exclusions and new 2026-10-26 gaps: default window capped to 24h; web/nat/etcd/milvus hit 500 lines. All current containers started after the prior review; predecessor logs were not collected. Proxy sample empty. Focused 2026-11-01 sample adds a four-hour web/proxy window with web capped at 100 lines and proxy empty; other services not sampled. On 2026-11-22 all five services hit the 24h window cap; etcd, Milvus and NAT hit the line cap. Web returned 499 recent access lines starting only 16 minutes before the sample end. Container restarts, recreation and omitted intervals preclude continuous coverage. The next sample contains replacement containers only. All five reads succeeded without caps, proxy returned zero lines and retained its previous sample cursor. The 17:52 UTC sample read five current containers, all started around 17:48. No output/line caps, zero proxy lines; earlier intervals lack coverage.",
+      "evidence": "data/skill-reviews/20261026T124708Z-0an073ii/evidence.json:docker.logs; docker.inspection; data/skill-reviews/20261101T131845Z-oh50cior/evidence.json; data/skill-reviews/20261122T154138Z-qxur4ydp/evidence.json; data/skill-reviews/20261122T160554Z-zjgxf78_/evidence.json; data/skill-reviews/20261122T175250Z-ec4cah7g/evidence.json",
       "next_check": "Collect a focused service/time window only for a concrete symptom; cursors track inspected bounded samples, not continuous coverage or proof of remote SSH."
     },
     {
       "id": "DEPLOYMENT-VERIFICATION",
-      "summary": "Web source, Pillow, NAT availability and one real chat completion verified. The host-IP action and full documentation re-index still lack end-to-end runtime verification in these reviews.",
+      "summary": "Web source, Pillow, NAT availability and one real chat completion verified. The host-IP action and full documentation re-index still lack end-to-end runtime verification in these reviews. Local catalog, readiness results, rolling controls, job-history fixes and prompt changes await deployment verification.",
       "evidence": "data/skill-reviews/20261122T160554Z-zjgxf78_/source-checks.json; data/skill-reviews/20261122T160554Z-zjgxf78_/live-greeting.json; data/skill-reviews/20261122T154138Z-qxur4ydp/ledger.md; data/skill-reviews/20261122T154138Z-qxur4ydp/runtime-checks.json; data/skill-reviews/20261122T154138Z-qxur4ydp/nat-status-final.json",
-      "next_check": "Observe an approved host-IP job or operator-initiated documentation re-index if those workflows need runtime verification."
+      "next_check": "After authorized web deployment and NAT reload, verify the catalog, run readiness against selected approved nodes, and observe operator-planned rolling maintenance through Activity. Host-IP and documentation re-index observations remain outstanding."
+    },
+    {
+      "id": "INGESTER-EMPTY-EMBEDDING-OVERRIDE",
+      "summary": "In a synthetic process environment, explicitly empty EMBED_API_KEY shadows a populated AI_HELPER_API_KEY in the Rust ingester. Web Context can pass this empty value despite its precheck accepting the fallback. README documents omitting the blank assignment. Separate from prior provider reachability.",
+      "evidence": "tools/dgx-doc-ingester/src/main.rs::AppConfig::from_env; backend/services/docs_indexer.py::_ingester_env; data/skill-reviews/20261122T175250Z-ec4cah7g/ledger.md",
+      "next_check": "In a scoped indexer change, align fallback handling for empty overrides and test both the standalone CLI and web-launched process with synthetic settings."
     }
   ],
   "baseline_scope": {

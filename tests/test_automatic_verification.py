@@ -137,6 +137,10 @@ def test_preflight_success_cannot_mask_a_later_failure(workflow, failure, expect
         job = db.query(Job).one()
         assert job.status == expected_status
         assert all(item['status'] != 'success' for item in job.device_results)
+        if failure == 'no_action_recap':
+            assert job.recap is None
+        else:
+            assert 'two : ok=' in job.recap
 
 
 def test_package_checks_do_not_need_recovery_verification(workflow):

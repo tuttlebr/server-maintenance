@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi import FastAPI
@@ -113,6 +113,25 @@ def test_adverse_pagination_is_global_and_stable_for_tied_timestamps(database, c
 @pytest.mark.parametrize("limit", [-1, 0, 201])
 def test_job_pagination_rejects_unbounded_limits(client, limit):
     assert client.get(f"/api/v2/jobs?limit={limit}").status_code == 422
+
+
+def test_activity_search_filters_targets_and_age_before_paginating(database, client):
+    db, _, _ = database
+    now = datetime.now(timezone.utc)
+    for job_id, targets, age in [
+        ("older", "other,gpu_2", 72), ("wanted", "head,GPU_2-worker", 8),
+        ("not-literal", "gpuA2-worker", 2), ("unrelated", "head", 1),
+    ]:
+        db.add(Job(job_id=job_id, target_hosts=targets, playbook="reboot.yml",
+                   status="success", created_at=now - timedelta(hours=age)))
+    db.commit()
+    params = {"target": "gpu_2", "period": "7d", "status": "success", "playbook": "reboot.yml", "limit": 1}
+    assert client.get("/api/v2/jobs", params=params).json()[0]["job_id"] == "wanted"
+    assert client.get("/api/v2/jobs", params={**params, "offset": 1}).json()[0]["job_id"] == "older"
+    assert client.get("/api/v2/jobs", params={**params, "period": "24h", "offset": 1}).json() == []
+    assert client.get("/api/v2/jobs", params={**params, "target": "%"}).json() == []
+    assert client.get("/api/v2/jobs", params={**params, "target": "head,gpu"}).json() == []
+    assert client.get("/api/v2/jobs", params={**params, "period": "forever"}).status_code == 422
 
 
 def test_user_listing_uses_two_queries_for_many_accounts(database, client):

@@ -339,6 +339,7 @@ class OperationResponse(BaseModel):
     risk: str
     confirmation: str
     icon: str
+    supports_batch_size: bool = False
     eligible_device_ids: list[int]
     eligible_count: int
     excluded_devices: list[dict] = Field(default_factory=list)
@@ -350,6 +351,7 @@ class OperationRunRequest(BaseModel):
     request_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,64}$")
     preview_job_id: str | None = Field(default=None, pattern=r"^[0-9a-f-]{36}$")
     confirmation: str | None = None
+    batch_size: int | None = Field(default=None, strict=True, ge=1)
     discovery_subnet: str | None = Field(default=None, max_length=32)
 
     @field_validator("discovery_subnet")
@@ -366,6 +368,12 @@ class OperationRunRequest(BaseModel):
     @classmethod
     def validate_device_ids(cls, value: list[int]) -> list[int]:
         return list(dict.fromkeys(value))
+
+    @model_validator(mode="after")
+    def validate_batch_size(self):
+        if self.batch_size is not None and self.batch_size > len(self.device_ids):
+            raise ValueError("Batch size cannot exceed the number of selected devices")
+        return self
 
 
 # Users

@@ -1,0 +1,43 @@
+---
+- name: Check maintenance readiness
+  hosts: managed_hosts
+  gather_facts: false
+  become: false
+  vars:
+    readiness_result_dir: "{{ __fleet_results_dir | default('/tmp/fleet-job-results') }}/{{ __fleet_job_id | default('manual') }}"
+  tasks:
+    - name: Read root capacity, memory, failed services and reboot request
+      ansible.builtin.script:
+        cmd: files/host_readiness.py
+        executable: >-
+          {{ ansible_python_interpreter if ansible_python_interpreter is defined
+             and ansible_python_interpreter not in ['auto', 'auto_silent', 'auto_legacy', 'auto_legacy_silent']
+             else 'python3' }}
+      register: readiness_readings
+      changed_when: false
+      check_mode: false
+
+    - name: Save this host's observations on the controller
+      delegate_to: localhost
+      vars:
+        ansible_connection: local
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
+      block:
+        - name: Create the job result directory
+          ansible.builtin.file:
+            path: "{{ readiness_result_dir }}"
+            state: directory
+            mode: "0700"
+
+        - name: Save the host readiness report
+          ansible.builtin.copy:
+            dest: "{{ readiness_result_dir }}/readiness_{{ inventory_hostname }}.json"
+            mode: "0600"
+            content: "{{ readiness_report | to_json }}"
+          vars:
+            readiness_report:
+              schema_version: 1
+              report_type: host_readiness
+              hostname: "{{ inventory_hostname }}"
+              timestamp: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+              checks: "{{ readiness_readings.stdout_lines | last | from_json }}"

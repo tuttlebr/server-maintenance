@@ -60,6 +60,7 @@ ALLOWED_PLAYBOOKS = {
     "host_drain.yml",
     "host_facts.yml",
     "host_ip_check.yml",
+    "host_readiness.yml",
     "install_docker.yml",
     "manage_groups.yml",
     "manage_sudoers.yml",
@@ -640,8 +641,9 @@ async def _refresh_job_facts(job_id, targets, host_credentials):
     """A fresh artifact and successful execution are both required evidence."""
     log_path = get_log_path(job_id)
     previous_output = log_path.read_text() if log_path.exists() else ""
+    scan_dir = settings.data_dir / "scans" / job_id
     for name in targets:
-        (settings.data_dir / "scans" / job_id / f"{name}.json").unlink(missing_ok=True)
+        (scan_dir / f"{name}.json").unlink(missing_ok=True)
     rc = await _execute("host_facts.yml", targets, None, host_credentials,
                         job_id, settings.ansible_job_timeout_seconds, True)
     output = log_path.read_text() if log_path.exists() else ""
@@ -649,9 +651,12 @@ async def _refresh_job_facts(job_id, targets, host_credentials):
     scan_output = output[len(previous_output):].partition("--- Post-operation facts ---")[2]
     outcomes = parse_host_outcomes(scan_output, targets)
     unverified = {item["hostname"] for item in outcomes if item["status"] != "success"}
-    if rc and not unverified:
+    if rc == 124 or (rc and not unverified):
         unverified.update(targets)
-    errors = _process_scan_results(targets, _extract_unreachable_hosts(scan_output), settings.data_dir / "scans" / job_id)
+    # A host can write its scan artifact before a later task or the process fails.
+    for name in unverified:
+        (scan_dir / f"{name}.json").unlink(missing_ok=True)
+    errors = _process_scan_results(targets, _extract_unreachable_hosts(scan_output), scan_dir)
     with SessionLocal() as db:
         unverified.update(host.hostname for host in db.query(Host).filter(Host.hostname.in_(targets)).all() if host.facts_stale)
     if unverified:
@@ -829,6 +834,15 @@ async def run_playbook(
                 outcomes = parse_host_outcomes(action_output, execution_targets)
                 successful = [item["hostname"] for item in outcomes if item["status"] == "success"]
                 failed = [name for name in execution_targets if name not in successful]
+                uncertain_exit = rc == 124 or (rc != 0 and not failed)
+                if not readonly and uncertain_exit:
+                    # A timeout or an unexplained process failure cannot certify a mutation.
+                    for item in outcomes:
+                        if item["status"] == "success":
+                            item["status"] = "verification_failed"
+                            item["detail"] = "Ansible timed out before confirming completion." if rc == 124 else f"Ansible exited with code {rc} despite a successful recap."
+                    failed = list(execution_targets)
+                    successful = []
                 cancelled = job_id in _CANCELLED_JOBS
                 errors = []
                 if rc or failed:
@@ -860,6 +874,14 @@ async def run_playbook(
                             else:
                                 _save_discovery_result(job_id, host)
                     output = log_path.read_text() if log_path.exists() else ""
+                elif playbook == "host_readiness.yml":
+                    reported = {r["hostname"] for r in get_job_results(job_id) if r["report_type"] == "host_readiness"}
+                    for item in outcomes:
+                        if item["status"] == "success" and item["hostname"] not in reported:
+                            item["status"] = "verification_failed"
+                            item["detail"] = "The readiness report is missing or incomplete."
+                            failed.append(item["hostname"])
+                            errors.append(f"{item['hostname']}: {item['detail']}")
                 elif playbook == "host_ip_check.yml":
                     # A successful recap cannot prove identity without the verified
                     # report. Discovery must not refresh facts or change inventory.
@@ -911,7 +933,7 @@ async def run_playbook(
                         if playbook == "host_facts.yml":
                             item["detail"] = "Scan report missing or invalid. Check device access and scan again."
                 recovery_targets = failed or (targets if rc else [])
-                if playbook in {"system_update.yml", "docker_cleanup.yml", "reboot.yml", "user_management.yml"} and rc != 124:
+                if playbook in {"system_update.yml", "docker_cleanup.yml", "reboot.yml", "user_management.yml"} and not uncertain_exit:
                     # A rejected plan or SSH failure before the mutation marker
                     # is an ordinary failed attempt, not an uncertain change.
                     reports = get_job_results(job_id)
@@ -924,6 +946,10 @@ async def run_playbook(
                     recovery_targets = [name for name in recovery_targets if name in started_targets or name in successful]
                 if not readonly and recovery_targets:
                     _invalidate_devices(recovery_targets, recovery_reason=f"Incomplete job {job_id} ({playbook})")
+                    for item in outcomes:
+                        if item["status"] == "not_checked" and item["hostname"] in recovery_targets:
+                            item["status"] = "recovery_required"
+                            item.setdefault("detail", "Ansible did not report a final host result. Check device health before another change.")
                 if recovery:
                     with SessionLocal() as state_db:
                         verified = [item["hostname"] for item in outcomes if item["status"] == "success"]
@@ -940,7 +966,7 @@ async def run_playbook(
                     status = "cancelled"
                 _update_job(job_id, status=status, phase="complete", finished_at=finished,
                             duration_seconds=int((finished - started_at).total_seconds()), output_log=output,
-                            recap=_extract_recap(output), outcomes_json=json.dumps(outcomes),
+                            recap=_extract_recap(action_output), outcomes_json=json.dumps(outcomes),
                             error_summary="\n".join(errors) or None)
         except (Exception, asyncio.CancelledError) as exc:
             uncertain = started and not readonly

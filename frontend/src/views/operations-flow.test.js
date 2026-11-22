@@ -6,21 +6,42 @@ import {element,renderer,text,find,flush,compileView} from '../../test-support/v
 
 const {default:Operations}=await import(await compileView(new URL('./Operations.vue',import.meta.url)));
 const devices=[{id:1,name:'Node 1',inventory_name:'node-01',discovered_at:new Date().toISOString(),facts_stale:false,transport:'ssh',os_family:'Debian',maintenance_mode:'kubernetes'},{id:2,name:'Robot',inventory_name:'robot',discovered_at:new Date().toISOString(),facts_stale:false,transport:'reachy_daemon',kind:'robot',model:'Reachy Mini Wireless'}];
+devices.push(...[3, 4].map(id => ({...devices[0], id, name: `Worker ${id}`, inventory_name: `node-0${id}`})));
+const operationLabels = {
+ 'system.scan':'Scan devices', 'system.ip.check':'Find current IP', 'system.assess':'Check maintenance readiness',
+ 'system.packages.preview':'Check for apt updates', 'system.update':'Install apt updates', 'containers.cleanup':'Clear container cache',
+ 'system.reboot':'Reboot nodes', 'storage.inspect':'Check storage', 'gpu.inspect':'Check GPU usage', 'reachy.daemon.restart':'Restart Reachy Mini daemon',
+};
 const checkJob={job_id:'check-id',playbook:'package_preview.yml',target_devices:'node-01',status:'success',finished_at:new Date().toISOString(),device_results:[{hostname:'node-01',status:'success'}],result_artifacts:[{hostname:'node-01',report_type:'packages',fingerprint:'a'.repeat(64),changes:['Inst curl [1] (2 Ubuntu)'],package_count:1}]};
-async function mount(query={devices:'1'},failOnce=false,recovery=false,installPhase='complete',inspectionReports=[],stale=false) {
+async function mount(query={devices:'1'},failOnce=false,recovery=false,installPhase='complete',inspectionReports=[],stale=false,restoredJob=checkJob) {
  global.Document=class Document {};global.ShadowRoot=class ShadowRoot {};global.document={activeElement:null};
  global.localStorage={getItem:()=> 'test'};global.window={location:{hash:''}};
- const calls=[];let posted=0;let currentJob=checkJob;let scanned=false;
+ const calls=[];let posted=0;let currentJob=restoredJob;let scanned=false;
  global.fetch=async(url,options={})=>{
   calls.push({url,options,body:options.body?JSON.parse(options.body):null});
   const respond=value=>new Response(JSON.stringify(value),{status:200,headers:{'Content-Type':'application/json'}});
   if(url==='/api/v2/devices')return respond(devices.map(device=>({...device,facts_stale:stale&&!scanned,recovery_required:recovery&&device.id===1})));
-  if(url==='/api/v2/operations')return respond(['system.scan','system.ip.check','system.packages.preview','system.update','containers.cleanup','system.reboot','storage.inspect','gpu.inspect','reachy.daemon.restart'].map(id=>id==='system.scan'?{id,eligible_device_ids:[1,2],excluded_devices:[]}:id==='system.ip.check'?{id,eligible_device_ids:[1],excluded_devices:[{id:2,reason:'Requires SSH'}]}:stale&&!scanned?{id,eligible_device_ids:[],excluded_devices:devices.map(d=>({id:d.id,reason:'Scan devices first. Device facts are missing or stale.'}))}:id==='reachy.daemon.restart'?{id,eligible_device_ids:[2],excluded_devices:[{id:1,reason:'Requires a Reachy Mini device connected through its daemon'}]}:{id,eligible_device_ids:[1],excluded_devices:[{id:2,reason:'Requires SSH'}]}));
+  if(url==='/api/v2/operations')return respond(Object.entries(operationLabels).map(([id,label]) => {
+   let eligible = [1,3,4], reason = 'Requires SSH';
+   if(id === 'system.scan') eligible = devices.map(d => d.id);
+   else if(id !== 'system.ip.check' && stale && !scanned) {
+    eligible = []; reason = 'Scan devices first. Device facts are missing or stale.';
+   } else if(id === 'reachy.daemon.restart') {
+    eligible = [2]; reason = 'Requires a Reachy Mini device connected through its daemon';
+   }
+   return {id, label, supports_batch_size:['system.update','system.reboot'].includes(id), eligible_device_ids:eligible, excluded_devices:devices.filter(d => !eligible.includes(d.id)).map(d => ({id:d.id,reason}))};
+  }));
   if(url.startsWith('/api/v2/jobs?'))return respond([]);
   if(options.method==='POST') {
    posted++;
    if(failOnce&&posted===1)throw new Error('Connection lost');
-   if(url.includes('system.packages.preview'))currentJob=checkJob;
+   if(url.includes('system.packages.preview')) {
+    const targets = JSON.parse(options.body).device_ids.map(id => devices.find(d => d.id === id).inventory_name);
+    currentJob = {...checkJob, target_devices:targets.join(','),
+     device_results:targets.map(hostname => ({hostname,status:'success'})),
+     result_artifacts:targets.map(hostname => ({...checkJob.result_artifacts[0],hostname}))};
+   }
+   if(url.includes('system.assess'))currentJob={...checkJob,job_id:'readiness-id',playbook:'host_readiness.yml',result_artifacts:inspectionReports};
    if(url.includes('system.scan')) {scanned=installPhase==='complete';currentJob={...checkJob,job_id:'scan-id',playbook:'host_facts.yml',target_devices:JSON.parse(options.body).device_ids.map(id=>devices.find(d=>d.id===id).inventory_name).join(','),status:installPhase==='complete'?'success':installPhase,phase:'scanning',result_artifacts:inspectionReports};}
    if(url.includes('system.ip.check'))currentJob={...checkJob,job_id:'ip-id',playbook:'host_ip_check.yml',status:installPhase==='complete'?'success':installPhase,result_artifacts:inspectionReports};
    if(url.includes('system.update'))currentJob={...checkJob,job_id:'install-id',playbook:'system_update.yml',phase:installPhase,status:installPhase==='checking_health'?'running':installPhase==='health_check_failed'?'failed':'success',error_summary:installPhase==='health_check_failed'?'Automatic health check failed. The requested action did not start.':null,device_results:installPhase==='health_check_failed'?[{hostname:'node-01',status:'verification_failed',detail:'Required mounts are missing: /data'}]:checkJob.device_results,result_artifacts:[{report_type:'apt_install',hostname:'node-01',package_count:1,reboot_required:true}]};
@@ -36,7 +57,15 @@ async function mount(query={devices:'1'},failOnce=false,recovery=false,installPh
  await router.push({path:'/operations',query});await router.isReady();
  const app=renderer.createApp(Operations).use(router),root=element('root');app.mount(root);await flush();
  const click=async label=>{const button=find(root,node=>node.tag==='button'&&text(node)===label);assert.ok(button,`Missing button ${label}`);assert.ok(!button.props.disabled,`${label} is disabled`);await button.props.onClick();await flush();};
- return {app,root,calls,click,router};
+ const viewRequirements=async id=>{
+  const card=find(root, n=>n.tag==='article'&&n.props['aria-labelledby']===`title-${id}`);
+  assert.ok(card, `Missing card ${id}`);
+  assert.match(text(card), /selected unavailable/);
+  const button=find(card, n=>n.tag==='button'&&text(n)==='View requirements');
+  assert.ok(button&&!button.props.disabled, `Expected requirements on ${id}`);
+  await button.props.onClick();await flush();
+ };
+ return {app,root,calls,click,router,viewRequirements};
 }
 
 test('check, review and install stay on the same screen without typed confirmation',async()=>{
@@ -98,7 +127,7 @@ test('IP discovery never treats an unverified candidate as a verified address',a
 
 test('unsupported selected devices block the whole request instead of being silently skipped',async()=>{
  const view=await mount({devices:'1,2'});
- try {await view.click('Check now');assert.match(text(view.root),/Requires SSH/);assert.equal(view.calls.filter(c=>c.options.method==='POST').length,0);await view.click('Deselect');await view.click('Check now');assert.deepEqual(view.calls.find(c=>c.options.method==='POST').body.device_ids,[1]);}
+ try {await view.viewRequirements('system.packages.preview');assert.match(text(view.root),/Requires SSH/);assert.equal(view.calls.filter(c=>c.options.method==='POST').length,0);await view.click('Deselect');await view.click('Check now');assert.deepEqual(view.calls.find(c=>c.options.method==='POST').body.device_ids,[1]);}
  finally{view.app.unmount();}
 });
 
@@ -208,7 +237,7 @@ for(const [id,cta,reports,expected] of [['storage.inspect','Check storage',stora
 
 test('GPU check blocks incompatible selections instead of skipping them',async()=>{
  const view=await mount({devices:'1,2',operation:'gpu.inspect'});
- try {await view.click('Check GPUs');assert.match(text(view.root),/Requires SSH/);assert.equal(view.calls.filter(c=>c.options.method==='POST').length,0);}
+ try {await view.viewRequirements('gpu.inspect');assert.match(text(view.root),/Requires SSH/);assert.equal(view.calls.filter(c=>c.options.method==='POST').length,0);}
  finally {view.app.unmount();}
 });
 
@@ -250,7 +279,7 @@ test('Reachy Mini restart is hidden when only SSH nodes are selected',async()=>{
 test('mixed Reachy Mini and SSH selection blocks the entire daemon restart',async()=>{
  const view=await mount({devices:'1,2'});
  try {
-  await view.click('Restart daemon…');
+  await view.viewRequirements('reachy.daemon.restart');
   assert.match(text(view.root),/Requires a Reachy Mini device/);
   assert.equal(view.calls.filter(c=>c.options.method==='POST').length,0);
   await view.click('Deselect');
@@ -283,7 +312,7 @@ test('scan prerequisite refreshes facts and eligibility before another action',a
  const view=await mount({devices:'1',operation:'system.update'},false,false,'complete',reports,true);
  try {
   assert.match(text(view.root),/Scan devices before maintenance/);
-  await view.click('Check now');
+  await view.viewRequirements('system.packages.preview');
   assert.equal(view.calls.filter(c=>c.options.method==='POST').length,0);
   await view.click('Scan selected devices');
   assert.match(text(view.root),/Device scan completed/);
@@ -314,7 +343,7 @@ test('failed scan leaves the prerequisite visible and blocks actions',async()=>{
   await view.click('Scan now');
   assert.match(text(view.root),/This operation needs attention/);
   assert.match(text(view.root),/Scan devices before maintenance/);
-  await view.click('Reboot…');
+  await view.viewRequirements('system.reboot');
   assert.equal(view.calls.filter(c=>c.options.method==='POST').length,1);
  } finally {view.app.unmount();}
 });
@@ -350,4 +379,107 @@ test('scan explains an unavailable recommendation and does not offer a command',
   assert.match(text(view.root),/Unavailable: No usable hardware serial number/);
   assert.ok(!find(view.root,n=>n.tag==='button'&&text(n)==='Copy command'));
  } finally {view.app.unmount();}
+});
+
+
+async function setInput(view, id, value) {
+ const input = find(view.root, node => node.props.id === id);
+ assert.ok(input, `Missing control ${id}`);
+ input.props['onUpdate:modelValue'](value);
+ await flush();
+}
+
+test('find a playbook by filename, retain filtered targets, then run the readiness check', async () => {
+ const check = {status:'ok', detail:'Checked', advice:''};
+ const reports = [{hostname:'node-01', report_type:'host_readiness', checks:{root_capacity:check, memory:check, services:{status:'attention', detail:'One failed service', advice:'Inspect the failed unit'}, reboot:check}}];
+ const view = await mount({devices:'1,3'}, false, false, 'complete', reports);
+ try {
+  await setInput(view, 'device-search', 'node-03');
+  assert.match(text(view.root), /1 selected device hidden by this filter/);
+  await setInput(view, 'operation-search', 'HOST_READINESS.YML');
+  assert.ok(!find(view.root, n => n.tag === 'button' && text(n) === 'Reboot…'));
+  await view.click('Check readiness');
+  const posts = view.calls.filter(call => call.options.method === 'POST');
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].url, '/api/v2/operations/system.assess/jobs');
+  assert.deepEqual(posts[0].body.device_ids, [1,3]);
+  assert.match(text(view.root), /Readiness check completed/);
+  assert.match(text(view.root), /One failed service/);
+  assert.match(text(view.root), /Inspect the failed unit/);
+  await setInput(view, 'operation-search', 'no matches');
+  assert.match(text(view.root), /No operations match/);
+  await view.click('Clear search');
+  assert.ok(find(view.root, n => n.tag === 'button' && text(n) === 'Reboot…'));
+ } finally { view.app.unmount(); }
+});
+
+test('rolling reboot reviews exact hosts, validates batch size, and reconnects with the identical plan', async () => {
+ const view = await mount({devices:'1,3,4'}, true);
+ try {
+  await view.click('Reboot…');
+  const review = find(view.root, n => n.props['aria-labelledby'] === 'review-heading');
+  for (const name of ['Node 1','node-01','Worker 3','node-03','Worker 4','node-04']) assert.ok(text(review).includes(name));
+  await setInput(view, 'rollout-mode', 'rolling');
+  await setInput(view, 'batch-size', 4);
+  assert.equal(find(review, n => n.tag === 'button' && text(n) === 'Reboot now').props.disabled, true);
+  await setInput(view, 'batch-size', 2);
+  assert.match(text(review), /2 batches/);
+  await view.click('Reboot now');
+  await view.click('Reconnect to request');
+  const posts = view.calls.filter(call => call.options.method === 'POST');
+  assert.equal(posts.length, 2);
+  assert.deepEqual(posts[0].body.device_ids, [1,3,4]);
+  assert.equal(posts[0].body.confirmation, 'Node 1, Worker 3, Worker 4');
+  assert.equal(posts[0].body.batch_size, 2);
+  assert.deepEqual(posts[1].body, posts[0].body);
+ } finally { view.app.unmount(); }
+});
+
+test('package preview runs once and rolling applies only to the reviewed install', async () => {
+ const view = await mount({devices:'1,3,4'});
+ try {
+  await view.click('Review & install');
+  await setInput(view, 'rollout-mode', 'rolling');
+  await view.click('Install 3 updates');
+  const posts = view.calls.filter(call => call.options.method === 'POST');
+  assert.equal(posts.length, 2);
+  assert.equal(posts[0].body.batch_size, undefined);
+  assert.equal(posts[1].body.batch_size, 1);
+  assert.equal(posts[1].body.preview_job_id, 'check-id');
+ } finally { view.app.unmount(); }
+});
+
+test('a new review defaults to parallel and cleanup never offers a rolling control', async () => {
+ const view = await mount({devices:'1,3'});
+ try {
+  await view.click('Reboot…');
+  await setInput(view, 'rollout-mode', 'rolling');
+  await view.click('Cancel');
+  await view.click('Clear cache…');
+  assert.ok(!find(view.root, n => n.props.id === 'rollout-mode'));
+  await view.click('Cancel');
+  await view.click('Reboot…');
+  assert.match(text(view.root), /Both nodes can be offline|nodes can be offline at the same time/);
+  await view.click('Reboot now');
+  assert.equal(view.calls.find(call => call.options.method === 'POST').body.batch_size, undefined);
+ } finally { view.app.unmount(); }
+});
+
+
+test('a restored package preview keeps vanished targets visible until explicitly removed', async () => {
+ const historical = {...checkJob, target_devices:'node-01,retired-01'};
+ const view = await mount({preview:'check-id'}, false, false, 'complete', [], false, historical);
+ try {
+  assert.match(text(view.root), /Unavailable targets: retired-01/);
+  assert.equal(find(view.root, n => n.tag === 'button' && text(n) === 'Review & install').props.disabled, true);
+  assert.equal(view.calls.filter(call => call.url.startsWith('/api/v2/jobs?')).length, 0);
+  assert.equal(view.calls.filter(call => call.options.method === 'POST').length, 0);
+  await view.click('Remove unavailable targets');
+  assert.ok(!text(view.root).includes('Unavailable targets: retired-01'));
+  await view.click('Review & install');
+  const posts = view.calls.filter(call => call.options.method === 'POST');
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].url, '/api/v2/operations/system.packages.preview/jobs');
+  assert.deepEqual(posts[0].body.device_ids, [1]);
+ } finally { view.app.unmount(); }
 });

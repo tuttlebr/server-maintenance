@@ -113,6 +113,7 @@ class OperationDefinition:
     confirmation: str
     playbook: str | None = None
     icon: str = "fa-bolt"
+    supports_batch_size: bool = False
 
 
 OPERATIONS = (
@@ -127,14 +128,20 @@ OPERATIONS = (
         "Discovery", SYSTEM_SCAN, "low", "none", "host_ip_check.yml", "fa-network-wired",
     ),
     OperationDefinition(
+        SYSTEM_ASSESS, "Check maintenance readiness",
+        "Check root filesystem capacity, available memory, failed systemd services, and pending Debian or Ubuntu reboots.",
+        "System", SYSTEM_ASSESS, "low", "none", "host_readiness.yml", "fa-heart-pulse",
+    ),
+    OperationDefinition(
         "system.packages.preview", "Check for apt updates",
         "Refresh package lists and show available updates. No packages are installed.",
         "Packages", SYSTEM_UPDATE, "low", "none", "package_preview.yml", "fa-magnifying-glass",
     ),
     OperationDefinition(
         "system.update", "Install apt updates",
-        "Install the checked package versions across selected devices in parallel. Services may restart. Reboots are a separate action.",
+        "Install the checked package versions on the selected devices. Services may restart. Reboots are a separate action.",
         "Packages", SYSTEM_UPDATE, "high", "confirm", "system_update.yml", "fa-arrow-down",
+        supports_batch_size=True,
     ),
     OperationDefinition(
         "containers.cleanup", "Clear container cache",
@@ -143,8 +150,9 @@ OPERATIONS = (
     ),
     OperationDefinition(
         "system.reboot", "Reboot nodes",
-        "Reboot the selected nodes in parallel and wait for SSH to return on each. Reboots interrupt running work and can proceed without a reboot-required flag or health preflight.",
+        "Reboot the selected nodes and wait for SSH to return on each. Reboots interrupt running work and can proceed without a reboot-required flag or health preflight.",
         "System", SYSTEM_REBOOT, "high", "confirm", "reboot.yml", "fa-power-off",
+        supports_batch_size=True,
     ),
     OperationDefinition(
         "storage.inspect", "Check storage",

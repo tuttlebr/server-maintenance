@@ -69,6 +69,7 @@ def list_operations(db: Session = Depends(get_db), user: str = Depends(get_curre
                 risk=operation.risk,
                 confirmation=operation.confirmation,
                 icon=operation.icon,
+                supports_batch_size=operation.supports_batch_size,
                 eligible_device_ids=eligible,
                 eligible_count=len(eligible),
                 excluded_devices=excluded,
@@ -89,6 +90,8 @@ async def run_operation(
         raise HTTPException(status_code=404, detail="Operation not found")
     if payload.discovery_subnet and operation.id != SYSTEM_IP_CHECK:
         raise HTTPException(status_code=400, detail="A discovery subnet is only supported by Find current IP")
+    if payload.batch_size is not None and not operation.supports_batch_size:
+        raise HTTPException(status_code=400, detail=f"{operation.label} does not support a batch size")
 
     devices = db.query(Device).filter(Device.id.in_(payload.device_ids)).order_by(Device.hostname).all()
     if len(devices) != len(payload.device_ids):
@@ -104,6 +107,7 @@ async def run_operation(
             same_subnet = operation.id != SYSTEM_IP_CHECK or (previous_vars.get("ip_discovery_subnet") or "") == (payload.discovery_subnet or "")
             if (previous.playbook != (operation.playbook or operation.id) or
                     set((previous.target_hosts or "").split(",")) != {d.hostname for d in devices} or
+                    previous_vars.get("maintenance_batch_size") != payload.batch_size or
                     previous.triggered_by != user or not same_preview or not same_subnet):
                 raise HTTPException(status_code=409, detail="Request key already used for a different operation")
             return {"job_id": previous.job_id, "detail": "Operation already accepted"}
@@ -119,17 +123,19 @@ async def run_operation(
     if operation.id == REACHY_DAEMON_RESTART:
         return _start_reachy_remote_jobs(db, devices, user, operation.id, operation.label, payload.request_key)
 
-    extra_vars = None
+    extra_vars = {}
     if operation.id == "system.update":
-        extra_vars = {"fleet_approved_package_plans": _approved_package_plans(db, payload.preview_job_id, devices)}
+        extra_vars["fleet_approved_package_plans"] = _approved_package_plans(db, payload.preview_job_id, devices)
     elif operation.id == SYSTEM_IP_CHECK:
-        extra_vars = {"ip_discovery_subnet": payload.discovery_subnet or ""}
+        extra_vars["ip_discovery_subnet"] = payload.discovery_subnet or ""
+    if payload.batch_size is not None:
+        extra_vars["maintenance_batch_size"] = payload.batch_size
 
     job_id = await run_playbook(
         db=db,
         playbook=operation.playbook or "",
         hosts=[device.hostname for device in devices],
-        extra_vars=extra_vars,
+        extra_vars=extra_vars or None,
         triggered_by=user,
         request_key=payload.request_key,
     )

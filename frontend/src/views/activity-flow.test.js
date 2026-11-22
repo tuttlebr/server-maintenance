@@ -6,6 +6,11 @@ import {element, renderer, text, find, flush, compileView} from '../../test-supp
 const {default: Activity} = await import(await compileView(new URL('./JobHistory.vue', import.meta.url)));
 
 async function mount(t, {status = 'running', query = {job:'job'}, intercept} = {}) {
+  for (const [key, value] of Object.entries({Document:class {}, ShadowRoot:class {}, document:{activeElement:null}})) {
+    const original = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, {configurable:true, value});
+    t.after(() => original ? Object.defineProperty(globalThis, key, original) : delete globalThis[key]);
+  }
   const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   Object.defineProperty(globalThis, 'localStorage', {configurable:true, value:{getItem:()=> 'test'}});
@@ -92,4 +97,30 @@ test('a late cancellation response cannot replace the selected job details', asy
   assert.equal(view.router.currentRoute.value.query.job, 'other');
   assert.match(text(view.root), /Selected job evidence/);
   assert.equal(view.calls.filter(url => url.endsWith('/cancel')).length, 1);
+});
+
+test('Activity searches all history by device and time, resets the page, and looks ahead for more jobs', async t => {
+  const view = await mount(t, {query:{page:'2', period:'24h'}, intercept:(url) => {
+    if (!url.startsWith('/api/v2/jobs?')) return;
+    const params = new URL(url, 'http://test').searchParams;
+    const count = params.has('target') ? 50 : 51;
+    const jobs = Array.from({length:count}, (_, index) => ({
+      job_id:`job-${index}`, playbook:'reboot.yml', status:'success', target_devices:'gpu_2',
+      created_at:new Date().toISOString(),
+    }));
+    return new Response(JSON.stringify(jobs));
+  }});
+  const next = () => find(view.root, node => node.tag === 'button' && text(node) === 'Next');
+  assert.equal(next().props.disabled, false);
+  const search = find(view.root, node => node.props.id === 'activity-target');
+  search.props['onUpdate:modelValue']('gpu_2');
+  const form = find(view.root, node => node.tag === 'form');
+  await form.props.onSubmit({preventDefault() {}});
+  await flush();
+  const params = new URL(view.calls.at(-1), 'http://test').searchParams;
+  assert.equal(params.get('target'), 'gpu_2');
+  assert.equal(params.get('period'), '24h');
+  assert.equal(params.get('offset'), '0');
+  assert.equal(params.get('limit'), '51');
+  assert.equal(next().props.disabled, true);
 });

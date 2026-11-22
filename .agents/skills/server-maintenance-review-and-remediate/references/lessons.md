@@ -150,5 +150,14 @@ Recheck their applicability before using them.
   scans with successful and unreachable devices, confirming applicability. No
   live Fleet Help answer or index refresh was performed; existing documents are
   unchanged until refreshed.
+- Multi-stage runs can contain several `PLAY RECAP` sections. Use the requested
+  action's output for the saved recap after successful preflight. For follow-up
+  discovery, validate the scan exit and each host's recap before applying
+  artifacts. A file can exist even if a later task failed. Cover a failure in
+  an early rolling batch, an omitted host, and a timeout despite a green recap.
+  Isolated regressions in `tests/test_operation_reliability.py` and
+  `tests/test_automatic_verification.py` verify the saved recap, inventory facts,
+  per-device outcomes, and recovery flags. Recheck if the runner starts
+  persisting separate per-stage events or Ansible changes its recap format.
 - **Invalidate when:** per-device result schemas, snapshot ownership, or historical
   job compatibility change.

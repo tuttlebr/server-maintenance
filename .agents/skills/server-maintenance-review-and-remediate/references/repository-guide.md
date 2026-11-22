@@ -20,7 +20,7 @@ CI on every review; update it when ownership or commands move.
 | NAT and ingestion | `nat/config.yml`, `nat/prepare_config.py`, `nat/fleet_rag/register.py`, `nat/ingest.py`, `nat/embedding_response.py`, `tools/dgx-doc-ingester/src/main.rs` | Cross-language embedding contracts, image packaging and index rebuild behavior |
 | Delivery and SSH | `docker-compose.yml`, `Dockerfile`, `nat/Dockerfile`, `ssh-agent-proxy/`, `scripts/start.sh`, `scripts/enroll_hosts.py` | Dedicated agent, strict host trust, secrets, volumes and running-image drift |
 
-The current service has seven maintenance actions plus device scanning, IP discovery, and
+The current service has eight maintenance actions plus device scanning, IP discovery, and
 bulk user management. Service operations treat devices as standalone; legacy CLI
 Kubernetes workflows still exist. Confirm the current catalog in
 `backend/routers/operations.py` rather than reviving requirements from old reviews.
@@ -34,6 +34,18 @@ Ansible authenticates with existing credentials. A successful recap also needs
 a verified `host_ip` artifact. Inventory, facts, and recovery flags stay unchanged.
 Trace the operation catalog, request schema, runner, report allowlist, Operations
 and Activity components, and Docker's Nmap dependency together.
+
+The standalone readiness operation `system.assess` runs `host_readiness.yml` on
+selected SSH nodes. The CLI's `maintenance_assessment.yml` includes separate
+legacy checks. Verify the four observations in the `host_readiness` artifact
+and its display in Operations and Activity. A completed observation can contain
+findings or unavailable readings. It leaves recovery flags intact.
+
+For UI apt installs and reboots, the catalog advertises `supports_batch_size`.
+The optional integer `batch_size` becomes Ansible's `maintenance_batch_size`.
+The parallel default and the exact-host package approval still apply. Check the
+route's replay comparison, job fingerprint, actual play headers, and per-host
+failure results. Activity filters target and period in SQL before pagination.
 
 SQL activity and full job logs are authoritative; Milvus is derived retrieval.
 `/api/v2/jobs/{job_id}/progress` deliberately avoids full logs and artifacts.

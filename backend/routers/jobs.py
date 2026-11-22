@@ -1,7 +1,8 @@
 import asyncio
 import codecs
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -31,6 +32,8 @@ def list_jobs(
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     user: str = Depends(get_current_user),
+    target: Annotated[str | None, Query(max_length=253)] = None,
+    period: Literal["24h", "7d"] | None = None,
 ):
     query = _summary_query(db)
     if status == "active":
@@ -41,6 +44,15 @@ def list_jobs(
         query = query.filter(Job.status == status)
     if playbook:
         query = query.filter(Job.playbook == playbook)
+    if target and target.strip():
+        # Inventory names cannot contain the delimiter used in historical target lists.
+        if "," in target:
+            return []
+        query = query.filter(Job.target_hosts.icontains(target.strip(), autoescape=True))
+    if period:
+        now = datetime.now(timezone.utc)
+        window = timedelta(days=7 if period == "7d" else 1)
+        query = query.filter(Job.created_at.between(now - window, now))
     return query.order_by(Job.created_at.desc(), Job.id.desc()).offset(offset).limit(limit).all()
 
 

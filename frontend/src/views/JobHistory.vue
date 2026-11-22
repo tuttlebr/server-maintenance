@@ -19,11 +19,18 @@
       </div>
     </div>
 
-    <div class="activity-filters"><label>Operation<select v-model="filterPlaybook" class="form-select"><option value="">All operations</option><option v-for="playbook in operationOptions" :key="playbook" :value="playbook">{{ operationLabel(playbook) }}</option></select></label><label>Device in loaded jobs<input v-model="filterTarget" type="search" class="form-input" placeholder="Inventory name" /></label><label>Created within<select v-model="filterPeriod" class="form-select"><option value="">Any time</option><option value="24h">24 hours</option><option value="7d">7 days</option></select></label></div>
-    <p class="activity-coverage">{{ loading ? 'Refreshing activity…' : `Page ${page + 1}: ${visibleJobs.length} visible jobs` }}. <span v-if="filterStatus === 'adverse'">Each page loads up to 50 adverse jobs. </span>Device and time filters apply to this loaded page. <router-link to="/">Back to Overview</router-link></p>
+    <div class="activity-filters">
+      <label>Operation<select v-model="filterPlaybook" class="form-select"><option value="">All operations</option><option v-for="playbook in operationOptions" :key="playbook" :value="playbook">{{ operationLabel(playbook) }}</option></select></label>
+      <form class="device-filter" role="search" @submit.prevent="filterTarget = targetDraft.trim()">
+        <label for="activity-target">Device</label>
+        <div><input id="activity-target" v-model="targetDraft" type="search" class="form-input" maxlength="253" placeholder="All or part of an inventory name" /><button class="btn btn-ghost btn-sm" type="submit">Search</button></div>
+      </form>
+      <label>Created within<select v-model="filterPeriod" class="form-select"><option value="">Any time</option><option value="24h">24 hours</option><option value="7d">7 days</option></select></label>
+    </div>
+    <p class="activity-coverage">{{ loading ? 'Refreshing activity…' : `Page ${page + 1} · ${jobs.length} ${jobs.length === 1 ? 'job' : 'jobs'}` }} <span v-if="filterStatus === 'adverse'">· Up to 50 adverse jobs per page</span></p>
     <p v-if="loadError" class="callout callout-warn" role="status">Activity could not be refreshed. {{ jobs.length ? 'Showing the last loaded jobs.' : 'Job history is unavailable.' }}</p>
     <p v-if="detailError" class="callout callout-danger" role="alert">The selected job could not be loaded. <button class="btn btn-ghost btn-sm" @click="showJob(route.query.job)">Retry job</button></p>
-    <div v-if="visibleJobs.length" class="table-wrapper">
+    <div v-if="jobs.length" class="table-wrapper">
       <table>
         <thead>
           <tr>
@@ -37,12 +44,12 @@
           </tr>
         </thead>
         <tbody>
-          <template v-for="job in visibleJobs" :key="job.job_id">
+          <template v-for="job in jobs" :key="job.job_id">
             <tr style="cursor: pointer" @click="toggleExpand(job.job_id)">
               <td><strong>{{ operationLabel(job.playbook) }}</strong></td>
               <td>{{ formatTargetList(job.target_devices) }}</td>
               <td><StatusBadge :status="job.status" /></td>
-              <td>{{ job.duration_seconds ? job.duration_seconds + 's' : '--' }}</td>
+              <td>{{ job.duration_seconds != null ? job.duration_seconds + 's' : '--' }}</td>
               <td>{{ job.triggered_by }}</td>
               <td>{{ formatTime(job.created_at) }}</td>
               <td>
@@ -71,8 +78,9 @@
                   <DiscoveryResults :reports="expandedJob?.result_artifacts || []" />
                   <HostIpResults :reports="expandedJob?.result_artifacts || []" />
                   <StorageResults :reports="expandedJob?.result_artifacts || []" />
-                  <section v-if="expandedJob?.result_artifacts?.some(result => !['execution','storage','discovery','host_ip'].includes(result.report_type))" class="result-grid" aria-label="Structured operation results">
-                    <article v-for="result in expandedJob.result_artifacts.filter(item => !['execution','storage','discovery','host_ip'].includes(item.report_type))" :key="`${result.report_type}-${result.hostname}`" class="result-card">
+                  <ReadinessResults :reports="expandedJob?.result_artifacts || []" />
+                  <section v-if="expandedJob?.result_artifacts?.some(result => !['execution','storage','discovery','host_ip','host_readiness'].includes(result.report_type))" class="result-grid" aria-label="Structured operation results">
+                    <article v-for="result in expandedJob.result_artifacts.filter(item => !['execution','storage','discovery','host_ip','host_readiness'].includes(item.report_type))" :key="`${result.report_type}-${result.hostname}`" class="result-card">
                       <div class="result-heading">
                         <span>{{ resultTitle(result.report_type) }}</span>
                         <strong>{{ result.hostname }}</strong>
@@ -97,6 +105,7 @@
                       </template>
                     </article>
                   </section>
+                  <p v-if="recordedBatchSize" class="job-vars">Requested rolling batch size: {{ recordedBatchSize }} {{ recordedBatchSize === 1 ? 'node' : 'nodes' }}.</p>
                   <div v-if="job.extra_vars" class="job-vars">
                     <strong>Parameters:</strong> {{ job.extra_vars }}
                   </div>
@@ -152,7 +161,8 @@
     <div v-else-if="!loading && !loadError" class="empty-state">
       <i class="fas fa-list-check" aria-hidden="true"></i>
       <p>No activity found</p>
-      <router-link to="/" class="btn btn-primary btn-sm" style="display: inline-flex; margin-top: var(--space-sm)">
+      <router-link v-if="filterTarget || filterStatus || filterPlaybook || filterPeriod" to="/activity" class="btn btn-ghost btn-sm">Clear filters</router-link>
+      <router-link v-else to="/overview" class="btn btn-primary btn-sm" style="display: inline-flex; margin-top: var(--space-sm)">
         <i class="fas fa-home" aria-hidden="true"></i> Back to overview
       </router-link>
     </div>
@@ -165,6 +175,7 @@ import DiscoveryResults from '../components/DiscoveryResults.vue';
 import StorageResults from "../components/StorageResults.vue";
 import {visibleStorageOutcomes} from "../utils/storage.js";
 import InspectionResults from "../components/InspectionResults.vue";
+import ReadinessResults from "../components/ReadinessResults.vue";
 import PackageResults from "../components/PackageResults.vue";
 import { ref, watch, onMounted, onUnmounted, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -174,8 +185,7 @@ import { ACTIVE } from "../utils/maintenance.js";
 import StatusBadge from "../components/StatusBadge.vue";
 import { formatTargetList, operationLabel, OPERATION_LABELS } from "../utils/devices.js";
 import HostIpResults from "../components/HostIpResults.vue";
-import { targetNames } from "../utils/fleetOverview.js";
-import { formatLongTime, ageInMs } from "../utils/time.js";
+import { formatLongTime } from "../utils/time.js";
 
 const jobs = ref([]);
 const cancelling = ref(false);
@@ -211,18 +221,20 @@ const loading = ref(true), loadError = ref(null), detailError = ref(null), hasNe
 let loadSequence = 0;
 function routeFilter(key) { return computed({ get: () => String(route.query[key] || ''), set: value => router.replace({ query: { ...route.query, [key]: value || undefined, page: undefined, job: undefined } }) }); }
 const filterStatus = routeFilter('status'), filterPlaybook = routeFilter('playbook'), filterTarget = routeFilter('target'), filterPeriod = routeFilter('period');
+const targetDraft = ref(filterTarget.value);
+watch(filterTarget, value => { targetDraft.value = value; });
 const page = computed(() => Math.max(0, Math.min(100000, Number.parseInt(route.query.page, 10) || 0)));
 function setPage(value) { router.replace({ query: { ...route.query, page: value || undefined, job: undefined } }); }
 const operationOptions = computed(() => [...new Set([...Object.keys(OPERATION_LABELS), ...jobs.value.map(job => job.playbook), filterPlaybook.value].filter(Boolean))].sort((a,b) => operationLabel(a).localeCompare(operationLabel(b))));
-const visibleJobs = computed(() => jobs.value.filter(job => {
-  if (job.job_id === expanded.value) return true;
-  const target = !filterTarget.value || targetNames(job).some(name => name.toLowerCase().includes(filterTarget.value.toLowerCase()));
-  const windowMs = ({ '24h': 86400000, '7d': 604800000 })[filterPeriod.value];
-  const age = ageInMs(job.created_at);
-  return target && (!windowMs || (age !== null && age >= 0 && age <= windowMs));
-}));
 const expanded = ref(null);
 const expandedJob = ref(null);
+const recordedBatchSize = computed(() => {
+  if (!['system_update.yml', 'reboot.yml'].includes(expandedJob.value?.playbook)) return null;
+  try {
+    const size = JSON.parse(expandedJob.value.extra_vars || '{}')?.maintenance_batch_size;
+    return Number.isInteger(size) && size > 0 ? size : null;
+  } catch { return null; }
+});
 const liveOutput = ref("");
 const streaming = ref(false);
 // Template refs inside v-for are arrays, even with only one expanded job.
@@ -273,13 +285,17 @@ async function load() {
   const sequence = ++loadSequence;
   loading.value = true;
   try {
-    const params = { limit: 50, offset: page.value * 50 };
+    const pageSize = 50;
+    const params = { limit: pageSize + 1, offset: page.value * pageSize };
     if (filterPlaybook.value) params.playbook = filterPlaybook.value;
     if (filterStatus.value) params.status = filterStatus.value;
-    const rows = await getJobs(params), more = rows.length === 50;
+    if (filterTarget.value) params.target = filterTarget.value;
+    if (filterPeriod.value) params.period = filterPeriod.value;
+    const matches = await getJobs(params);
     if (sequence !== loadSequence) return;
+    const rows = matches.slice(0, pageSize);
     if (expandedJob.value && !rows.some(job => job.job_id === expanded.value)) rows.unshift(expandedJob.value);
-    jobs.value = rows; hasNextPage.value = more; loadError.value = null;
+    jobs.value = rows; hasNextPage.value = matches.length > pageSize; loadError.value = null;
   } catch (error) { if (sequence === loadSequence) loadError.value = error; }
   finally { if (sequence === loadSequence) loading.value = false; }
 }
@@ -416,13 +432,16 @@ async function refreshActivity() {
   }
 }
 onUnmounted(() => { disposed = true; loadSequence++; stopStream(); clearTimeout(refreshTimer); });
-watch(() => [filterStatus.value, filterPlaybook.value, page.value], load);
+watch([filterStatus, filterPlaybook, filterTarget, filterPeriod, page], load);
 watch(() => route.query.job, showJob);
 onMounted(async () => { await load(); if (disposed) return; await showJob(route.query.job); if (!disposed) refreshTimer = setTimeout(refreshActivity, 5000); });
 </script>
 
 <style scoped>
 .technical-output { margin-top:20px; }.technical-output > summary { cursor:pointer; font-size:13px; padding:10px 0; }
+.device-filter { display: grid; align-content: start; gap: 5px; flex: 2; min-width: min(100%, 260px); }
+.device-filter > div { display: flex; gap: 6px; }
+.device-filter input { min-width: 0; flex: 1; }
 .activity-filters { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }.activity-filters label { display: grid; gap: 5px; font-size: 12px; flex: 1; min-width: 180px; }.activity-coverage { color: var(--text-secondary); font-size: 12px; margin-bottom: 14px; }.activity-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 16px; margin-top: 16px; font-size: 13px; }
 
 .structured-text { white-space:pre-wrap; max-height:350px; overflow:auto; overflow-wrap:anywhere; }.service-results { max-height:350px; overflow:auto; }.outcomes { display:flex; flex-wrap:wrap; gap:8px 24px; }.job-detail {
