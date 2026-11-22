@@ -6,3 +6,5 @@
   tasks:
     - name: Verify host health
       ansible.builtin.include_tasks: tasks/verify_host_health.yml
+      vars:
+        fleet_allow_spark_splash_wait: true

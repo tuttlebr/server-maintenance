@@ -58,6 +58,28 @@
     - fleet_systemd_health.rc != 0 or fleet_systemd_health.stdout | trim != 'running'
 
 - name: Require healthy system services
+  vars:
+    pending_jobs: "{{ fleet_systemd_jobs.stdout_lines | default([]) | map('trim') | reject('equalto', '') | list }}"
+    splash_job: '^[0-9]+\s+plymouth-quit-wait\.service\s+start\s+running$'
+    splash_dependents:
+      - getty.target
+      - multi-user.target
+      - system-getty.slice
+      - serial-getty@ttyS0.service
+      - systemd-update-utmp-runlevel.service
+      - graphical.target
+      - setvtrgb.service
+    waiting_job: '^[0-9]+\s+({{ splash_dependents | map("regex_escape") | join("|") }})\s+start\s+waiting$'
+    spark_splash_wait: >-
+      {{
+        fleet_allow_spark_splash_wait | default(false) | bool
+        and 'dgx_spark' in group_names
+        and fleet_systemd_health.rc == 1 and fleet_systemd_health.stdout | trim == 'starting'
+        and fleet_failed_units.stdout | trim == ''
+        and fleet_systemd_jobs.rc | default(-1) == 0
+        and pending_jobs | select('match', splash_job) | list | length == 1
+        and pending_jobs | reject('match', splash_job) | reject('match', waiting_job) | list | length == 0
+      }}
   ansible.builtin.assert:
     that:
       - fleet_failed_units.rc == 0
@@ -66,6 +88,10 @@
         (fleet_systemd_health.rc == 0 and fleet_systemd_health.stdout | trim == 'running')
         or (fleet_systemd_health.rc == 1 and fleet_systemd_health.stdout | trim == 'degraded'
         and fleet_ignored_failed_unit_names | length > 0)
+        or spark_splash_wait | bool
+    success_msg: >-
+      {{ 'DGX Spark boot splash is still active. Only the Plymouth wait and its expected boot jobs are pending. Continuing SSH health checks.'
+         if spark_splash_wait | bool else 'All assertions passed' }}
     fail_msg: |-
       System services need recovery.
       System state: {{ fleet_systemd_health.stdout | trim | default('unknown', true) }} (rc={{ fleet_systemd_health.rc }}).

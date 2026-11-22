@@ -8,7 +8,7 @@ The automatic check treats all devices as standalone hosts and checks mounts, sy
 
 Existing inventory metadata does not change this policy. A failed or incomplete follow-up scan keeps the affected device unverified and cannot clear its recovery requirement, even if a scan report was written before the failure. Facts scans inspect local membership files for inventory only; they do not query a cluster API.
 
-SSH access alone does not establish that boot has completed. The systemd check requires `running` (rc=0), or `degraded` (rc=1) when every failed unit is explicitly ignored as non-critical. By default, only `motd-news.service` is ignored. The job reports ignored failures without resetting, disabling, or masking services. All other failed units, state or failed-unit query errors, unexplained degradation, and states such as `starting` or `maintenance` keep recovery blocked.
+The systemd check accepts `running` (rc=0), or `degraded` (rc=1) when every failed unit is explicitly ignored as non-critical. By default, only `motd-news.service` is ignored. The job reports ignored failures without resetting, disabling, or masking services. Other failed units, failed state queries, and unexplained degradation block recovery. The DGX Spark boot splash described below is the only accepted `starting` state.
 
 Set `fleet_systemd_ignored_units` in inventory/group/host variables to replace the default list of exact unit names. Set it to `[]` to require zero failed units. An ignored MOTD failure cannot hide another service failure or an incomplete boot.
 
@@ -18,7 +18,11 @@ When this check fails, the job output includes the system state, command return 
 
 ## DGX Spark waiting for the boot splash
 
-On the two Sparks inspected during this failure, systemd reported `starting` with zero failed units. `plymouth-quit-wait.service` remained in `activating` state. Its pending start job held up `multi-user.target` and other boot jobs, although SSH and the display manager were active.
+Plymouth draws the boot splash on the local display. On an SSH-managed DGX Spark, the splash can stay active and keep systemd in `starting` after remote services are available.
+
+Fleet's standalone recovery check recognizes this case on hosts in the discovered `dgx_spark` inventory group. It requires zero failed units, a successful job query, and `plymouth-quit-wait.service` as the only running job. Fleet accepts pending starts for the boot targets (`getty.target`, `multi-user.target`, `graphical.target`) and their observed console and runlevel units (`system-getty.slice`, `serial-getty@ttyS0.service`, `setvtrgb.service`, `systemd-update-utmp-runlevel.service`). Each must be waiting. Any other job blocks recovery.
+
+Fleet logs the splash wait and continues the package and GPU checks. This check is read-only. Legacy Kubernetes resume checks still require the usual systemd health state.
 
 Check the affected host over SSH:
 
@@ -29,7 +33,7 @@ systemctl list-jobs --no-pager
 systemctl status plymouth-quit-wait.service --no-pager
 ```
 
-If these checks confirm the same stalled Plymouth wait, end the boot splash:
+To end the current splash manually and let systemd finish booting:
 
 ```bash
 sudo /usr/bin/plymouth quit
@@ -37,7 +41,7 @@ systemctl is-system-running
 systemctl list-jobs --no-pager
 ```
 
-This is the command used by the installed `plymouth-quit.service`. It ends the current splash process without disabling services or changing future boot configuration. Allow pending jobs to finish, then retry the intended operation; its health check runs automatically.
+The installed `plymouth-quit.service` uses the same command. It ends the splash for the current boot.
 
 If the system remains in `starting`, inspect the remaining jobs. If it reports `degraded`, inspect the failed units. A recurring Plymouth wait needs separate investigation of the boot and display-manager configuration.
 
