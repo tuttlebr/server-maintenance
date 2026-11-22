@@ -2,7 +2,7 @@
 - name: Firmware Update
   hosts: managed_hosts
   become: true
-  serial: "{{ maintenance_batch_size | default(1) }}"
+  serial: "{{ maintenance_batch_size | default('100%') }}"
   gather_facts: true
   vars:
     firmware_mode: inventory

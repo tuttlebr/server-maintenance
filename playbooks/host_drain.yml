@@ -3,7 +3,7 @@
   hosts: managed_hosts
   become: true
   gather_facts: true
-  serial: "{{ maintenance_batch_size | default(1) }}"
+  serial: "{{ maintenance_batch_size | default('100%') }}"
   vars:
     drain_action: status
   tasks:

@@ -65,14 +65,15 @@ m.exit_json(changed=True, rebooted=m.params['result'] != 'not_rebooted', elapsed
     output = run.stdout + run.stderr
     assert run.returncode == (0 if result == 'success' else 2), output
     recorded = [json.loads(line) for line in calls.read_text().splitlines()]
-    assert recorded[0]['node'] == 'node-one'
-    assert recorded[0]['pre_reboot_delay'] == 0
-    report = tmp_path / 'reports/job/reboot_node-one.json'
-    if result == 'success':
-        assert [call['node'] for call in recorded] == ['node-one', 'node-two']
-        assert json.loads(report.read_text()) == {
-            'schema_version': 1, 'report_type': 'reboot', 'hostname': 'node-one',
-            'rebooted': True, 'elapsed_seconds': 45,
-        }
-    else:
-        assert not report.exists()
+    assert sorted(call['node'] for call in recorded) == ['node-one', 'node-two']
+    for call in recorded:
+        node = call['node']
+        assert call['pre_reboot_delay'] == 0
+        report = tmp_path / 'reports/job' / f'reboot_{node}.json'
+        if result == 'success':
+            assert json.loads(report.read_text()) == {
+                'schema_version': 1, 'report_type': 'reboot', 'hostname': node,
+                'rebooted': True, 'elapsed_seconds': 45,
+            }
+        else:
+            assert not report.exists()

@@ -249,11 +249,12 @@ def _run_playbook_streaming(
         "ANSIBLE_HOST_KEY_CHECKING": "True",
         "ANSIBLE_FORCE_COLOR": "0",
         "ANSIBLE_NOCOLOR": "1",
-        "ANSIBLE_FORKS": str(settings.ansible_forks),
         "PYTHONUNBUFFERED": "1",
         "PATH": "/usr/local/bin:/usr/bin:/bin",
         "HOME": str(Path.home()),
     }
+    if settings.ansible_forks is not None:
+        env_vars["ANSIBLE_FORKS"] = str(settings.ansible_forks)
     if os.environ.get("SSH_AUTH_SOCK"):
         env_vars["SSH_AUTH_SOCK"] = os.environ["SSH_AUTH_SOCK"]
     if os.environ.get("KUBECONFIG"):

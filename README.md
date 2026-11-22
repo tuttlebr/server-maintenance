@@ -8,7 +8,7 @@ Fleet maintenance focused on seven operations: check storage, inspect GPU usage,
 - **Storage checks:** capacity of the filesystem containing `/home` and each `/etc/fstab` mount. Missing, inaccessible, optional, manual, and pending automount entries remain visible. Swap is excluded; checks do not mount filesystems or scan directory trees.
 - **GPU checks:** NVIDIA GPU utilization and memory, process names, PIDs, effective Linux owners, and available Docker/containerd pod context. Unsupported metrics remain unavailable.
 - **APT checks:** refresh package lists and show exact candidate versions on Debian and Ubuntu, without requiring Python APT bindings.
-- **Reviewed installs:** one confirmation, exact package versions, a 30-minute check validity window, rolling execution, and no automatic reboots or package removals.
+- **Reviewed installs:** one confirmation, exact package versions, a 30-minute check validity window, parallel host execution, and no automatic reboots or package removals.
 - **Container cache cleanup:** unused Docker images and build cache, plus unused images in containerd namespaces through nerdctl. Containers, volumes, and networks are retained. BuildKit cache is cleared when available; skipped components are reported.
 - **Clear failures:** individual device errors, persistent activity, safe request retries, and automatic health checks when a previous change may be incomplete.
 - **Device inventory and Fleet Help:** connection management, discovery, documentation, and recorded job history remain available.
@@ -363,7 +363,7 @@ Startup validates the admin password, JWT signing key, and host-encryption key.
 | `CORS_ORIGINS` | dev localhost origins | Comma-separated list of allowed browser origins |
 | `ANSIBLE_JOB_TIMEOUT_SECONDS` | `3600` | Maximum runtime for one queued Ansible job |
 | `ANSIBLE_MAX_CONCURRENT_JOBS` | `4` | Maximum concurrent Ansible jobs |
-| `ANSIBLE_FORKS` | `10` | Maximum hosts Ansible may operate on concurrently inside one fleet-scoped job; playbook `serial` still takes precedence |
+| `ANSIBLE_FORKS` | Ansible default (`5`) | Optional worker limit per Ansible job. When unset, Ansible reads `forks` from `ansible.cfg` or uses its own default. |
 | `AUTOMATIC_SCAN_ENABLED` | `true` | Schedule read-only device scans hourly; checks for due, idle devices at startup and every minute |
 | `AI_HELPER_API_KEY` | empty | Provider-issued credential for Fleet Help; see secret setup above |
 | `AI_HELPER_MODEL` | `aws/anthropic/bedrock-claude-sonnet-4-6` | Chat model API ID in `.env.example` |
@@ -475,7 +475,7 @@ A selection is never silently reduced to eligible devices. The page explains blo
 
 Cache cleanup targets the privileged system runtime connections on the device. It enumerates containerd namespaces instead of assuming only `k8s.io`, and leaves Docker's `moby` namespace to Docker. BuildKit availability and every skipped or failed runtime are visible in the result. It never prunes containers, volumes, or networks.
 
-**Reboot nodes** requires current discovery facts and restarts the selected nodes, one at a time, after one confirmation. It requires no reboot-required flag, package preview, preflight health check, or Kubernetes drain. It remains available when a previous operation needs recovery, while respecting active device reservations. Fleet waits for a new boot and SSH access, then refreshes device details. A failed return is reported as an incomplete change. Existing host-health issues are checked automatically before later installs or cleanup. The CLI `reboot.yml` playbook uses the same unconditional behavior.
+**Reboot nodes** requires current discovery facts and restarts the selected nodes in parallel after one confirmation. Multiple nodes can be offline at the same time. It requires no reboot-required flag, package preview, preflight health check, or Kubernetes drain. It remains available when a previous operation needs recovery, while respecting active device reservations. Fleet waits for a new boot and SSH access, then refreshes device details. A failed return is reported as an incomplete change. Existing host-health issues are checked automatically before later installs or cleanup. The CLI `reboot.yml` playbook uses the same unconditional behavior.
 
 A rejected package plan before any mutation is a failed attempt, not a recovery lock. Interrupted or unverified changes trigger automatic health checks before the next install or cleanup; there is no separate Verify step. Network retries reuse a request key, so reconnecting cannot launch the same accepted action twice.
 
@@ -563,7 +563,7 @@ docker compose up -d --build --force-recreate web
 
 The controller identity needs enough RBAC to list nodes and pods, patch node schedulability, and create pod evictions. A host matches a Kubernetes node by the optional `kubernetes_node_name` host variable, then by inventory name, `ansible_host`, discovered hostname/FQDN, or primary IP. Set `kubernetes_context` per host or group when one controller kubeconfig contains multiple clusters. If local kubelet, K3s, RKE2, or MicroK8s files indicate membership but the selected context has no matching node, disruptive work stops instead of treating the host as standalone.
 
-These legacy disruptive playbooks run one host at a time by default. A matching node is drained before maintenance and returned to its original scheduling state afterward. A node that was already cordoned stays cordoned. Hosts that do not match a node continue normally. If the Kubernetes API cannot be checked, disruptive work fails closed.
+These legacy maintenance playbooks run each task across the selected hosts in parallel. Set `-e maintenance_batch_size=1` for rolling maintenance. A matching node is drained before maintenance and returned to its original scheduling state afterward. A node that was already cordoned stays cordoned. Hosts that do not match a node continue normally. If the Kubernetes API cannot be checked, disruptive work fails closed.
 
 Normal drains use the Eviction API, respect PodDisruptionBudgets, ignore DaemonSets, and refuse to delete `emptyDir` data. Allow `emptyDir` eviction for a planned operation explicitly:
 
@@ -590,7 +590,7 @@ ansible-playbook playbooks/host_drain.yml -e drain_action=drain
 ansible-playbook playbooks/host_drain.yml -e drain_action=resume
 ```
 
-The main controls are `maintenance_batch_size` (default `1`), `kubernetes_drain_timeout` (default `900` seconds), `kubernetes_delete_emptydir_data` (default `false`), `kubernetes_node_name`, `kubernetes_context`, and `kubernetes_kubeconfig`. Set `kubernetes_membership_required=false` only to dismiss stale local membership files on a confirmed standalone host. Direct CLI runs can pass `-e force=true` as an emergency bypass.
+The main controls are `maintenance_batch_size` (default `100%`), `kubernetes_drain_timeout` (default `900` seconds), `kubernetes_delete_emptydir_data` (default `false`), `kubernetes_node_name`, `kubernetes_context`, and `kubernetes_kubeconfig`. Set `kubernetes_membership_required=false` only to dismiss stale local membership files on a confirmed standalone host. Direct CLI runs can pass `-e force=true` as an emergency bypass.
 
 ## Fleet Documentation Ingestion
 
@@ -750,7 +750,7 @@ server-maintenance/
 │   ├── manage_groups.yml       # Create system groups
 │   ├── admin_setup.yml         # Single admin sudo setup
 │   ├── host_bootstrap.yml      # Groups, admin, Docker/toolkit, scan
-│   ├── system_update.yml       # Focused rolling package updates
+│   ├── system_update.yml       # Install reviewed package updates
 │   ├── maintenance_assessment.yml # Preflight and health assessment
 │   ├── docker_cleanup.yml      # Docker/containerd image and cache cleanup
 │   ├── preflight_check.yml     # Read-only maintenance readiness checks

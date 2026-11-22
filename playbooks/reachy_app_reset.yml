@@ -3,7 +3,7 @@
   hosts: reachy_ssh
   become: true
   gather_facts: false
-  serial: 1
+  serial: "{{ maintenance_batch_size | default('100%') }}"
   vars:
     reachy_apps_venv_path: /venvs/apps_venv
   tasks:

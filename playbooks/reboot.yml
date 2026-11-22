@@ -3,7 +3,7 @@
   hosts: managed_hosts
   become: true
   gather_facts: false
-  serial: "{{ maintenance_batch_size | default(1) }}"
+  serial: "{{ maintenance_batch_size | default('100%') }}"
   tasks:
     - name: Record that reboot is about to begin
       ansible.builtin.include_tasks: tasks/save_operation_report.yml

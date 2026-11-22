@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     inventory_file: Path | None = None
     ansible_job_timeout_seconds: int = 3600
     ansible_max_concurrent_jobs: int = 4
-    ansible_forks: int = 10
+    ansible_forks: int | None = None
     automatic_scan_enabled: bool = True
     ssh_known_hosts_file: Path = Path("/app/data/ssh/known_hosts")
     ssh_known_hosts_seed_file: Path | None = None
@@ -119,7 +119,7 @@ class Settings(BaseSettings):
             self.cors_origin_list
         except RuntimeError as exc:
             problems.append(str(exc))
-        if not 1 <= self.ansible_forks <= 100:
+        if self.ansible_forks is not None and not 1 <= self.ansible_forks <= 100:
             problems.append("ANSIBLE_FORKS must be between 1 and 100")
         if problems:
             raise RuntimeError("; ".join(problems))

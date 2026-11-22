@@ -2,7 +2,7 @@
 - name: NVIDIA Driver Upgrade (Rolling)
   hosts: nvidia_gpu
   become: true
-  serial: "{{ maintenance_batch_size | default(1) }}"
+  serial: "{{ maintenance_batch_size | default('100%') }}"
   gather_facts: true
   vars:
     upgrade_mode: standard

@@ -33,7 +33,8 @@
         ansible_connection: local
         ansible_python_interpreter: "{{ ansible_playbook_python }}"
       register: ip_check_discovery
-      throttle: 1
+      # Subnet discovery shares the controller's scan rate limit.
+      throttle: "{{ 1 if ip_discovery_subnet else 0 }}"
       changed_when: false
       check_mode: false
 

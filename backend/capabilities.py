@@ -133,7 +133,7 @@ OPERATIONS = (
     ),
     OperationDefinition(
         "system.update", "Install apt updates",
-        "Install the checked package versions, one device at a time. Services may restart; devices are never rebooted automatically.",
+        "Install the checked package versions across selected devices in parallel. Services may restart. Reboots are a separate action.",
         "Packages", SYSTEM_UPDATE, "high", "confirm", "system_update.yml", "fa-arrow-down",
     ),
     OperationDefinition(
@@ -143,7 +143,7 @@ OPERATIONS = (
     ),
     OperationDefinition(
         "system.reboot", "Reboot nodes",
-        "Reboot every selected node, one at a time, and wait for SSH to return. Running work is interrupted; no reboot-required flag or health preflight is needed.",
+        "Reboot the selected nodes in parallel and wait for SSH to return on each. Reboots interrupt running work and can proceed without a reboot-required flag or health preflight.",
         "System", SYSTEM_REBOOT, "high", "confirm", "reboot.yml", "fa-power-off",
     ),
     OperationDefinition(

@@ -2,7 +2,7 @@
 - name: Install Docker Engine and NVIDIA Container Toolkit
   hosts: managed_hosts
   become: true
-  serial: "{{ maintenance_batch_size | default(1) }}"
+  serial: "{{ maintenance_batch_size | default('100%') }}"
   vars:
     docker_group_users: []
   tasks:
