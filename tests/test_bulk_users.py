@@ -183,3 +183,60 @@ def test_inspection_accepts_explicit_devices_with_stale_facts(api):
     assert response.status_code==200,response.text
     assert runner.call_args.args[1]=='access_inspect.yml'
     assert runner.call_args.kwargs['hosts']==['one','two']
+
+
+@pytest.fixture
+def public_key():
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+    return Ed25519PrivateKey.generate().public_key().public_bytes(Encoding.OpenSSH, PublicFormat.OpenSSH).decode() + ' jane@example.com'
+
+
+def test_edit_credentials_only_request_and_redaction(api, public_key):
+    from backend.services.ansible_runner import redact_extra_vars
+    client, runner, _ = api
+    password = 'Temporary-password-123!'
+    response = client.put('/api/v2/users/bulk-update', json={
+        'device_ids': [1], 'users': [{'username': 'jane', 'password': password, 'public_key': public_key}],
+    })
+    assert response.status_code == 200, response.text
+    kwargs = runner.call_args.kwargs
+    assert kwargs['extra_vars']['user_updates'][0]['password'] == password
+    assert kwargs['extra_vars']['user_updates'][0]['public_key'] == public_key
+    assert password not in redact_extra_vars(kwargs['extra_vars'])
+    assert 'password' not in kwargs['completion_action']['users'][0]
+
+
+def test_public_key_add_edit_and_csv(api, public_key):
+    client, runner, _ = api
+    for mode in ['add', 'edit']:
+        header = 'username,full_name,public_key' if mode == 'add' else 'username,public_key'
+        row = f'jane,Jane,{public_key}' if mode == 'add' else f'jane,{public_key}'
+        records = parse_csv(f'{header}\n{row}\n', mode)
+        assert records[0].public_key == public_key
+        payload = {'device_ids': [1], 'users': [record.model_dump(exclude_none=True) for record in records]}
+        response = client.post('/api/v2/users/bulk-add', json=payload) if mode == 'add' else client.put('/api/v2/users/bulk-update', json=payload)
+        assert response.status_code == 200, response.text
+        key = 'user_records' if mode == 'add' else 'user_updates'
+        assert runner.call_args.kwargs['extra_vars'][key][0]['public_key'] == public_key
+    shared = BulkUserUpdate(usernames=['jane'], public_key=public_key, device_ids=[1])
+    assert shared.updates[0].public_key == public_key
+
+
+@pytest.mark.parametrize('key', ['ssh-ed25519 not-a-key', 'https://example.com/key.pub',
+                                  '-----BEGIN PRIVATE KEY-----', 'ssh-rsa AAAA',
+                                  'ssh-ed25519 AAAA\nssh-ed25519 AAAA', '{{ lookup("pipe", "id") }}'])
+def test_invalid_public_key_never_queues_work(api, key):
+    client, runner, _ = api
+    for path, method, record in [('/bulk-add', client.post, {'full_name': 'Jane'}), ('/bulk-update', client.put, {})]:
+        response = method('/api/v2/users' + path, json={'device_ids': [1], 'users': [dict(username='jane', public_key=key, **record)]})
+        assert response.status_code == 422, response.text
+    runner.assert_not_awaited()
+
+
+@pytest.mark.parametrize('password', ['short', 'long-enough-{{bad}}', 'long-enough\npassword'])
+def test_invalid_edit_password_never_queues_work(api, password):
+    client, runner, _ = api
+    response = client.put('/api/v2/users/bulk-update', json={'device_ids': [1], 'users': [{'username': 'jane', 'password': password}]})
+    assert response.status_code == 422, response.text
+    runner.assert_not_awaited()

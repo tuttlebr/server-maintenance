@@ -1,12 +1,13 @@
 export const SHELLS = ['/bin/bash', '/bin/sh', '/bin/zsh', '/usr/bin/bash', '/usr/bin/zsh', '/usr/sbin/nologin', '/bin/false'];
-export const USER_FIELDS = ['username', 'full_name', 'email', 'groups', 'shell'];
+export const USER_FIELDS = ['username', 'full_name', 'email', 'groups', 'shell', 'public_key'];
 const linuxName = /^[a-z_][a-z0-9_-]{0,31}$/;
-export function blankUser(username = '') { return {username, full_name:'', email:'', groups:'', shell:'', grant_sudo:false}; }
+export function blankUser(username = '') { return {username, full_name:'', email:'', groups:'', shell:'', grant_sudo:false, public_key:'', password:''}; }
 export function validateUserRows(rows, mode) {
   const errors = [], users = [], seen = new Set();
   if (!rows.length || rows.length > 500) errors.push('Use between 1 and 500 users per operation.');
   rows.forEach((row, index) => {
     const user = Object.fromEntries(USER_FIELDS.map(key => [key, String(row[key] || '').trim()]).filter(([,value]) => value));
+    if (mode === 'edit' && row.password) user.password = row.password;
     if (row.grant_sudo === true) user.grant_sudo = true;
     if (user.email) user.email = user.email.toLowerCase();
     if (!user.username && mode === 'add' && user.email) user.username = user.email.split('@')[0];
@@ -22,14 +23,16 @@ export function validateUserRows(rows, mode) {
       user.groups = [...new Set(user.groups.split(',').map(s => s.trim()).filter(Boolean))].join(',');
       if (!user.groups || !user.groups.split(',').every(g => linuxName.test(g))) fail('Groups must be comma-separated Linux group names.');
     }
+    if (user.password && (user.password.length < 12 || user.password.length > 1024 || /[\x00-\x1f]/.test(user.password) || /{{|}}|{%|%}|{#|#}/.test(user.password))) fail('Password must contain 12 to 1024 characters without control characters or templates.');
+    if (user.public_key && !/^(ssh-(ed25519|rsa)|ecdsa-sha2-nistp(256|384|521)) [A-Za-z0-9+/]+={0,2}( [^\r\n]*)?$/.test(user.public_key)) fail('Enter one OpenSSH public key, not a private key.');
     if (user.shell && !SHELLS.includes(user.shell)) fail('Choose a supported login shell.');
-    if (mode === 'edit' && !['full_name','email','groups','shell','grant_sudo'].some(key => user[key])) fail('Enter at least one change. Blank fields keep their current value.');
+    if (mode === 'edit' && !['full_name','email','groups','shell','grant_sudo','public_key','password'].some(key => user[key])) fail('Enter at least one change. Blank fields keep their current value.');
     users.push(user);
   });
   return {users, errors};
 }
 export function csvTemplate(mode) {
-  return 'username,full_name,email,groups,shell,grant_sudo\n' + (mode === 'edit'
-    ? 'jane,,,"developers,docker",/bin/bash,\n'
-    : 'jane,Jane Example,jane@example.com,developers,/bin/bash,false\n');
+  return 'username,full_name,email,groups,shell,grant_sudo,public_key\n' + (mode === 'edit'
+    ? 'jane,,,"developers,docker",/bin/bash,,\n'
+    : 'jane,Jane Example,jane@example.com,developers,/bin/bash,false,\n');
 }

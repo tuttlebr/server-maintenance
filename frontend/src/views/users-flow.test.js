@@ -222,3 +222,34 @@ test('a failed account change remains visible without an automatic inspection re
   assert.equal(inspections(v).length,0);assert.match(text(v.root),/Some devices need attention/);
  }finally{v.app.unmount();}
 });
+
+test('edit accepts password-only changes, masks review and clears accepted passwords',async()=>{
+ const v=await mount({initialMode:'edit'});try{
+  const password='Temporary-password-123!';
+  await v.input('Username row 1','jane');await v.input('Password row 1',password);
+  await v.click('Review changes');assert.match(text(v.root),/Set password; require change/);assert.ok(!text(v.root).includes(password));
+  await v.click('Apply changes');assert.deepEqual(mutations(v)[0].body.users,[{username:'jane',password}]);
+  const field=find(v.root,n=>n.props['aria-label']==='Password row 1');assert.equal(field.props.value,'');
+ }finally{v.app.unmount();}
+});
+
+test('add and edit accept per-user public keys and show keys in review',async()=>{
+ const key='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKc7V8M4mtYdkGkVnM0Gk0ERuS3gmb5V18i73WzM3x9K jane@example.com';
+ for(const mode of ['add','edit']){
+  const v=await mount({initialMode:mode});try{
+   await v.input('Username row 1','jane');if(mode==='add')await v.input('Full name row 1','Jane');
+   await v.input('SSH public key row 1',key);await v.click(mode==='add'?'Review additions':'Review changes');
+   assert.ok(text(v.root).includes(key));await v.click(mode==='add'?'Add users now':'Apply changes');
+   assert.equal(mutations(v)[0].body.users[0].public_key,key);
+  }finally{v.app.unmount();}
+ }
+});
+
+test('invalid edit credentials never reach review or queue changes',async()=>{
+ const v=await mount({initialMode:'edit'});try{
+  await v.input('Username row 1','jane');await v.input('Password row 1','short');await v.click('Review changes');
+  assert.match(text(v.root),/Password must contain 12/);assert.equal(mutations(v).length,0);
+  await v.input('Password row 1','');await v.input('SSH public key row 1','-----BEGIN PRIVATE KEY-----');await v.click('Review changes');
+  assert.match(text(v.root),/Enter one OpenSSH public key/);assert.equal(mutations(v).length,0);
+ }finally{v.app.unmount();}
+});

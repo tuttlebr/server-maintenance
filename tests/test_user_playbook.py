@@ -21,7 +21,7 @@ def accounts(tmp_path):
     (library/'fake_account_change.py').write_text('''import json
 from pathlib import Path
 from ansible.module_utils.basic import AnsibleModule
-m=AnsibleModule(argument_spec={key:dict(type='raw') for key in ['name','comment','groups','append','shell','state','create_home','password','update_password','calls','kind','marker','path','line','create','owner','group','mode','validate']})
+m=AnsibleModule(argument_spec={key:dict(type='raw') for key in ['name','comment','groups','append','shell','state','create_home','password','update_password','calls','kind','marker','path','line','create','owner','group','mode','validate','user','key','exclusive','manage_dir','argv']})
 assert json.loads(Path(m.params['marker']).read_text())['mutation_started']
 with open(m.params['calls'],'a') as f:f.write(json.dumps(m.params)+'\\n')
 m.exit_json(changed=True)
@@ -39,6 +39,12 @@ m.exit_json(changed=True)
                 task['ansible.builtin.command']['argv']=['test','-x','/nonexistent/visudo' if missing_visudo else sys.executable]
             if 'ansible.builtin.getent' in task:
                 task.pop('ansible.builtin.getent');task['ansible.builtin.set_fact']={'ansible_facts':{'getent_passwd':{'jane':['x','1001','1001','Old Name','/home/jane','/bin/sh']},'os_family':'Debian'}}
+            if task['name']=='Require password change after an edit password reset':
+                task['fake_account_change']=task.pop('ansible.builtin.command')
+                task['fake_account_change'].update(kind='expire',calls=str(calls),marker=str(tmp_path/'reports/job/execution_localhost.json'))
+            if 'ansible.posix.authorized_key' in task:
+                task['fake_account_change']=task.pop('ansible.posix.authorized_key')
+                task['fake_account_change'].update(kind='authorized_key',calls=str(calls),marker=str(tmp_path/'reports/job/execution_localhost.json'))
             for module in ['user','group','file','lineinfile']:
                 if f'ansible.builtin.{module}' in task:
                     task['fake_account_change']=task.pop(f'ansible.builtin.{module}')
@@ -121,3 +127,38 @@ def test_missing_visudo_blocks_every_account_change(accounts):
     result,calls=run({'test_missing_visudo':True,'user_records':[dict(username='sam',full_name='Sam',grant_sudo=True)]})
     assert result.returncode!=0
     assert calls==[] and not marker.exists()
+
+
+def test_edit_password_is_set_and_expired_without_leaking_to_logs(accounts):
+    run, _ = accounts
+    password = 'Temporary-password-123!'
+    result, calls = run({'user_updates': [dict(username='jane', password=password, grant_sudo=True)]})
+    assert result.returncode == 0, result.stdout + result.stderr
+    resets = [c for c in calls if c['kind'] == 'user' and c['password']]
+    assert len(resets) == 1
+    assert resets[0]['update_password'] == 'always'
+    from passlib.hash import sha512_crypt
+    assert sha512_crypt.verify(password, resets[0]['password'])
+    assert next(c for c in calls if c['kind'] == 'expire')['argv'] == ['chage', '-d', '0', 'jane']
+    assert password not in result.stdout + result.stderr
+
+
+def test_public_key_targets_only_new_adds_and_explicit_edits(accounts):
+    run, _ = accounts
+    result, calls = run({
+        'user_records': [dict(username='jane', full_name='Existing', public_key='ignored'),
+                         dict(username='sam', full_name='Sam', public_key='new-key')],
+        'user_updates': [dict(username='jane', public_key='edit-key')],
+    })
+    assert result.returncode == 0, result.stdout + result.stderr
+    keys = [c for c in calls if c['kind'] == 'authorized_key']
+    assert [(c['user'], c['key']) for c in keys] == [('sam', 'new-key'), ('jane', 'edit-key')]
+    assert all(c['exclusive'] is False and c['manage_dir'] is True and c['state'] == 'present' for c in keys)
+    assert not any(c['kind'] == 'expire' for c in calls)
+
+
+def test_short_edit_password_fails_before_mutations(accounts):
+    run, marker = accounts
+    result, calls = run({'user_updates': [dict(username='jane', password='short')]})
+    assert result.returncode != 0
+    assert calls == [] and not marker.exists()

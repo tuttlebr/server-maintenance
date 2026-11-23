@@ -8,7 +8,7 @@ from backend.schemas import UserEdit, UserInfo
 
 MAX_CSV_BYTES = 1024 * 1024
 MAX_CSV_USERS = 500
-COLUMNS = {"username", "full_name", "email", "groups", "shell", "grant_sudo"}
+COLUMNS = {"username", "full_name", "email", "groups", "shell", "grant_sudo", "public_key"}
 ALIASES = {"name": "full_name", "full name": "full_name", "email_address": "email", "mail": "email"}
 
 
@@ -37,7 +37,7 @@ def parse_csv(content: str, mode: str = "add") -> list[UserInfo | UserEdit]:
                         raise CsvValidationError("CSV has duplicate column headers")
                     unknown = set(header) - COLUMNS
                     if unknown:
-                        raise CsvValidationError(f"Unknown CSV columns: {', '.join(sorted(unknown))}. Use username, full_name, email, groups, shell, grant_sudo.")
+                        raise CsvValidationError(f"Unknown CSV columns: {', '.join(sorted(unknown))}. Use username, full_name, email, groups, shell, grant_sudo, public_key.")
                     if mode == "edit" and "username" not in header:
                         raise CsvValidationError("Edit CSV requires a username column")
                     if mode == "add" and ("full_name" not in header or not {"username", "email"} & set(header)):

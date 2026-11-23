@@ -3,6 +3,8 @@ import re
 from datetime import datetime
 from typing import Literal
 
+from cryptography.exceptions import UnsupportedAlgorithm
+from cryptography.hazmat.primitives.serialization import load_ssh_public_key
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
@@ -384,6 +386,21 @@ class AccountFields(BaseModel):
     groups: str | None = None
     shell: str | None = None
     grant_sudo: bool | None = Field(default=None, strict=True)
+    public_key: str | None = Field(default=None, max_length=16384)
+
+    @field_validator("public_key")
+    @classmethod
+    def validate_public_key(cls, value: str | None) -> str | None:
+        value = _strip(value)
+        if not value:
+            return None
+        if any(ord(c) < 32 for c in value) or any(marker in value for marker in JINJA_MARKERS):
+            raise ValueError("public_key must be one OpenSSH public key without control characters or templates")
+        try:
+            load_ssh_public_key(value.encode("utf-8"))
+        except (ValueError, TypeError, UnsupportedAlgorithm) as exc:
+            raise ValueError("public_key must be a valid OpenSSH public key, not a private key") from exc
+        return value
 
     @field_validator("full_name")
     @classmethod
@@ -446,6 +463,12 @@ class UserInfo(AccountFields):
 
 class UserEdit(AccountFields):
     username: str
+    password: str | None = Field(default=None, repr=False)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str | None) -> str | None:
+        return _validate_account_password(value, "password") or None
 
     @field_validator("username")
     @classmethod
@@ -454,7 +477,7 @@ class UserEdit(AccountFields):
 
     @model_validator(mode="after")
     def require_change(self):
-        if not any((self.full_name, self.email, self.groups, self.shell, self.grant_sudo)):
+        if not any((self.full_name, self.email, self.groups, self.shell, self.grant_sudo, self.public_key, self.password)):
             raise ValueError("provide at least one update field; blank fields keep their current value")
         return self
 
@@ -510,7 +533,7 @@ class BulkUserUpdate(AccountFields):
     @property
     def updates(self) -> list[UserEdit]:
         return self.users or [UserEdit(username=name, full_name=self.full_name,
-                                      email=self.email, groups=self.groups, shell=self.shell, grant_sudo=self.grant_sudo)
+                                      email=self.email, groups=self.groups, shell=self.shell, grant_sudo=self.grant_sudo, public_key=self.public_key)
                               for name in self.usernames or []]
 
     @model_validator(mode="after")
@@ -518,7 +541,7 @@ class BulkUserUpdate(AccountFields):
         _validate_device_targeting(self.device_ids, self.all_devices)
         if bool(self.users) == bool(self.usernames):
             raise ValueError("provide either per-user records or usernames with shared changes")
-        if self.users and any((self.full_name, self.email, self.groups, self.shell, self.grant_sudo is not None)):
+        if self.users and any((self.full_name, self.email, self.groups, self.shell, self.grant_sudo is not None, self.public_key)):
             raise ValueError("shared changes cannot be combined with per-user records")
         _validate_unique_accounts(self.updates)
         return self

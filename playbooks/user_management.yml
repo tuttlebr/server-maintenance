@@ -59,6 +59,7 @@
         that: item.username in ansible_facts.getent_passwd
         fail_msg: "Account {{ item.username }} does not exist on {{ inventory_hostname }}. Use Add users first."
       loop: "{{ fleet_user_updates }}"
+      no_log: true
       loop_control:
         label: "{{ item.username }}"
 
@@ -66,7 +67,18 @@
       ansible.builtin.set_fact:
         fleet_new_accounts: "{{ fleet_user_records | rejectattr('username', 'in', ansible_facts.getent_passwd.keys()) | list }}"
 
+    - name: Validate explicitly supplied edit passwords
+      ansible.builtin.assert:
+        that:
+          - item.password | length >= 12
+          - item.password | length <= 1024
+        fail_msg: "Edit passwords must contain 12 to 1024 characters."
+      loop: "{{ fleet_user_updates | selectattr('password', 'defined') | selectattr('password') | list }}"
+      no_log: true
+
+    # Sudo records can also carry edit passwords. Suppress the resulting facts.
     - name: Collect requested groups and shells
+      no_log: true
       ansible.builtin.set_fact:
         fleet_requested_groups: "{{ ((fleet_new_accounts + fleet_user_updates) | map(attribute='groups', default='') | join(',')).split(',') | reject('equalto', '') | unique | list }}"
         fleet_requested_shells: "{{ (fleet_new_accounts + fleet_user_updates) | map(attribute='shell', default='') | reject('equalto', '') | unique | list }}"
@@ -110,8 +122,24 @@
         shell: "{{ item.shell | default(omit, true) }}"
         state: present
       loop: "{{ fleet_user_updates }}"
+      no_log: true
       loop_control:
         label: "{{ item.username }}"
+
+    - name: Set explicitly supplied passwords for existing accounts
+      ansible.builtin.user:
+        name: "{{ item.username }}"
+        password: "{{ item.password | password_hash('sha512') }}"
+        update_password: always
+      loop: "{{ fleet_user_updates | selectattr('password', 'defined') | selectattr('password') | list }}"
+      no_log: true
+
+    - name: Require password change after an edit password reset
+      ansible.builtin.command:
+        argv: [chage, -d, '0', "{{ item.username }}"]
+      loop: "{{ fleet_user_updates | selectattr('password', 'defined') | selectattr('password') | list }}"
+      changed_when: true
+      no_log: true
 
     - name: Create new accounts using system home defaults
       ansible.builtin.user:
@@ -136,6 +164,16 @@
         - force_password_change | bool
       changed_when: true
 
+    - name: Add supplied SSH public keys while preserving existing keys
+      ansible.posix.authorized_key:
+        user: "{{ item.username }}"
+        key: "{{ item.public_key }}"
+        state: present
+        exclusive: false
+        manage_dir: true
+      loop: "{{ (fleet_new_accounts + fleet_user_updates) | selectattr('public_key', 'defined') | selectattr('public_key') | list }}"
+      no_log: true
+
     - name: Ensure the sudoers directory exists for requested grants
       ansible.builtin.file:
         path: /etc/sudoers.d
@@ -146,6 +184,7 @@
       when: fleet_sudo_accounts | length > 0
 
     - name: Grant explicitly requested passwordless sudo access
+      no_log: true
       ansible.builtin.lineinfile:
         path: "/etc/sudoers.d/{{ item.username }}"
         line: "{{ item.username }} ALL=(ALL) NOPASSWD:ALL"

@@ -193,7 +193,7 @@ async def bulk_update_users(
         completion_action={
             "type": "update_users",
             "hostnames": [device.hostname for device in target_devices],
-            "users": records,
+            "users": [{key: value for key, value in record.items() if key != "password"} for record in records],
         },
     )
     return {"job_id": job_id, "detail": f"Updating {len(records)} users"}
