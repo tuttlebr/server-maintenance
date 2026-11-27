@@ -39,10 +39,8 @@ services:
     depends_on:
       nat:
         condition: service_started
-        required: false
       milvus:
         condition: service_started
-        required: false
       ssh-agent-proxy:
         condition: service_healthy
     healthcheck:
