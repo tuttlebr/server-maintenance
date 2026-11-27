@@ -1,5 +1,6 @@
 import io
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -8,6 +9,26 @@ from scripts import enroll_hosts
 
 FINGERPRINT = "SHA256:n4bQgYhMfWWaL+qgxVrQFaO/TxsrC4Is0V1sFbDwCgg"
 OTHER_FINGERPRINT = "SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU"
+
+
+def test_prepare_makes_new_and_existing_seed_readable_by_web(tmp_path):
+    script = Path(__file__).resolve().parents[1] / "scripts/start.sh"
+    seed = tmp_path / "known_hosts"
+    prepare = [
+        "bash", "-c",
+        'source "$1" --help >/dev/null\nKNOWN_HOSTS_PATH="$2"\nensure_known_hosts',
+        "bash", str(script), str(seed),
+    ]
+    subprocess.run(prepare, check=True)
+    assert seed.read_bytes() == b""
+    assert seed.stat().st_mode & 0o777 == 0o644
+
+    trusted = b"192.0.2.10 ssh-ed25519 fixture\n"
+    seed.write_bytes(trusted)
+    seed.chmod(0o600)
+    subprocess.run(prepare, check=True)
+    assert seed.read_bytes() == trusted
+    assert seed.stat().st_mode & 0o777 == 0o644
 
 
 class FakeClient:

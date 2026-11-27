@@ -342,7 +342,9 @@ ensure_known_hosts() {
         : >"$KNOWN_HOSTS_PATH"
         log "Created empty known_hosts seed at $KNOWN_HOSTS_PATH"
     fi
-    chmod 600 "$KNOWN_HOSTS_PATH"
+    # Web reads this file through a read-only bind mount as UID 10001.
+    # The private state directory still restricts access on the host.
+    chmod 644 "$KNOWN_HOSTS_PATH"
 }
 
 prepare_ssh() {
