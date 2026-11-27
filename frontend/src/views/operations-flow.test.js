@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createRouter,createMemoryHistory} from 'vue-router';
 
-import {element,renderer,text,find,flush,compileView} from '../../test-support/vue.js';
+import {element,renderer,text,find,flush,compileView,mockHttpCrypto} from '../../test-support/vue.js';
 
 const {default:Operations}=await import(await compileView(new URL('./Operations.vue',import.meta.url)));
 const devices=[{id:1,name:'Node 1',inventory_name:'node-01',discovered_at:new Date().toISOString(),facts_stale:false,transport:'ssh',os_family:'Debian',maintenance_mode:'kubernetes'},{id:2,name:'Robot',inventory_name:'robot',discovered_at:new Date().toISOString(),facts_stale:false,transport:'reachy_daemon',kind:'robot',model:'Reachy Mini Wireless'}];
@@ -325,12 +325,14 @@ test('scan prerequisite refreshes facts and eligibility before another action',a
  } finally {view.app.unmount();}
 });
 
-test('mixed scan runs exactly the selection and reconnects with the same request key',async()=>{
+test('mixed scan over LAN HTTP runs exactly the selection and reconnects with the same request key',async t=>{
+ mockHttpCrypto(t);
  const view=await mount({devices:'1,2',operation:'system.scan'},true,false,'complete',[],true);
  try {
   await view.click('Scan now');await view.click('Reconnect to request');
   const posts=view.calls.filter(c=>c.options.method==='POST');
   assert.equal(posts.length,2);assert.deepEqual(posts[0].body,posts[1].body);
+  assert.match(posts[0].body.request_key,/^[A-Za-z0-9_-]{16,64}$/);
   assert.deepEqual(posts[0].body.device_ids,[1,2]);
   assert.match(posts[0].url,/system.scan/);
   assert.match(text(view.root),/Device scan completed/);

@@ -112,7 +112,7 @@ import InspectionResults from '../components/InspectionResults.vue';
 import DiscoveryResults from '../components/DiscoveryResults.vue';
 import HostIpResults from '../components/HostIpResults.vue';
 import {visibleStorageOutcomes} from '../utils/storage.js';
-import { getDevices, getOperations, runOperation, getJobs, getJob, getJobProgress } from '../api.js';
+import { createRequestKey, getDevices, getOperations, runOperation, getJobs, getJob, getJobProgress } from '../api.js';
 import { parseDeviceIds } from '../utils/fleetOverview.js';
 import { formatLongTime } from '../utils/time.js';
 import { SCAN, IP_CHECK, READINESS, needsScan, CHECK, INSTALL, CLEANUP, REBOOT, STORAGE, GPU, REACHY_RESTART, PLAYBOOKS, ACTION_IDS, ACTIVE, namesFor, sameTargets, validPackageCheck, blockers, packageCount, statusLabel, updateLabel } from '../utils/maintenance.js';
@@ -264,7 +264,7 @@ async function openReview(id) {
 }
 function makeRequest(id) {
   const ordered = [...selectedDevices.value].sort((a,b) => a.inventory_name < b.inventory_name ? -1 : a.inventory_name > b.inventory_name ? 1 : 0);
-  const parameters = {request_key:crypto.randomUUID(), confirmation:ordered.map(device => device.name).join(', ')};
+  const parameters = {request_key:createRequestKey(), confirmation:ordered.map(device => device.name).join(', ')};
   if (id === INSTALL) parameters.preview_job_id = check.value.job_id;
   if (id === IP_CHECK) parameters.discovery_subnet = discoverySubnet.value || null;
   if (rolling.value) parameters.batch_size = batchSize.value;

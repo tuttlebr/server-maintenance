@@ -5,6 +5,12 @@ const BASE = "/api/v2";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+export function createRequestKey() {
+  // getRandomValues is available on plain HTTP LAN origins as well as HTTPS.
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
 function getToken() {
   return localStorage.getItem("fleet_token");
 }

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createRouter,createMemoryHistory} from 'vue-router';
 
-import {element,renderer,text,find,flush,compileView} from '../../test-support/vue.js';
+import {element,renderer,text,find,flush,compileView,mockHttpCrypto} from '../../test-support/vue.js';
 
 const {default:Users}=await import(await compileView(new URL('./UserManagement.vue',import.meta.url)));
 const devices=[{id:1,name:'Node 1',inventory_name:'node-01',discovered_at:new Date().toISOString(),transport:'ssh',capabilities:['users.manage'],os_family:'Debian',facts_stale:false,recovery_required:true},{id:2,name:'Node 2',inventory_name:'node-02',discovered_at:new Date().toISOString(),transport:'ssh',capabilities:['users.manage']}];
@@ -42,12 +42,16 @@ async function mount({query={devices:'1'},failOnce=false,csvError=false,jobState
 }
 const mutations=view=>view.calls.filter(c=>['POST','PUT'].includes(c.options.method)&&!c.url.endsWith('csv-preview')&&!c.url.endsWith('/inspect'));
 
-test('manual add derives a username, confirms scope once and shows completion inline',async()=>{
+test('manual add over LAN HTTP derives a username, confirms scope once and shows completion inline',async t=>{
+ mockHttpCrypto(t);
  const v=await mount();try{
+  const inspectionKey=v.calls.find(call=>call.url.endsWith('/inspect')).body.request_key;
+  assert.match(inspectionKey,/^[A-Za-z0-9_-]{16,64}$/);
   await v.input('Full name row 1','Jane Doe');await v.input('Email row 1','jane@example.com');
   await v.click('Review additions');assert.match(text(v.root),/Add 1 user on 1 device/);assert.equal(mutations(v).length,0);
   assert.match(text(v.root),/Pending health checks run automatically/);
-  await v.click('Add users now');const call=mutations(v)[0];assert.deepEqual(call.body.device_ids,[1]);assert.equal(call.body.users[0].username,'jane');assert.ok(call.body.request_key);
+  await v.click('Add users now');const call=mutations(v)[0];assert.deepEqual(call.body.device_ids,[1]);assert.equal(call.body.users[0].username,'jane');
+  assert.match(call.body.request_key,/^[A-Za-z0-9_-]{16,64}$/);assert.notEqual(call.body.request_key,inspectionKey);
   assert.match(text(v.root),/Account changes completed/);assert.equal(v.router.currentRoute.value.path,'/access');assert.ok(!v.calls.some(c=>c.url.includes('/scan')));
  }finally{v.app.unmount();}
 });

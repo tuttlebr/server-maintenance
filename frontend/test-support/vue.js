@@ -2,6 +2,11 @@ import {readFile} from 'node:fs/promises';
 import {parse,compileScript} from '@vue/compiler-sfc';
 import {createRenderer,nextTick} from 'vue';
 
+export function mockHttpCrypto(t) {
+ const httpCrypto = {getRandomValues: crypto.getRandomValues.bind(crypto)};
+ t.mock.getter(globalThis, 'crypto', () => httpCrypto);
+}
+
 export function element(tag,text='') { return {tag,text,props:{},children:[],parent:null,get options(){return this.children.filter(c=>c.tag==='option');},get value(){return this.props.value;},set value(v){this.props.value=v;},getRootNode(){return {activeElement:null};},focus(){},scrollIntoView(){},addEventListener(){},removeEventListener(){},setAttribute(){},removeAttribute(){}}; }
 const teleportTarget = element('body');
 export const renderer=createRenderer({

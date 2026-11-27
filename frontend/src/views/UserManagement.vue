@@ -86,7 +86,7 @@
 <script setup>
 import {computed,nextTick,onMounted,onUnmounted,ref,watch} from 'vue';
 import {useRoute,useRouter} from 'vue-router';
-import {getDevices,getUsers,bulkAddUsers,bulkUpdateUsers,inspectAccounts,getJobProgress} from '../api.js';
+import {createRequestKey,getDevices,getUsers,bulkAddUsers,bulkUpdateUsers,inspectAccounts,getJobProgress} from '../api.js';
 import CsvUpload from '../components/CsvUpload.vue';
 import StatusBadge from '../components/StatusBadge.vue';
 import {accountPlacement,privilegeLabel} from '../utils/access.js';
@@ -128,7 +128,7 @@ async function review(){
   if(mode.value==='add' && password.value && password.value.length<12)validationErrors.value.push('Initial password must be at least 12 characters.');
   if(validationErrors.value.length)return;
   actionError.value='';
-  pending.value={mode:mode.value,devices:selectedDevices.value.map(d=>({...d})),payload:{device_ids:[...selectedIds.value],users:checked.users,request_key:crypto.randomUUID(),...(mode.value==='add' && password.value ? {password:password.value}: {})}};
+  pending.value={mode:mode.value,devices:selectedDevices.value.map(d=>({...d})),payload:{device_ids:[...selectedIds.value],users:checked.users,request_key:createRequestKey(),...(mode.value==='add' && password.value ? {password:password.value}: {})}};
   await nextTick();reviewPanel.value?.focus({preventScroll:true});reviewPanel.value?.scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 async function accept(result,playbook='user_management.yml'){
@@ -150,7 +150,7 @@ async function inspect(){
   if(disposed || starting.value || jobActive.value || importing.value || loading.value || pending.value || !!loadError.value || !selectedIds.value.length || missingIds.value.length)return;
   starting.value=true;actionError.value='';
   job.value=null;
-  inspectionRequest ||= {device_ids:[...selectedIds.value],request_key:crypto.randomUUID()};
+  inspectionRequest ||= {device_ids:[...selectedIds.value],request_key:createRequestKey()};
   try{await accept(await inspectAccounts(inspectionRequest),'access_inspect.yml');}
   catch(e){actionError.value=e.message;uncertain.value=!e.status || e.status>=500;if(!uncertain.value)inspectionRequest=null;}
   finally{starting.value=false;}
